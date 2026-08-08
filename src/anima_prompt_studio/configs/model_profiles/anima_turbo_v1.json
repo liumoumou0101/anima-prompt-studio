@@ -1,0 +1,8 @@
+{
+  "id": "anima_turbo_v1", "display_name": "ANIMA Turbo", "variant": "turbo",
+  "checkpoint_logical_name": "anima_turbo_v1", "default_steps": 10, "default_cfg": 1.0,
+  "default_sampler": "euler", "default_scheduler": "normal", "negative_prompt_mode": "disabled",
+  "positive_prefix": ["score_7"], "negative_prompt": [], "default_width": 896, "default_height": 1152,
+  "workflow_template_id": "anima_turbo_api_v1", "status": "tested",
+  "notes": "依据 CircleStone Labs 官方 ANIMA 1.0 建议：CFG 1、8–12 步，官方推荐从 Turbo 开始迭代。"
+}

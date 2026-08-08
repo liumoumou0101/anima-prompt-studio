@@ -1,0 +1,167 @@
+{
+  "defaults": {
+    "shot": {"value": "半身", "score": 10, "reason": "默认人物肖像兼顾表情和上半身"},
+    "camera_height": {"value": "平视", "score": 10, "reason": "平视机位适合一般人物场景"},
+    "angle": {"value": "正面", "score": 10, "reason": "正面视角是稳定的默认选择"},
+    "gaze": {"value": "看镜头", "score": 10, "reason": "未指定动作目标时使用普通肖像视线"},
+    "aspect": {"value": "竖图", "score": 10, "reason": "竖图适合一般单人构图"},
+    "subject_position": {"value": "中", "score": 10, "reason": "居中是稳定的默认人物位置"}
+  },
+  "explicit_terms": {
+    "shot": [
+      {"value":"头像","zh":["头像构图","头像","脸部特写","正面特写","特写"],"en":["headshot","close-up"],"reason":"用户明确要求头像或特写构图"},
+      {"value":"胸像","zh":["胸像"],"en":["bust shot"],"reason":"用户明确要求胸像"},
+      {"value":"半身","zh":["半身","上半身"],"en":["upper body"],"reason":"用户明确要求半身构图"},
+      {"value":"膝上","zh":["膝上","中近景"],"en":["cowboy shot"],"reason":"用户明确要求膝上构图"},
+      {"value":"全身","zh":["全身","全景人像"],"en":["full body"],"reason":"用户明确要求全身构图"},
+      {"value":"远景","zh":["远景","广角远景"],"en":["wide shot"],"reason":"用户明确要求远景"}
+    ],
+    "camera_height": [
+      {"value":"平视","zh":["平视","平视机位"],"en":["eye level"],"reason":"用户明确要求平视机位"},
+      {"value":"高机位","zh":["高机位","从上往下看","俯拍"],"en":["from above","high angle"],"reason":"用户明确要求高机位"},
+      {"value":"低机位","zh":["低机位","从下往上看","仰拍"],"en":["from below","low angle"],"reason":"用户明确要求低机位"}
+    ],
+    "angle": [
+      {"value":"正面","zh":["正面","正面视角"],"en":["front view"],"reason":"用户明确要求正面视角"},
+      {"value":"侧面","zh":["侧面","侧面视角"],"en":["side view","from the side"],"reason":"用户明确要求侧面视角"},
+      {"value":"背面","zh":["背面视角","从背后"],"en":["from behind","back view"],"reason":"用户明确要求背面视角"},
+      {"value":"三分之四","zh":["三分之四","四分之三"],"en":["three-quarter view"],"reason":"用户明确要求三分之四视角"}
+    ],
+    "gaze": [
+      {"value":"看镜头","zh":["看镜头","看向镜头"],"en":["looking at viewer","looks at the camera"],"reason":"用户明确要求看镜头"},
+      {"value":"看人物","zh":["看着对方","看向另一人","看向对方"],"en":["looking at another","looks at the other"],"reason":"视线有明确的人物目标"},
+      {"value":"看物体","zh":["看书","看向手中","看着手中","看蘑菇","看向蘑菇"],"en":["looking at the book","looks at the book","looking at the mushrooms"],"reason":"视线应跟随明确动作目标"},
+      {"value":"看向画外","zh":["看向画外","看向窗外","不看镜头"],"en":["looking away","looks outside","doesn't look at the camera"],"reason":"用户明确说明视线离开镜头"}
+    ],
+    "aspect": [
+      {"value":"方形","zh":["方形构图","方图"],"en":["square composition"],"reason":"用户明确要求方形画幅"},
+      {"value":"竖图","zh":["竖图","竖幅"],"en":["portrait orientation"],"reason":"用户明确要求竖幅"},
+      {"value":"横图","zh":["横图","横幅"],"en":["landscape orientation"],"reason":"用户明确要求横幅"}
+    ],
+    "subject_position": [
+      {"value":"左","zh":["主体在左","人物在左"],"en":["subject on the left"],"reason":"用户明确指定主体位于左侧"},
+      {"value":"中","zh":["主体居中","人物居中","居中构图"],"en":["centered composition"],"reason":"用户明确要求居中"},
+      {"value":"右","zh":["主体在右","人物在右"],"en":["subject on the right"],"reason":"用户明确指定主体位于右侧"}
+    ]
+  },
+  "rules": [
+    {
+      "id":"people_two", "people_min":2, "people_max":2,
+      "recommendations":{
+        "shot":[["膝上",75,"双人需要同时保留人物动作和互动空间"],["全身",65,"全身可容纳两名人物"]],
+        "aspect":[["横图",85,"横图更适合双人并列或互动"]]
+      }
+    },
+    {
+      "id":"people_three", "people_min":3, "people_max":3,
+      "recommendations":{
+        "shot":[["全身",85,"三人构图需要足够的竖向和横向空间"],["膝上",70,"膝上景别可保留三人关系"]],
+        "aspect":[["横图",90,"横图有利于展开左中右三人布局"]],
+        "subject_position":[["中",70,"三人以整体群组居中更稳定"]]
+      }
+    },
+    {
+      "id":"people_group", "people_min":4,
+      "recommendations":{
+        "shot":[["远景",100,"四人以上需要群像远景"]],
+        "aspect":[["横图",100,"横图更适合群像展开"]],
+        "subject_position":[["中",70,"群像使用整体居中布局"]]
+      }
+    },
+    {
+      "id":"people_interaction", "people_min":2,
+      "zh_any":["面对面","交谈","对话","握手","对视","看着对方"],
+      "en_any":["face to face","facing each other","talking to each other","shake hands","looking at each other"],
+      "recommendations":{"gaze":[["看人物",100,"人物互动时视线应联系另一名人物"]]}
+    },
+    {
+      "id":"dynamic_nonportrait_gaze", "dynamic_action":true,
+      "recommendations":{"gaze":[["看向画外",40,"动态动作未指定镜头视线时，优先跟随动作方向"]]}
+    },
+    {
+      "id":"back_without_lookback", "zh_any":["从背后拍摄","背面拍摄","背面视角","背影"], "en_any":["from behind","back view","back in the mirror"],
+      "recommendations":{"angle":[["背面",105,"背面或背影语义应使用背面视角"]],"gaze":[["看向画外",80,"没有回头语义时，背面人物不应默认看镜头"]]}
+    },
+    {
+      "id":"dynamic_jump", "zh_any":["跳跃","跳过","纵身跳","跃下","跃起","飞跃","跨越"], "en_any":["jumping","jumps over","leaps over","leaps down","vaults"],
+      "recommendations":{"shot":[["全身",105,"跳跃需要显示完整肢体和落点关系"]],"angle":[["侧面",85,"侧面视角便于表现跳跃轨迹"]],"gaze":[["看向画外",75,"跳跃时视线应跟随运动方向"]],"aspect":[["横图",85,"横图为起跳和落点保留运动空间"]]}
+    },
+    {
+      "id":"multi_depth", "people_min":2, "zh_all":[["前面"],["后面"]],
+      "recommendations":{"angle":[["三分之四",70,"三分之四视角更适合表现人物前后层次"]],"gaze":[["看向画外",35,"未指定视线时不强制群像看镜头"]]}
+    },
+    {
+      "id":"mushroom_picking", "zh_any":["采蘑菇","摘蘑菇","捡蘑菇"], "en_any":["picks mushrooms","picking mushrooms","gathers mushrooms"],
+      "recommendations":{
+        "shot":[["全身",100,"采集动作需要显示手部、蘑菇和地面关系"],["膝上",82,"膝上景别也能表现采集动作"]],
+        "camera_height":[["高机位",75,"略高视点更容易看到地面的蘑菇"]],
+        "angle":[["三分之四",90,"三分之四视角能同时表现人物和手部动作"]],
+        "gaze":[["看物体",110,"采蘑菇时视线应跟随蘑菇"]],
+        "aspect":[["竖图",70,"竖图有利于表现蹲姿和地面关系"]],
+        "subject_position":[["左",55,"主体略偏一侧可为蘑菇和森林留出空间"]]
+      }
+    },
+    {
+      "id":"angel_descending", "zh_all":[["天使"],["从天而降","降落","降下","飘落","下落","降临"]], "en_all":[["angel"],["descended","descending","descends","fell slowly","drifts down"]],
+      "recommendations":{
+        "shot":[["全身",110,"降落动作需要完整表现身体和翅膀"]],
+        "camera_height":[["低机位",105,"低机位能强调从天而降的高度感"]],
+        "angle":[["三分之四",80,"三分之四视角可表现降落动势和翅膀张开"]],
+        "gaze":[["看向画外",75,"降落时视线优先朝向下方或远处"]],
+        "aspect":[["竖图",105,"竖向画幅强调降落高度和巨大翅膀"]],
+        "subject_position":[["中",95,"天使降临适合对称居中构图"]]
+      }
+    },
+    {
+      "id":"large_wings", "zh_any":["巨大的白色羽翼","巨大翅膀","展开翅膀"], "en_any":["huge white wings","large wings","wings spread"],
+      "recommendations":{"shot":[["全身",85,"大型翅膀需要足够的画面空间"]],"aspect":[["竖图",75,"竖图可完整容纳人物和翅膀"]],"subject_position":[["中",70,"对称翅膀适合居中"]]}
+    },
+    {
+      "id":"train_window", "zh_any":["将头伸出列车外","探出列车窗外","从火车窗探出头","伸出火车窗外"], "en_any":["out of the train","out of a train window","leans out of the train"],
+      "recommendations":{
+        "shot":[["半身",110,"半身能同时展示面部细节、手部和列车窗"]],
+        "camera_height":[["平视",80,"平视机位保留自然的车窗肖像感"]],
+        "angle":[["三分之四",105,"三分之四视角更容易表现探出车窗的动作"]],
+        "gaze":[["看向画外",85,"探出车窗时视线默认跟随外部风景"]],
+        "aspect":[["横图",110,"横图能同时容纳人物、列车窗和前进方向"]],
+        "subject_position":[["左",75,"人物略偏左可为视线和飘动头发留出空间"]]
+      }
+    },
+    {
+      "id":"reading", "zh_any":["读书","看书","翻阅书"], "en_any":["reading a book","looks at the book"],
+      "recommendations":{"shot":[["半身",75,"半身能同时显示表情、手和书"]],"gaze":[["看物体",110,"阅读时视线应落在书上"]],"angle":[["三分之四",55,"三分之四视角更容易表现书和面部"]]}
+    },
+    {
+      "id":"legs_visible", "zh_any":["双腿垂下","脚不着地","跑动","奔跑","跳跃"], "en_any":["legs dangling","running","jumping"],
+      "recommendations":{"shot":[["全身",95,"腿部动作需要全身景别"]],"angle":[["三分之四",55,"斜向视角能更好表现肢体动势"]]}
+    },
+    {
+      "id":"dynamic_running", "zh_any":["快速奔跑","奔跑","跑动","向前冲"], "en_any":["running fast","runs quickly","sprinting"],
+      "recommendations":{"shot":[["全身",100,"奔跑需要展示完整肢体动作"]],"angle":[["侧面",95,"侧面视角最容易表现奔跑方向和速度"]],"gaze":[["看向画外",90,"奔跑时视线应跟随前进方向"]],"aspect":[["横图",80,"横图能为奔跑方向留出空间"]]}
+    },
+    {
+      "id":"face_details", "zh_any":["瞳孔图案","星形瞳孔","脸部纹样","精致妆容","耳饰"], "en_any":["pattern in her pupils","facial markings","detailed makeup"],
+      "recommendations":{"shot":[["胸像",65,"面部和瞳孔细节需要较近景别"],["半身",55,"半身仍可保留主要面部细节"]]}
+    },
+    {
+      "id":"environment_large", "zh_any":["广阔的城市","巨大建筑","广阔风景","连绵群山","宏大场景"], "en_any":["vast city","huge building","wide landscape","mountain range"],
+      "recommendations":{"shot":[["远景",105,"大型环境需要远景展示尺度"]],"aspect":[["横图",100,"横图更适合宽广环境"]]}
+    },
+    {
+      "id":"movement_right_space", "people_max":1, "movement_direction":"right",
+      "recommendations":{"shot":[["全身",100,"方向性运动需要展示完整肢体动作"]],"angle":[["侧面",95,"侧面视角最清楚地表现运动方向"]],"subject_position":[["左",100,"主体放在左侧，为右方视线或运动留白"]],"aspect":[["横图",55,"横图能为右向运动留出空间"]],"gaze":[["看向画外",70,"人物朝右看时视线不应默认指向镜头"]]}
+    },
+    {
+      "id":"movement_left_space", "people_max":1, "movement_direction":"left",
+      "recommendations":{"shot":[["全身",100,"方向性运动需要展示完整肢体动作"]],"angle":[["侧面",95,"侧面视角最清楚地表现运动方向"]],"subject_position":[["右",100,"主体放在右侧，为左方视线或运动留白"]],"aspect":[["横图",55,"横图能为左向运动留出空间"]],"gaze":[["看向画外",70,"人物朝左看时视线不应默认指向镜头"]]}
+    },
+    {
+      "id":"gaze_right_space", "people_max":1, "gaze_direction":"right",
+      "recommendations":{"subject_position":[["左",100,"主体放在左侧，为右方视线留白"]],"aspect":[["横图",55,"横图能为右向视线留出空间"]],"gaze":[["看向画外",70,"人物朝右看时视线不应默认指向镜头"]]}
+    },
+    {
+      "id":"gaze_left_space", "people_max":1, "gaze_direction":"left",
+      "recommendations":{"subject_position":[["右",100,"主体放在右侧，为左方视线留白"]],"aspect":[["横图",55,"横图能为左向视线留出空间"]],"gaze":[["看向画外",70,"人物朝左看时视线不应默认指向镜头"]]}
+    }
+  ]
+}

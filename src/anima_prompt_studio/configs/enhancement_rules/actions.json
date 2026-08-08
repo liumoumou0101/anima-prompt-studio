@@ -1,0 +1,120 @@
+[
+  {
+    "id":"crouching", "type":"动作", "priority":140,
+    "triggers":["蹲","蹲着","蹲下","半蹲","蹲在地上"],
+    "content":"She crouches low to the ground.", "canonical_phrases":["crouches","crouching"],
+    "emit_tags_when_canonical":true, "tags":["crouching"], "suppress_tags":["sitting"], "suppress_patterns":[],
+    "natural_replacements":[["\\bsits\\b","crouches"],["\\bsit\\b","crouch"],["\\bsitting\\b","crouching"]],
+    "composition_recommendations":{"shot":[["全身",80,"蹲姿需要显示腿部和地面关系"]],"camera_height":[["高机位",45,"略高视点有利于显示蹲姿周围的地面"]]}
+  },
+  {
+    "id":"mushroom_search", "type":"动作", "priority":138,
+    "triggers_all":[["采蘑菇","摘蘑菇","捡蘑菇"],["寻找","搜索","仔细找"]],
+    "content":"", "canonical_phrases":["searches the grass for mushrooms","searching the grass for mushrooms"],
+    "emit_tags_when_canonical":true, "tags":["mushroom"], "suppress_tags":[], "suppress_patterns":[],
+    "natural_replacements":[["(?:picks?|gathers?) mushrooms and (?:carefully )?looks down for mushrooms in the grass","carefully searches the grass for mushrooms"],["(?:picks?|gathers?) mushrooms and (?:carefully )?searches? (?:through )?the grass for mushrooms","carefully searches the grass for mushrooms"]]
+  },
+  {
+    "id":"wings_spread", "type":"动作", "priority":136,
+    "triggers_all":[["白色羽翼","白色翅膀","白翅"],["展开","张开"]],
+    "content":"", "canonical_phrases":["white wings fully spread","white wings spread wide"],
+    "emit_tags_when_canonical":true, "tags":["white wings"], "suppress_tags":["wings","giant"], "suppress_patterns":[],
+    "natural_replacements":[["the (?:giant|huge|large) white wing was fully spread","her huge white wings fully spread"],["(?:a |the )?white wing(?:s)? (?:was|were) (?:fully )?spread","her white wings fully spread"]]
+  },
+  {
+    "id":"floating_midair", "type":"动作", "priority":135,
+    "triggers":["悬浮在空中","漂浮在空中","悬浮半空","漂浮半空"],
+    "content":"", "canonical_phrases":["floating in midair","body floating in midair"],
+    "emit_tags_when_canonical":true, "tags":["floating"], "suppress_tags":["suspension"], "suppress_patterns":[],
+    "natural_replacements":[["the body was suspended in the air","her body floating in midair"],["(?:her )?body (?:is|was) suspended (?:in the air|midair)","her body floating in midair"]]
+  },
+  {
+    "id":"descending", "type":"动作", "priority":134,
+    "triggers":["从天而降","降落","降下","缓缓降落","飘落","下落","降临"],
+    "content":"", "canonical_phrases":["descends","descending"],
+    "emit_tags_when_canonical":true, "tags":[], "suppress_tags":[], "suppress_patterns":[],
+    "natural_replacements":[["\\bfell slowly from\\b","slowly descends from"],["\\bslowly fell from\\b","slowly descends from"],[", and (her (?:huge )?white wings fully spread) and (her body floating in midair)"," with \\1, \\2"]]
+  },
+  {
+    "id":"directional_running", "type":"动作", "priority":132,
+    "triggers":["奔跑","跑动","快速跑","向前冲"],
+    "content":"", "canonical_phrases":["runs quickly","running quickly","sprinting"],
+    "emit_tags_when_canonical":true, "tags":["running","leaning forward"], "suppress_tags":["photo (object)","back"], "suppress_patterns":[],
+    "natural_replacements":[["running fast on the right side of the (?:picture|image|frame)","runs quickly toward the right"],["running fast on the left side of the (?:picture|image|frame)","runs quickly toward the left"],["\\blong hairs\\b","long hair"],["\\bscarfs\\b","scarf"],[",? (?:long hair|hair) and (?:a )?scarf(?:ves)? (?:running|flying|flowing) behind (?:her|his)(?: back)?",", with her long hair and scarf flowing behind her"]]
+  },
+  {
+    "id":"hug_knees", "type":"动作", "priority":100,
+    "triggers":["双手抱膝","抱着膝盖","抱膝坐着","双臂环抱膝盖","缩着腿抱膝","抱膝"],
+    "content":"She sits with her knees drawn close, both arms wrapped around her knees.",
+    "canonical_phrases":["arms wrapped around her knees","arms wrapped around her legs","hugging her knees"],
+    "emit_tags_when_canonical":true,
+    "tags":["sitting","hugging own legs"], "suppress_tags":["knees","sitting on person"],
+    "composition_recommendations":{"shot":[["膝上",75,"膝上景别可完整显示抱膝姿势"]],"angle":[["三分之四",55,"斜向视角更容易显示手臂和膝盖关系"]]},
+    "suppress_patterns":[",?\\s*with (?:both )?(?:her )?hands on (?:her )?knees", "sitting on (?:her )?knees", "with (?:her )?hands on (?:her )?knees"],
+    "natural_replacements":[
+      ["A girl sitting on her knees","A girl sits with her knees drawn close, both arms wrapped around her knees"],
+      ["A girl sits on the floor with her knees","A girl sits on the floor with her knees drawn close, both arms wrapped around her knees"],
+      ["The girl's arms and arms and knees are shrunk together","She sits with her knees drawn close, both arms wrapped around her knees"],
+      ["The girl sits by the window with her legs shrunk","The girl sits by the window with her knees drawn close, both arms wrapped around her knees"]
+    ]
+  },
+  {
+    "id":"table_dangling", "type":"动作", "priority":100,
+    "triggers":["双腿垂下","两腿垂下","脚不着地"],
+    "content":"She sits with both legs dangling freely, her feet off the ground.",
+    "canonical_phrases":["feet off the ground","legs dangling"], "emit_tags_when_canonical":true,
+    "tags":["legs dangling"], "suppress_tags":["legs"],
+    "composition_recommendations":{"shot":[["全身",100,"垂下的双腿和地面关系需要全身景别"]]},
+    "suppress_patterns":["with (?:her )?legs down", "with both legs down"]
+  },
+  {
+    "id":"touching_hair", "type":"动作", "priority":94,
+    "triggers":["撩头发","摸头发","手放在头发上","整理头发"],
+    "content":"She raises one hand to her hair.",
+    "canonical_phrases":["touches her hair","touching her hair","hand to her hair"], "emit_tags_when_canonical":true,
+    "tags":["hand in hair"], "suppress_tags":[], "suppress_patterns":[],
+    "composition_recommendations":{"shot":[["半身",65,"半身景别能清楚显示手与头发的互动"]]}
+  },
+  {
+    "id":"hair_tuck", "type":"动作", "priority":95,
+    "triggers":["把头发拨到耳后","拨到耳后","将发丝别到耳后","别到耳后"],
+    "content":"She gently raises one hand and tucks a strand of hair behind her ear.",
+    "tags":["hair tuck"], "suppress_tags":[], "suppress_patterns":[]
+    ,"composition_recommendations":{"shot":[["半身",70,"半身景别能清楚显示手部和头发动作"]]}
+  },
+  {
+    "id":"fingers_through_hair", "type":"动作", "priority":95,
+    "triggers":["手指穿过发丝","手指穿过头发"],
+    "content":"She gently runs her fingers through her hair.",
+    "tags":["hand in hair"], "suppress_tags":[], "suppress_patterns":[]
+  },
+  {
+    "id":"look_down_camera", "type":"镜头", "priority":100,
+    "triggers":["低头看镜头","低头看下方镜头","看向下方镜头","俯视镜头","俯视下方镜头"],
+    "content":"She lowers her head and looks directly at the camera positioned below her.",
+    "tags":["looking at viewer","from below"], "suppress_tags":["camera"],
+    "composition_recommendations":{"camera_height":[["低机位",110,"镜头明确位于人物下方"]],"gaze":[["看镜头",110,"人物明确看向下方镜头"]]},
+    "suppress_patterns":["looks down at the camera", "looking down at the camera"]
+  },
+  {
+    "id":"against_wall", "type":"动作", "priority":90,
+    "triggers":["靠墙站立","靠着墙站","背靠墙站"],
+    "content":"She stands with her back lightly against the wall, her posture relaxed and natural.",
+    "tags":["standing"], "suppress_tags":[], "suppress_patterns":[]
+  },
+  {
+    "id":"looking_back", "type":"动作", "priority":90,
+    "triggers":["回头看","回眸"],
+    "content":"She turns her head back over her shoulder.",
+    "tags":["looking back"], "suppress_tags":[], "suppress_patterns":[]
+  },
+  {
+    "id":"lean_window", "type":"动作", "priority":90,
+    "triggers":["把头伸出窗外","探出窗外"],
+    "content":"She leans out of the open window, resting one hand on the frame as she looks outside.",
+    "canonical_phrases":["leans out of the open window","leaning out of the window"], "emit_tags_when_canonical":true,
+    "tags":["open window"], "suppress_tags":[], "suppress_patterns":[],
+    "natural_replacements":[["The girl came out (?:of )?the window and looked at the view","The girl leans out of the open window, resting one hand on the frame as she looks outside"]],
+    "composition_recommendations":{"shot":[["半身",85,"半身能同时表现人物和窗框"]],"angle":[["三分之四",80,"斜向视角更适合探出窗外的动作"]],"gaze":[["看向画外",85,"探窗动作的视线应跟随窗外环境"]],"aspect":[["横图",65,"横图可容纳窗框和视线方向"]]}
+  }
+]

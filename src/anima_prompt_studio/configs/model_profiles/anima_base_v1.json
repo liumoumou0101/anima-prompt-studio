@@ -1,0 +1,9 @@
+{
+  "id": "anima_base_v1", "display_name": "ANIMA Base", "variant": "base",
+  "checkpoint_logical_name": "anima_base_v1", "default_steps": 35, "default_cfg": 4.5,
+  "default_sampler": "er_sde", "default_scheduler": "normal", "negative_prompt_mode": "enabled",
+  "positive_prefix": ["score_7"],
+  "negative_prompt": ["worst quality", "low quality", "score_1", "score_2", "score_3", "artist name", "blurry", "jpeg artifacts", "chromatic aberration"],
+  "default_width": 896, "default_height": 1152, "workflow_template_id": "anima_base_api_v1",
+  "status": "tested", "notes": "依据 CircleStone Labs 官方 ANIMA 1.0 建议：30–50 步、CFG 4–5；er_sde 为官方推荐默认采样器之一。"
+}

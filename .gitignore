@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+build/
+dist/
+*.egg-info/
+*.db
+*.log
+/reports/
+/*.zip
+/*.md
+!/README.md
+!/THIRD_PARTY_RESOURCES.md

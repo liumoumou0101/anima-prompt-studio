@@ -1,0 +1,38 @@
+[
+  {
+    "id": "RACE_DARK_ELF", "triggers": ["暗精灵"], "canonical_en": "dark elf",
+    "tags": ["dark elf"], "category": "race", "priority": 100, "suppresses_tags": ["elf"],
+    "translation_replacements": [
+      ["\\blittle elf girl\\b", "petite dark elf girl"],
+      ["\\b(?:dark-skinned|dark) elf girl\\b", "dark elf girl"],
+      ["\\belf girl\\b", "dark elf girl"], ["\\ban elf\\b", "a dark elf"]
+    ]
+  },
+  {
+    "id": "RACE_ELF", "triggers": ["精灵"], "exclude_triggers": ["暗精灵"],
+    "canonical_en": "elf", "tags": ["elf"], "category": "race", "priority": 50
+  },
+  {
+    "id": "RACE_FOX_GIRL", "triggers": ["狐娘", "狐狸娘"], "canonical_en": "fox girl",
+    "tags": ["fox girl"], "category": "race", "priority": 100, "suppresses_tags": ["fox"],
+    "translation_replacements": [["\\b(?:a |one )?fox(?: woman| girl)?\\b", "a fox girl"]]
+  },
+  {
+    "id": "RACE_CAT_GIRL", "triggers": ["猫娘"], "canonical_en": "cat girl",
+    "tags": ["cat girl"], "category": "race", "priority": 100, "suppresses_tags": ["cat"],
+    "translation_replacements": [["\\b(?:a |one )?cat(?: woman| girl)?\\b", "a cat girl"]]
+  },
+  {
+    "id": "RACE_DRAGON_GIRL", "triggers": ["龙娘", "龙女"], "canonical_en": "dragon girl",
+    "tags": ["dragon girl"], "category": "race", "priority": 100, "suppresses_tags": ["dragon"],
+    "translation_replacements": [["\\b(?:a |one )?dragon (?:woman|female|girl)\\b", "a dragon girl"], ["\\ba dragon\\b", "a dragon girl"]]
+  },
+  {
+    "id": "BODY_PETITE", "triggers": ["小女孩", "娇小女孩", "娇小的女孩"], "canonical_en": "petite",
+    "tags": ["petite"], "category": "body", "priority": 80,
+    "translation_replacements": [["\\blittle (dark elf |elf |fox |cat |dragon )?girl\\b", "petite \\1girl"], ["\\byoung girl\\b", "petite girl"]]
+  },
+  {"id":"HAIR_BLUE","triggers":["蓝发","蓝色头发","蓝色长发","蓝色短发"],"canonical_en":"blue hair","tags":["blue hair"],"category":"hair","priority":90},
+  {"id":"EYES_GREEN","triggers":["绿瞳","绿色眼睛"],"canonical_en":"green eyes","tags":["green eyes"],"category":"eyes","priority":90},
+  {"id":"EYES_PURPLE","triggers":["紫瞳","紫色眼睛"],"canonical_en":"purple eyes","tags":["purple eyes"],"category":"eyes","priority":90}
+]

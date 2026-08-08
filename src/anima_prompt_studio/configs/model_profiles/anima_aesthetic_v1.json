@@ -1,0 +1,9 @@
+{
+  "id": "anima_aesthetic_v1", "display_name": "ANIMA Aesthetic", "variant": "aesthetic",
+  "checkpoint_logical_name": "anima_aesthetic_v1", "default_steps": 35, "default_cfg": 4.5,
+  "default_sampler": "euler", "default_scheduler": "normal", "negative_prompt_mode": "enabled",
+  "positive_prefix": [],
+  "negative_prompt": ["worst quality", "low quality", "artist name", "blurry", "jpeg artifacts", "chromatic aberration"],
+  "default_width": 896, "default_height": 1152, "workflow_template_id": "anima_aesthetic_api_v1",
+  "status": "tested", "notes": "依据 CircleStone Labs 官方 ANIMA 1.0 建议；Aesthetic 已移除训练质量标签，不默认使用 score_*。"
+}

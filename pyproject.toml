@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anima-prompt-studio"
+version = "1.0.0"
+description = "Offline-first Chinese prompt compiler for ANIMA image models"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.7,<3",
+  "PySide6>=6.7,<7",
+]
+
+[project.optional-dependencies]
+translation = ["transformers>=4.44,<5", "sentencepiece>=0.2", "torch>=2.2"]
+dev = ["pytest>=8", "pytest-cov>=5"]
+
+[project.scripts]
+anima-prompt-studio = "anima_prompt_studio.app.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+anima_prompt_studio = ["configs/**/*.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+

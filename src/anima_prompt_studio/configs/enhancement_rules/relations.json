@@ -1,0 +1,56 @@
+[
+  {
+    "id":"sitting_by_window", "type":"关系", "priority":85,
+    "triggers":["坐在窗边","坐在窗户边","在窗边坐着"],
+    "content":"She sits quietly by the window.", "canonical_phrases":["sitting by the window","sits by the window"],
+    "tags":["sitting","window"], "suppress_tags":[], "suppress_patterns":[]
+  },
+  {
+    "id":"sitting_table_edge", "type":"关系", "priority":85,
+    "triggers":["坐在桌边","坐在桌子边缘","坐在桌子上"],
+    "content":"She sits on the edge of the table.", "canonical_phrases":["sitting on the edge of the table","sits on the edge of the table"],
+    "tags":["sitting"], "suppress_tags":[], "suppress_patterns":[]
+  },
+  {
+    "id":"leaning_by_window", "type":"关系", "priority":85,
+    "triggers":["靠在窗边","倚着窗户","倚在窗边"],
+    "content":"She leans by the window and looks into the distance.", "canonical_phrases":["leans by the window","leaning by the window"],
+    "tags":["window"], "suppress_tags":[], "suppress_patterns":[]
+  },
+  {
+    "id":"window_soft_light", "type":"光线", "priority":40,
+    "triggers":["窗边","窗户"],
+    "forbidden_context":["清晨","早晨","黄昏","夕阳","夜晚","月光","雨天","雨夜","阳光","灯光","光线","逆光"],
+    "content":"Soft light falls across her, creating a calm and gentle atmosphere.",
+    "tags":["soft lighting"], "suppress_tags":[], "suppress_patterns":[]
+  },
+  {
+    "id":"sunlight_through_window", "type":"光线", "priority":90,
+    "triggers":["阳光穿过窗户","阳光透过窗户","光线穿过窗户"],
+    "content":"Sunlight passes through the window and falls across her face.",
+    "tags":["sunlight","window"], "suppress_tags":[], "suppress_patterns":[]
+  },
+  {
+    "id":"shadow_behind_wall", "type":"关系", "priority":90,
+    "triggers":["影子投在身后的墙上","影子映在身后的墙上"],
+    "content":"Her shadow is cast on the wall behind her.",
+    "canonical_phrases":["shadow is cast on the wall behind her"], "emit_tags_when_canonical":true,
+    "natural_replacements":[["The girl's shadow was thrown behind the wall","Her shadow is cast on the wall behind her"]],
+    "tags":["shadow"], "suppress_tags":[], "suppress_patterns":[]
+  },
+  {
+    "id":"no_background_people", "type":"关系", "priority":100,
+    "triggers_all":[["独自","单独"],["背景没有其他人","背景没其他人","背景无人"]],
+    "content":"A girl stands alone. There is no one else in the background.",
+    "canonical_phrases":["stands alone","no one else in the background"], "emit_tags_when_canonical":true,
+    "replaces_translation":true,
+    "tags":["standing"], "suppress_tags":["no"], "suppress_patterns":[]
+  },
+  {
+    "id":"mirror_back", "type":"关系", "priority":100,
+    "triggers_all":[["镜子","镜中"],["背影"]],
+    "content":"The girl's back is reflected in the mirror.",
+    "replaces_translation":true,
+    "tags":["mirror"], "suppress_tags":["front view","looking at viewer"], "suppress_patterns":[]
+  }
+]

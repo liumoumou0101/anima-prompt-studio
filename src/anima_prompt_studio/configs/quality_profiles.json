@@ -1,0 +1,7 @@
+[
+  {"id":"draft","display_name":"草稿","base_quality_tags":["safe"]},
+  {"id":"standard","display_name":"标准","base_quality_tags":["masterpiece","best quality","safe"]},
+  {"id":"portrait_detail","display_name":"精致人物","base_quality_tags":["masterpiece","best quality","safe"],"rendering_style_tags":["anime illustration"],"detail_tags":["delicate details","detailed face","detailed eyes","detailed hair"]},
+  {"id":"ornate_illustration","display_name":"华丽插画","base_quality_tags":["masterpiece","best quality","safe"],"rendering_style_tags":["anime illustration","vivid colors"],"detail_tags":["beautiful lighting","delicate details"]},
+  {"id":"atmospheric","display_name":"氛围叙事","base_quality_tags":["masterpiece","best quality","safe"],"rendering_style_tags":["anime illustration"],"atmosphere_tags":["atmospheric lighting","moody atmosphere"]}
+]
