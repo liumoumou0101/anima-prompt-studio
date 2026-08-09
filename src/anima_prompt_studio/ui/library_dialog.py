@@ -63,6 +63,7 @@ class LibraryPanel(QWidget):
         elif self.model_type is ArtistProfile:
             self._line("canonical_tag", "标准标签")
             self._line("output_tag", "输出标签", "@artist name")
+            self._line("anima_tested_tag", "ANIMA 已验证标签", "可留空；例如 @artist name")
             self._line("historical_tags", "历史标签", "逗号分隔")
             self._line("style_keywords", "风格关键词", "逗号分隔")
         else:
@@ -115,6 +116,7 @@ class LibraryPanel(QWidget):
         if self.model_type is ArtistProfile:
             canonical = self._value("canonical_tag") or display_name
             return ArtistProfile(**common, canonical_tag=canonical, output_tag=self._value("output_tag") or f"@{canonical}",
+                anima_tested_tag=self._value("anima_tested_tag") or None,
                 historical_tags=split_values(self._value("historical_tags")), style_keywords=split_values(self._value("style_keywords")))
         try: weight = float(self._value("default_weight") or .8)
         except ValueError: raise ValueError("LoRA 默认权重必须是数字。")
@@ -131,6 +133,9 @@ class LibraryPanel(QWidget):
     def use_selected(self) -> None:
         try:
             self.selected_entity = self.build_entity()
+            # “应用” is the natural completion action; persist the card as well so
+            # users never have to recreate it after restarting the application.
+            self.repository.save_entity(self.selected_entity)
             self.window().accept()
         except Exception as exc: QMessageBox.warning(self, "无法应用", str(exc))
 

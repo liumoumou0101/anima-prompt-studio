@@ -7,10 +7,17 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from anima_prompt_studio.domain.execution_models import (
+    ACTIVE_RUN_STATES,
+    GenerationArtifact,
+    GenerationRun,
+    RemoteProfile,
+    WorkflowProfile,
+)
 from anima_prompt_studio.domain.models import ArtistProfile, CharacterCard, LoRAProfile, PromptJob
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def default_data_dir() -> Path:
@@ -45,6 +52,24 @@ class SQLiteRepository:
                 CREATE TABLE IF NOT EXISTS artists (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, payload_json TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS loras (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, payload_json TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS remote_profiles (
+                    id TEXT PRIMARY KEY, display_name TEXT NOT NULL, payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workflow_profiles (
+                    id TEXT PRIMARY KEY, display_name TEXT NOT NULL, payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS generation_runs (
+                    id TEXT PRIMARY KEY, prompt_job_id TEXT NOT NULL, remote_profile_id TEXT NOT NULL,
+                    workflow_profile_id TEXT NOT NULL, remote_prompt_id TEXT NOT NULL,
+                    state TEXT NOT NULL, updated_at TEXT NOT NULL, payload_json TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_generation_runs_updated ON generation_runs(updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_generation_runs_state ON generation_runs(state);
+                CREATE TABLE IF NOT EXISTS generation_artifacts (
+                    id TEXT PRIMARY KEY, generation_run_id TEXT NOT NULL, local_path TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_generation_artifacts_run ON generation_artifacts(generation_run_id);
             """)
             self.connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -94,6 +119,102 @@ class SQLiteRepository:
     def get_setting(self, key: str, default=None):
         row = self.connection.execute("SELECT value_json FROM settings WHERE key=?", (key,)).fetchone()
         return json.loads(row[0]) if row else default
+
+    def save_remote_profile(self, profile: RemoteProfile) -> None:
+        with self.connection:
+            self.connection.execute(
+                """INSERT INTO remote_profiles(id,display_name,payload_json) VALUES(?,?,?)
+                ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,payload_json=excluded.payload_json""",
+                (profile.id, profile.display_name, profile.model_dump_json(by_alias=True)),
+            )
+
+    def get_remote_profile(self, profile_id: str) -> RemoteProfile:
+        row = self.connection.execute("SELECT payload_json FROM remote_profiles WHERE id=?", (profile_id,)).fetchone()
+        if not row:
+            raise KeyError(f"云主机配置不存在：{profile_id}")
+        return RemoteProfile.model_validate_json(row[0])
+
+    def list_remote_profiles(self, enabled_only: bool = False) -> list[RemoteProfile]:
+        profiles = [
+            RemoteProfile.model_validate_json(row[0])
+            for row in self.connection.execute("SELECT payload_json FROM remote_profiles ORDER BY display_name")
+        ]
+        return [profile for profile in profiles if profile.enabled] if enabled_only else profiles
+
+    def save_workflow_profile(self, profile: WorkflowProfile) -> None:
+        with self.connection:
+            self.connection.execute(
+                """INSERT INTO workflow_profiles(id,display_name,payload_json) VALUES(?,?,?)
+                ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,payload_json=excluded.payload_json""",
+                (profile.id, profile.display_name, profile.model_dump_json(by_alias=True)),
+            )
+
+    def get_workflow_profile(self, profile_id: str) -> WorkflowProfile:
+        row = self.connection.execute("SELECT payload_json FROM workflow_profiles WHERE id=?", (profile_id,)).fetchone()
+        if not row:
+            raise KeyError(f"工作流配置不存在：{profile_id}")
+        return WorkflowProfile.model_validate_json(row[0])
+
+    def list_workflow_profiles(self) -> list[WorkflowProfile]:
+        return [
+            WorkflowProfile.model_validate_json(row[0])
+            for row in self.connection.execute("SELECT payload_json FROM workflow_profiles ORDER BY display_name")
+        ]
+
+    def save_generation_run(self, run: GenerationRun) -> None:
+        with self.connection:
+            self.connection.execute(
+                """INSERT INTO generation_runs(
+                    id,prompt_job_id,remote_profile_id,workflow_profile_id,remote_prompt_id,state,updated_at,payload_json
+                ) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+                    remote_prompt_id=excluded.remote_prompt_id,state=excluded.state,
+                    updated_at=excluded.updated_at,payload_json=excluded.payload_json""",
+                (
+                    run.id,
+                    run.prompt_job_id,
+                    run.remote_profile_id,
+                    run.workflow_profile_id,
+                    run.remote_prompt_id,
+                    run.state.value,
+                    run.updated_at.isoformat(),
+                    run.model_dump_json(),
+                ),
+            )
+
+    def get_generation_run(self, run_id: str) -> GenerationRun:
+        row = self.connection.execute("SELECT payload_json FROM generation_runs WHERE id=?", (run_id,)).fetchone()
+        if not row:
+            raise KeyError(f"远程生成任务不存在：{run_id}")
+        return GenerationRun.model_validate_json(row[0])
+
+    def list_generation_runs(self, limit: int = 100) -> list[GenerationRun]:
+        rows = self.connection.execute(
+            "SELECT payload_json FROM generation_runs ORDER BY updated_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [GenerationRun.model_validate_json(row[0]) for row in rows]
+
+    def list_active_generation_runs(self) -> list[GenerationRun]:
+        states = sorted(state.value for state in ACTIVE_RUN_STATES)
+        placeholders = ",".join("?" for _ in states)
+        rows = self.connection.execute(
+            f"SELECT payload_json FROM generation_runs WHERE state IN ({placeholders}) ORDER BY updated_at DESC",
+            states,
+        ).fetchall()
+        return [GenerationRun.model_validate_json(row[0]) for row in rows]
+
+    def save_generation_artifact(self, artifact: GenerationArtifact) -> None:
+        with self.connection:
+            self.connection.execute(
+                """INSERT INTO generation_artifacts(id,generation_run_id,local_path,payload_json) VALUES(?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET local_path=excluded.local_path,payload_json=excluded.payload_json""",
+                (artifact.id, artifact.generation_run_id, artifact.local_path, artifact.model_dump_json()),
+            )
+
+    def list_generation_artifacts(self, run_id: str) -> list[GenerationArtifact]:
+        rows = self.connection.execute(
+            "SELECT payload_json FROM generation_artifacts WHERE generation_run_id=? ORDER BY id", (run_id,)
+        ).fetchall()
+        return [GenerationArtifact.model_validate_json(row[0]) for row in rows]
 
     def close(self) -> None:
         self.connection.close()
