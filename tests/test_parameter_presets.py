@@ -132,9 +132,10 @@ def test_long_prompt_only_adds_advisory_and_keeps_source():
 
 
 def test_task_package_exposes_preset_but_not_internal_parameter_states():
-    job = PromptJob(generation_preset_id="quality")
+    job = PromptJob(generation_preset_id="quality", quality_profile_id="portrait_detail")
     job.generation_params.set_state("steps", GenerationFieldState.LOCKED)
     package = job.task_package()
     assert package["generation_preset"] == "quality"
+    assert package["quality_profile"] == "portrait_detail"
     assert "field_states" not in package
     assert "locked_fields" not in package

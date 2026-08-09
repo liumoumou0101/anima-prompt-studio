@@ -367,6 +367,7 @@ class PromptJob(BaseModel):
             "positive_prompt": self.positive_prompt,
             "negative_prompt": self.negative_prompt,
             "generation_preset": self.generation_preset_id,
+            "quality_profile": self.quality_profile_id,
             **self.generation_params.model_dump(exclude={"locked_fields", "field_states"}),
             "loras": [x.model_dump() for x in self.lora_selection],
             "characters": (

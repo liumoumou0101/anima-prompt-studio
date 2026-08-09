@@ -30,9 +30,16 @@ def test_history_round_trip_preserves_composition_decisions(tmp_path):
 
 
 def test_json_export(tmp_path):
-    job = PromptJob(original_zh="测试", positive_prompt="safe")
+    job = PromptJob(
+        original_zh="测试",
+        positive_prompt="safe",
+        generation_preset_id="quality",
+        quality_profile_id="portrait_detail",
+    )
     path = ExportService().export_task(job, tmp_path / "job.json")
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["schema_version"] == "1.4"
+    assert data["generation_preset"] == "quality"
+    assert data["quality_profile"] == "portrait_detail"
     assert data["composition"]["mode"] == "mixed"
     assert data["positive_prompt"] == "safe"
