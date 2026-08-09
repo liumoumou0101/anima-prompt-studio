@@ -1,5 +1,6 @@
 -r requirements.txt
 -r requirements-resources.txt
+# Windows 用户建议运行 install_translation_cpu.ps1，确保先安装 CPU-only Torch。
 transformers>=4.44,<5
 sentencepiece>=0.2
 sacremoses>=0.1

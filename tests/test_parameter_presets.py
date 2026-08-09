@@ -34,7 +34,7 @@ def test_generation_presets_are_model_specific(model, preset, expected):
     assert (params.steps, params.cfg, params.sampler) == expected
 
 
-def test_manual_parameter_survives_model_switch_and_locked_survives_preset():
+def test_model_switch_resets_model_dependent_manual_value_but_keeps_locked_value():
     pipeline = PromptPipeline()
     job = PromptJob(model_profile_id="anima_base_v1")
     pipeline.compiler.apply_model_defaults(job)
@@ -42,16 +42,51 @@ def test_manual_parameter_survives_model_switch_and_locked_survives_preset():
     job.generation_params.set_state("steps", GenerationFieldState.USER_SELECTED)
     job.generation_params.cfg = 3.25
     job.generation_params.set_state("cfg", GenerationFieldState.LOCKED)
+    job.generation_params.sampler = "custom_sampler"
+    job.generation_params.scheduler = "custom_scheduler"
+    job.generation_params.set_state("sampler", GenerationFieldState.USER_SELECTED)
+    job.generation_params.set_state("scheduler", GenerationFieldState.USER_SELECTED)
+    job.generation_params.width = 1024
+    job.generation_params.height = 1024
+    job.generation_params.set_state("width", GenerationFieldState.USER_SELECTED)
+    job.generation_params.set_state("height", GenerationFieldState.USER_SELECTED)
 
     pipeline.switch_model(job, "anima_turbo_v1")
-    assert job.generation_params.steps == 41
+    assert job.generation_params.steps == 10
+    assert job.generation_params.state("steps") == GenerationFieldState.AUTO
     assert job.generation_params.cfg == 3.25
+    assert job.generation_params.sampler == "euler"
+    assert job.generation_params.scheduler == "normal"
+    assert job.generation_params.state("sampler") == GenerationFieldState.AUTO
+    assert job.generation_params.state("scheduler") == GenerationFieldState.AUTO
+    assert (job.generation_params.width, job.generation_params.height) == (1024, 1024)
+    assert job.generation_params.state("width") == GenerationFieldState.USER_SELECTED
+    assert job.generation_params.state("height") == GenerationFieldState.USER_SELECTED
 
     pipeline.apply_generation_preset(job, "quality")
     assert job.generation_params.steps == 12
     assert job.generation_params.state("steps") == GenerationFieldState.AUTO
     assert job.generation_params.cfg == 3.25
     assert job.generation_params.state("cfg") == GenerationFieldState.LOCKED
+
+
+@pytest.mark.parametrize("state", [GenerationFieldState.USER_SELECTED, GenerationFieldState.LOCKED])
+def test_generation_preset_never_resets_manual_or_locked_dimensions(state):
+    pipeline = PromptPipeline()
+    job = PromptJob(model_profile_id="anima_aesthetic_v1", generation_preset_id="balanced")
+    pipeline.compiler.apply_model_defaults(job)
+    job.generation_params.width = 1024
+    job.generation_params.height = 1024
+    job.generation_params.set_state("width", state)
+    job.generation_params.set_state("height", state)
+
+    pipeline.apply_generation_preset(job, "quality")
+
+    params = job.generation_params
+    assert (params.width, params.height) == (1024, 1024)
+    assert params.state("width") == state
+    assert params.state("height") == state
+    assert (params.steps, params.cfg, params.sampler, params.scheduler) == (50, 5.0, "euler", "normal")
 
 
 def test_manual_dimensions_are_not_overwritten_by_aspect_change():

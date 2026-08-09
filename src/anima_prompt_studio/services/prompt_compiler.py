@@ -22,6 +22,9 @@ CATEGORY_ORDER = {
     "scene": 80, "weather": 90, "time": 91, "lighting": 92, "general": 100,
 }
 
+PRESET_MANAGED_FIELDS = frozenset({"steps", "cfg", "sampler", "scheduler"})
+MODEL_DEPENDENT_FIELDS = PRESET_MANAGED_FIELDS
+
 
 class PromptCompiler:
     def __init__(self, configs: ConfigService) -> None:
@@ -41,7 +44,9 @@ class PromptCompiler:
                 result.append(clean)
         return result
 
-    def apply_model_defaults(self, job: PromptJob, reset_user_selected: bool = False) -> None:
+    def apply_model_defaults(
+        self, job: PromptJob, reset_user_selected_fields: frozenset[str] = frozenset(),
+    ) -> None:
         profile = self.configs.get_model(job.model_profile_id)
         try:
             preset = self.configs.get_generation_preset(job.model_profile_id, job.generation_preset_id)
@@ -58,7 +63,7 @@ class PromptCompiler:
             "scheduler": preset.scheduler,
         }
         for field, value in defaults.items():
-            if reset_user_selected and params.state(field) == GenerationFieldState.USER_SELECTED:
+            if field in reset_user_selected_fields and params.state(field) == GenerationFieldState.USER_SELECTED:
                 params.set_state(field, GenerationFieldState.AUTO)
             if params.is_automatic(field):
                 setattr(params, field, value)
@@ -67,7 +72,7 @@ class PromptCompiler:
     def apply_generation_preset(self, job: PromptJob, preset_id: str) -> None:
         self.configs.get_generation_preset(job.model_profile_id, preset_id)
         job.generation_preset_id = preset_id
-        self.apply_model_defaults(job, reset_user_selected=True)
+        self.apply_model_defaults(job, reset_user_selected_fields=PRESET_MANAGED_FIELDS)
 
     def _people_tag(self, job: PromptJob) -> str:
         n = job.composition.people_count

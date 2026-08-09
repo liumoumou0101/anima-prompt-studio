@@ -6,6 +6,7 @@
   {"id":"race_cat_girl","group":"concept","input":"一个猫娘坐在椅子上","require_all":["cat girl"],"forbid_tags":["cat"]},
   {"id":"race_dragon_girl","group":"concept","input":"一个龙娘展开翅膀","require_all":["dragon girl","wings"]},
   {"id":"appearance_white_gold","group":"concept","input":"一个白发金瞳的女孩","require_all":["white hair","golden eyes"],"forbid_en":["blonde"]},
+  {"id":"appearance_white_no_length","group":"concept","input":"一个白发女孩","require_tags":["white hair"],"forbid_tags":["blonde hair","black hair","brown hair","short hair","long hair","very long hair"],"forbid_en":["blonde","short hair","long hair"]},
   {"id":"appearance_black_short","group":"concept","input":"一个黑色短发的女孩","require_all":["black hair","short hair"],"require_en_all":["short black hair"],"forbid_en":["short black-haired"]},
   {"id":"appearance_blue_long","group":"concept","input":"一个蓝色长发红瞳的女孩","require_all":["blue hair","long hair","red eyes"],"forbid_en":["red-skinned","red skinned"],"forbid_tags":["skinned"]},
   {"id":"appearance_petite_policy","group":"concept","input":"一个小女孩站在房间里","require_all":["petite"],"forbid_en":["little girl","child"]},

@@ -113,12 +113,13 @@ def test_smart_mode_resets_nonlocked_fields_to_auto(window):
     assert window.job.composition.shot == "半身"
 
 
-def test_generation_parameter_edit_becomes_manual_and_survives_model_switch(window):
+def test_generation_parameter_edit_becomes_manual_and_resets_on_model_switch(window):
     window.steps.setValue(77)
     assert window.job.generation_params.state("steps") == GenerationFieldState.USER_SELECTED
     window.model_combo.setCurrentIndex(window.model_combo.findData("anima_aesthetic_v1"))
-    assert window.job.generation_params.steps == 77
-    assert window.steps.value() == 77
+    assert window.job.generation_params.steps == 35
+    assert window.job.generation_params.state("steps") == GenerationFieldState.AUTO
+    assert window.steps.value() == 35
 
 
 def test_generation_preset_resets_manual_but_preserves_locked(window):
@@ -134,6 +135,22 @@ def test_generation_preset_resets_manual_but_preserves_locked(window):
     assert window.job.generation_params.state("steps") == GenerationFieldState.AUTO
     assert window.job.generation_params.cfg == 2.5
     assert not window.cfg.isEnabled()
+
+
+@pytest.mark.parametrize("state", [GenerationFieldState.USER_SELECTED, GenerationFieldState.LOCKED])
+def test_generation_preset_preserves_ui_dimensions(window, state):
+    window.job = PromptJob(model_profile_id="anima_aesthetic_v1")
+    window.pipeline.compiler.apply_model_defaults(window.job)
+    window.job.generation_params.width = 1024
+    window.job.generation_params.height = 1024
+    window.job.generation_params.set_state("width", state)
+    window.job.generation_params.set_state("height", state)
+    window._load_job_into_ui()
+    window.generation_combo.setCurrentIndex(window.generation_combo.findData("quality"))
+    assert (window.job.generation_params.width, window.job.generation_params.height) == (1024, 1024)
+    assert window.job.generation_params.state("width") == state
+    assert window.job.generation_params.state("height") == state
+    assert (window.width.value(), window.height.value()) == (1024, 1024)
 
 
 def test_dynamic_composition_preset_updates_dimensions(window):

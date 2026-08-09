@@ -30,4 +30,5 @@ anima_prompt_studio = ["configs/**/*.json"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+norecursedirs = ["reports", "build", ".git", ".venv"]
 addopts = "-q"

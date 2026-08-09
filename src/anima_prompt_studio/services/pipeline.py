@@ -16,7 +16,7 @@ from .input_preprocessor import InputPreprocessor
 from .final_consistency import FinalConsistencyService
 from .lora_resolver import LoRAResolver
 from .multi_scope import MultiScopeService
-from .prompt_compiler import PromptCompiler
+from .prompt_compiler import MODEL_DEPENDENT_FIELDS, PromptCompiler
 from .prompt_complexity import PromptComplexityService
 from .semantic_diff import SemanticDiffService
 from .semantic_frame import SemanticFrameResolver
@@ -204,7 +204,7 @@ class PromptPipeline:
 
     def switch_model(self, job: PromptJob, model_profile_id: str) -> PromptJob:
         job.model_profile_id = model_profile_id
-        self.compiler.apply_model_defaults(job)
+        self.compiler.apply_model_defaults(job, reset_user_selected_fields=MODEL_DEPENDENT_FIELDS)
         self.composition_recommender.apply_aspect_dimensions(job)
         return self.compiler.compile(job)
 

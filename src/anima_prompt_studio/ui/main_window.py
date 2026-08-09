@@ -683,8 +683,14 @@ class MainWindow(QMainWindow):
     def on_model_changed(self) -> None:
         if self._updating: return
         try:
-            self._sync_ui_to_job(); self.pipeline.switch_model(self.job, self.model_combo.currentData()); self._load_job_into_ui()
-            self.statusBar().showMessage("模型已切换；质量词和推荐参数已重新编译。", 5000)
+            self._sync_ui_to_job()
+            reset_fields = [
+                name for name in ("steps", "cfg", "sampler", "scheduler")
+                if self.job.generation_params.state(name) == GenerationFieldState.USER_SELECTED
+            ]
+            self.pipeline.switch_model(self.job, self.model_combo.currentData()); self._load_job_into_ui()
+            suffix = f" 手动参数 {', '.join(reset_fields)} 已恢复为新模型的自动值。" if reset_fields else ""
+            self.statusBar().showMessage(f"模型已切换；质量词和推荐参数已重新编译。{suffix}", 7000)
         except Exception as exc: self._show_error("模型切换失败", exc)
 
     def on_generation_preset_changed(self) -> None:

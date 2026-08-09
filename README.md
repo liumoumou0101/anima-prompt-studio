@@ -64,14 +64,24 @@ python -m anima_prompt_studio.tools.resource_setup --tags
 Windows 建议先从 PyTorch 官方 CPU 索引安装纯 CPU 版，避免误装不需要的 CUDA 运行库：
 
 ```powershell
-python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-python -m pip install -r requirements-translation.txt
-python -m anima_prompt_studio.tools.resource_setup --models
+.\install_translation_cpu.ps1
+```
+
+同时下载约 600 MB 的双向模型：
+
+```powershell
+.\install_translation_cpu.ps1 -DownloadModels
 ```
 
 当前 Windows CPU 环境的参考量级：Torch wheel 约 120 MB、安装后约 500 MB；Transformers 及其依赖安装后约 100–200 MB；双向模型约 600 MB。加上 Qt 和缓存，完整增强环境通常占用约 1.4–2 GB，安装过程的临时峰值可能更高。这一整套均为可选能力，不是基础运行条件。
 
 下载完成后软件会自动发现资源，日常翻译和标签匹配均离线运行。也可在“设置 → 配置本地 Marian 翻译模型”中选择其他本地模型目录。资源命令必须明确使用 `--tags` 或 `--models`，不会再因省略参数而意外下载全部资源。
+
+只检查当前环境，不安装任何内容：
+
+```powershell
+python -m anima_prompt_studio.tools.verify_translation_env
+```
 
 ## 测试
 
@@ -106,6 +116,8 @@ python -m anima_prompt_studio.tools.semantic_audit
 - `生成预设` 决定 Steps、CFG、Sampler 和 Scheduler 的查表结果；`质量预设` 负责质量词和表现意图，两者职责不同。
 - 修改参数后该字段转为“手动”，重新分析 Prompt 不会覆盖；“锁定”后控件不可编辑。
 - 把字段恢复成“自动”会重新采用当前 Model 与生成预设的值；切换生成预设会重置手动项，但保留锁定项。
+- 生成预设只管理 Steps、CFG、Sampler、Scheduler，不会重置手工或锁定的 Width/Height。
+- 切换 Model 时，模型强相关的手动 Steps、CFG、Sampler、Scheduler 会恢复自动；锁定参数和手工 Width/Height 保留。
 - 快速和高质量档位依据 ANIMA 官方建议区间设置，仍需在具体 ComfyUI 工作流中使用固定 Seed 验证，不宣称对所有场景都优于平衡档。
 
 用户数据默认保存在 `%LOCALAPPDATA%\AnimaPromptStudio`，包括 SQLite 数据库和滚动日志。Model、生成预设、质量词和构图预设位于 `src/anima_prompt_studio/configs`，可以扩充 JSON 而不需要修改业务代码；下载的标签数据库和翻译模型保存在用户数据目录，不提交到 Git。标准 pytest 在没有下载标签数据库或翻译模型的干净环境中也可运行。
