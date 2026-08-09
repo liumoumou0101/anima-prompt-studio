@@ -1,0 +1,9 @@
+[
+  {"id":"standard_portrait","display_name":"标准人物","values":{"shot":"半身","camera_height":"平视","angle":"正面","gaze":"看镜头","aspect":"竖图","subject_position":"中"},"notes":"稳定的普通单人肖像起点。"},
+  {"id":"portrait_closeup","display_name":"人物特写","values":{"shot":"头像","camera_height":"平视","angle":"正面","gaze":"看镜头","aspect":"方形","subject_position":"中"},"notes":"突出面部和表情。"},
+  {"id":"upper_body","display_name":"半身人物","values":{"shot":"半身","camera_height":"平视","angle":"三分之四","gaze":"看镜头","aspect":"竖图","subject_position":"中"},"notes":"兼顾表情、服装和手部。"},
+  {"id":"full_body","display_name":"全身立绘","values":{"shot":"全身","camera_height":"平视","angle":"三分之四","gaze":"看镜头","aspect":"竖图","subject_position":"中"},"notes":"完整展示人物与服装轮廓。"},
+  {"id":"dynamic_action","display_name":"动态动作","values":{"shot":"全身","camera_height":"平视","angle":"侧面","gaze":"看向画外","aspect":"横图","subject_position":"左"},"notes":"为运动方向保留空间，适合奔跑、骑乘和载具运动。"},
+  {"id":"environment_character","display_name":"环境人物","values":{"shot":"全身","camera_height":"平视","angle":"三分之四","gaze":"看向画外","aspect":"横图","subject_position":"左"},"notes":"人物与环境并重，给场景保留画面空间。"},
+  {"id":"large_scene","display_name":"大场景","values":{"shot":"远景","camera_height":"平视","angle":"无","gaze":"无","aspect":"横图","subject_position":"中"},"notes":"强调环境尺度；人物相关字段可继续手动调整。"}
+]

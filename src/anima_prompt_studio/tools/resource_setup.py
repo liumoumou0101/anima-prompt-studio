@@ -120,7 +120,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tags", action="store_true", help="从 Danbooru 官方 API 构建标签库")
     parser.add_argument("--root", type=Path, help="覆盖资源目录")
     args = parser.parse_args(argv)
-    if not args.models and not args.tags: args.models = args.tags = True
+    if not args.models and not args.tags:
+        parser.error("请明确指定 --tags、--models，或同时指定两者；模型下载不是基础安装的必需步骤。")
     resources = ResourceManager(args.root)
     additions = {}
     try:

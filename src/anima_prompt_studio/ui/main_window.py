@@ -14,14 +14,14 @@ from PySide6.QtWidgets import (
 )
 
 from anima_prompt_studio.domain.models import (
-    ArtistProfile, CharacterCard, CharacterSlot, CompositionFieldState, ItemState,
+    ArtistProfile, CharacterCard, CharacterSlot, CompositionFieldState, GenerationFieldState, ItemState,
     LoRAProfile, LoRASelection, PromptJob, SubjectMode,
 )
 from anima_prompt_studio.repositories import SQLiteRepository
 from anima_prompt_studio.services.config_service import ConfigService
 from anima_prompt_studio.services.export_service import ExportService
 from anima_prompt_studio.services.pipeline import PromptPipeline
-from anima_prompt_studio.services.translation_service import LazyLocalMarianEngine, TranslationService
+from anima_prompt_studio.services.translation_service import LazyLocalMarianEngine, TranslationService, marian_runtime_available
 from anima_prompt_studio.services.resource_manager import ResourceManager
 from anima_prompt_studio.ui.library_dialog import EntityLibraryDialog
 
@@ -76,7 +76,7 @@ class MainWindow(QMainWindow):
         self.job = PromptJob()
         self._updating = False
         self._cached_character_people_count = 1
-        self.setWindowTitle("ANIMA 中文提示词辅助工具 V1")
+        self.setWindowTitle("ANIMA 中文提示词辅助工具 V1.1")
         self.resize(1540, 940)
         self.setMinimumSize(1100, 720)
         self._build_ui()
@@ -87,6 +87,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"就绪 · 翻译引擎：{self.pipeline.translation.engine_name}")
 
     def _load_configured_translation(self) -> None:
+        if not marian_runtime_available():
+            log.info("本地 Marian 模型运行依赖未安装，使用内置离线基础翻译。")
+            return
         zh_en = self.repository.get_setting("zh_en_model_path")
         en_zh = self.repository.get_setting("en_zh_model_path")
         resources = ResourceManager()
@@ -132,6 +135,12 @@ class MainWindow(QMainWindow):
             self.model_combo.addItem(profile.display_name, profile.id)
         self.model_combo.currentIndexChanged.connect(self.on_model_changed)
         header.addWidget(self.model_combo)
+        header.addWidget(QLabel("生成预设"))
+        self.generation_combo = QComboBox()
+        for preset in self.configs.generation_presets["anima_turbo_v1"].values():
+            self.generation_combo.addItem(preset.display_name, preset.id)
+        self.generation_combo.currentIndexChanged.connect(self.on_generation_preset_changed)
+        header.addWidget(self.generation_combo)
         header.addWidget(QLabel("质量预设"))
         self.quality_combo = QComboBox()
         for profile in self.configs.quality_profiles.values():
@@ -201,8 +210,15 @@ class MainWindow(QMainWindow):
         self.subject_mode.currentIndexChanged.connect(self.on_subject_mode_changed)
         self.composition_mode.currentIndexChanged.connect(self.on_composition_mode_changed)
         grid.addWidget(QLabel("模式"), 0, 0); grid.addWidget(self.composition_mode, 0, 1, 1, 2)
-        grid.addWidget(QLabel("主体类型"), 1, 0); grid.addWidget(self.subject_mode, 1, 1, 1, 2)
-        grid.addWidget(QLabel("人数"), 2, 0); grid.addWidget(self.people_count, 2, 1)
+        self.composition_preset = QComboBox()
+        self.composition_preset.addItem("智能推荐", "smart")
+        for preset in self.configs.composition_presets.values():
+            self.composition_preset.addItem(preset.display_name, preset.id)
+        apply_composition_preset = QPushButton("应用预设")
+        apply_composition_preset.clicked.connect(self.apply_composition_preset)
+        grid.addWidget(QLabel("构图预设"), 1, 0); grid.addWidget(self.composition_preset, 1, 1); grid.addWidget(apply_composition_preset, 1, 2)
+        grid.addWidget(QLabel("主体类型"), 2, 0); grid.addWidget(self.subject_mode, 2, 1, 1, 2)
+        grid.addWidget(QLabel("人数"), 3, 0); grid.addWidget(self.people_count, 3, 1)
         self.composition_controls = {
             "shot": self.shot, "camera_height": self.camera, "angle": self.angle,
             "gaze": self.gaze, "aspect": self.aspect, "subject_position": self.position,
@@ -210,7 +226,7 @@ class MainWindow(QMainWindow):
         labels = {"shot":"景别", "camera_height":"机位", "angle":"角度", "gaze":"视线", "aspect":"画幅", "subject_position":"主体"}
         self.composition_state_boxes: dict[str, QComboBox] = {}
         self.composition_reason_labels: dict[str, QLabel] = {}
-        for row, (field_name, widget) in enumerate(self.composition_controls.items(), 3):
+        for row, (field_name, widget) in enumerate(self.composition_controls.items(), 4):
             state = QComboBox(); state.addItem("自动", CompositionFieldState.AUTO.value); state.addItem("手动", CompositionFieldState.USER_SELECTED.value); state.addItem("锁定", CompositionFieldState.LOCKED.value)
             reason = QLabel(); reason.setWordWrap(True); reason.setStyleSheet("color: #777; font-size: 11px")
             self.composition_state_boxes[field_name] = state; self.composition_reason_labels[field_name] = reason
@@ -218,7 +234,7 @@ class MainWindow(QMainWindow):
             widget.currentIndexChanged.connect(lambda _=0, name=field_name: self.on_composition_value_changed(name))
             state.currentIndexChanged.connect(lambda _=0, name=field_name: self.on_composition_state_changed(name))
         recommend = QPushButton("重新推荐构图"); recommend.clicked.connect(self.recommend_composition)
-        grid.addWidget(recommend, 9, 1, 1, 2)
+        grid.addWidget(recommend, 10, 1, 1, 2)
         grid.setColumnStretch(3, 1)
         layout.addWidget(composition)
 
@@ -290,7 +306,7 @@ class MainWindow(QMainWindow):
         libraries.addWidget(artist_lib); libraries.addWidget(lora_lib); form.addRow(libraries)
         layout.addWidget(style)
 
-        params = QGroupBox("模型参数（推荐默认值，可覆盖）")
+        params = QGroupBox("模型参数（自动 / 手动 / 锁定）")
         grid = QGridLayout(params)
         self.width = QSpinBox(); self.width.setRange(256, 4096); self.width.setSingleStep(64)
         self.height = QSpinBox(); self.height.setRange(256, 4096); self.height.setSingleStep(64)
@@ -298,8 +314,26 @@ class MainWindow(QMainWindow):
         self.cfg = QDoubleSpinBox(); self.cfg.setRange(0, 30); self.cfg.setDecimals(2); self.cfg.setSingleStep(.5)
         self.sampler = QLineEdit(); self.scheduler = QLineEdit(); self.seed = QLineEdit("-1")
         self.batch = QSpinBox(); self.batch.setRange(1, 32)
-        for i, (label, widget) in enumerate((("宽", self.width), ("高", self.height), ("步数", self.steps), ("CFG", self.cfg), ("采样器", self.sampler), ("调度器", self.scheduler), ("Seed", self.seed), ("批量", self.batch))):
-            grid.addWidget(QLabel(label), i // 2, (i % 2) * 2); grid.addWidget(widget, i // 2, (i % 2) * 2 + 1)
+        self.parameter_controls = {
+            "width": self.width, "height": self.height, "steps": self.steps,
+            "cfg": self.cfg, "sampler": self.sampler, "scheduler": self.scheduler,
+        }
+        self.parameter_state_boxes: dict[str, QComboBox] = {}
+        labels = {"width":"宽", "height":"高", "steps":"步数", "cfg":"CFG", "sampler":"采样器", "scheduler":"调度器"}
+        for row, (field_name, widget) in enumerate(self.parameter_controls.items()):
+            state = QComboBox()
+            state.addItem("自动", GenerationFieldState.AUTO.value)
+            state.addItem("手动", GenerationFieldState.USER_SELECTED.value)
+            state.addItem("锁定", GenerationFieldState.LOCKED.value)
+            self.parameter_state_boxes[field_name] = state
+            grid.addWidget(QLabel(labels[field_name]), row, 0); grid.addWidget(widget, row, 1); grid.addWidget(state, row, 2)
+            state.currentIndexChanged.connect(lambda _=0, name=field_name: self.on_generation_state_changed(name))
+            if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                widget.valueChanged.connect(lambda _=0, name=field_name: self.on_generation_value_changed(name))
+            else:
+                widget.editingFinished.connect(lambda name=field_name: self.on_generation_value_changed(name))
+        grid.addWidget(QLabel("Seed"), 6, 0); grid.addWidget(self.seed, 6, 1)
+        grid.addWidget(QLabel("批量"), 7, 0); grid.addWidget(self.batch, 7, 1)
         layout.addWidget(params)
 
         layout.addWidget(QLabel("Positive Prompt"))
@@ -367,11 +401,17 @@ class MainWindow(QMainWindow):
                 reconciled_loras.append(item)
         self.job.lora_selection = reconciled_loras
         p = self.job.generation_params
+        ui_values = {
+            "width": self.width.value(), "height": self.height.value(), "steps": self.steps.value(),
+            "cfg": self.cfg.value(), "sampler": self.sampler.text().strip() or "euler",
+            "scheduler": self.scheduler.text().strip() or "normal",
+        }
         if not self._updating:
-            if self.width.value() != p.width and "width" not in p.locked_fields: p.locked_fields.append("width")
-            if self.height.value() != p.height and "height" not in p.locked_fields: p.locked_fields.append("height")
-        p.width = self.width.value(); p.height = self.height.value(); p.steps = self.steps.value(); p.cfg = self.cfg.value()
-        p.sampler = self.sampler.text().strip() or "euler"; p.scheduler = self.scheduler.text().strip() or "normal"
+            for field_name, value in ui_values.items():
+                if value != getattr(p, field_name) and p.state(field_name) == GenerationFieldState.AUTO:
+                    p.set_state(field_name, GenerationFieldState.USER_SELECTED)
+        for field_name, value in ui_values.items():
+            setattr(p, field_name, value)
         try: p.seed = int(self.seed.text())
         except ValueError: p.seed = -1
         p.batch_size = self.batch.value()
@@ -396,7 +436,7 @@ class MainWindow(QMainWindow):
         j = self.job
         self.project_name.setText(j.project_name); self.chinese.setPlainText(j.original_zh); self.english.setPlainText(j.translated_en)
         self.back_chinese.setPlainText(j.back_translated_zh); self.lock_english.setChecked(j.translation_state == ItemState.LOCKED)
-        self._set_combo_data(self.model_combo, j.model_profile_id); self._set_combo_data(self.quality_combo, j.quality_profile_id)
+        self._set_combo_data(self.model_combo, j.model_profile_id); self._set_combo_data(self.generation_combo, j.generation_preset_id); self._set_combo_data(self.quality_combo, j.quality_profile_id)
         c = j.composition; self.people_count.setValue(c.people_count)
         self._set_combo_data(self.subject_mode, j.subject_mode.value)
         self._set_combo_data(self.composition_mode, c.mode)
@@ -415,6 +455,10 @@ class MainWindow(QMainWindow):
         self.loras.setText(", ".join(f"{x.logical_id}:{x.weight}" + ((":" + "+".join(x.trigger_words)) if x.trigger_words else "") for x in j.lora_selection))
         p=j.generation_params; self.width.setValue(p.width); self.height.setValue(p.height); self.steps.setValue(p.steps); self.cfg.setValue(p.cfg)
         self.sampler.setText(p.sampler); self.scheduler.setText(p.scheduler); self.seed.setText(str(p.seed)); self.batch.setValue(p.batch_size)
+        for field_name, state_box in self.parameter_state_boxes.items():
+            state = p.state(field_name)
+            self._set_combo_data(state_box, state.value)
+            self.parameter_controls[field_name].setEnabled(state != GenerationFieldState.LOCKED)
         self._refresh_results()
         self._updating = False
 
@@ -455,7 +499,14 @@ class MainWindow(QMainWindow):
             self._set_combo_data(self.composition_state_boxes[field_name], decision.state.value)
             combo.setEnabled(decision.state != CompositionFieldState.LOCKED)
             self.composition_reason_labels[field_name].setText(decision.reason or "")
-        self.width.setValue(j.generation_params.width); self.height.setValue(j.generation_params.height)
+        self._set_combo_data(self.generation_combo, j.generation_preset_id)
+        p = j.generation_params
+        self.width.setValue(p.width); self.height.setValue(p.height); self.steps.setValue(p.steps); self.cfg.setValue(p.cfg)
+        self.sampler.setText(p.sampler); self.scheduler.setText(p.scheduler)
+        for field_name, state_box in self.parameter_state_boxes.items():
+            state = p.state(field_name)
+            self._set_combo_data(state_box, state.value)
+            self.parameter_controls[field_name].setEnabled(state != GenerationFieldState.LOCKED)
         self.warning_list.clear()
         for warning in j.semantic_warnings:
             item = QListWidgetItem(f"[{warning.level.value.upper()}] {warning.message}")
@@ -474,7 +525,8 @@ class MainWindow(QMainWindow):
             lock = QTableWidgetItem(); lock.setFlags(lock.flags() | Qt.ItemIsUserCheckable); lock.setCheckState(Qt.Checked if enh.state == ItemState.LOCKED else Qt.Unchecked)
             self.enhancement_table.setItem(row, 0, check); self.enhancement_table.setItem(row, 1, QTableWidgetItem(enh.type)); self.enhancement_table.setItem(row, 2, QTableWidgetItem(enh.source_rule)); self.enhancement_table.setItem(row, 3, QTableWidgetItem(enh.content)); self.enhancement_table.setItem(row, 4, lock)
         profile = self.configs.get_model(j.model_profile_id)
-        self.model_note.setText(f"{profile.display_name} · {profile.status} · {profile.notes}")
+        preset = self.configs.get_generation_preset(j.model_profile_id, j.generation_preset_id)
+        self.model_note.setText(f"{profile.display_name} · {profile.status} · {profile.notes}\n生成预设：{preset.display_name} · {preset.notes}")
         self._updating = previous_updating
 
     def translate_and_compile(self) -> None:
@@ -607,12 +659,67 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("构图推荐已更新；手动和锁定项保持不变。", 5000)
         except Exception as exc: self._show_error("构图推荐失败", exc)
 
+    def apply_composition_preset(self) -> None:
+        if self._updating:
+            return
+        preset_id = self.composition_preset.currentData()
+        if preset_id == "smart":
+            previous = self._updating; self._updating = True
+            for field_name, state_box in self.composition_state_boxes.items():
+                if self.job.composition.decision(field_name).state != CompositionFieldState.LOCKED:
+                    self.job.composition.decision(field_name).state = CompositionFieldState.AUTO
+                    self._set_combo_data(state_box, CompositionFieldState.AUTO.value)
+            self._updating = previous
+            self.recommend_composition()
+            return
+        try:
+            self._sync_ui_to_job()
+            self.pipeline.apply_composition_preset(self.job, preset_id)
+            self._load_job_into_ui()
+            self.statusBar().showMessage("构图预设已应用；锁定构图项保持不变。", 5000)
+        except Exception as exc:
+            self._show_error("构图预设应用失败", exc)
+
     def on_model_changed(self) -> None:
         if self._updating: return
         try:
             self._sync_ui_to_job(); self.pipeline.switch_model(self.job, self.model_combo.currentData()); self._load_job_into_ui()
             self.statusBar().showMessage("模型已切换；质量词和推荐参数已重新编译。", 5000)
         except Exception as exc: self._show_error("模型切换失败", exc)
+
+    def on_generation_preset_changed(self) -> None:
+        if self._updating:
+            return
+        try:
+            self._sync_ui_to_job()
+            self.pipeline.apply_generation_preset(self.job, self.generation_combo.currentData())
+            self._load_job_into_ui()
+            self.statusBar().showMessage("生成预设已应用；锁定参数保持不变。", 5000)
+        except Exception as exc:
+            self._show_error("生成预设应用失败", exc)
+
+    def on_generation_value_changed(self, field_name: str) -> None:
+        if self._updating:
+            return
+        params = self.job.generation_params
+        if params.state(field_name) != GenerationFieldState.LOCKED:
+            params.set_state(field_name, GenerationFieldState.USER_SELECTED)
+            previous = self._updating; self._updating = True
+            self._set_combo_data(self.parameter_state_boxes[field_name], GenerationFieldState.USER_SELECTED.value)
+            self._updating = previous
+        self._sync_ui_to_job()
+
+    def on_generation_state_changed(self, field_name: str) -> None:
+        if self._updating:
+            return
+        state = GenerationFieldState(self.parameter_state_boxes[field_name].currentData())
+        self.job.generation_params.set_state(field_name, state)
+        self.parameter_controls[field_name].setEnabled(state != GenerationFieldState.LOCKED)
+        self._sync_ui_to_job()
+        if state == GenerationFieldState.AUTO:
+            self.pipeline.compiler.apply_model_defaults(self.job)
+            self.pipeline.composition_recommender.apply_aspect_dimensions(self.job)
+        self._refresh_results()
 
     def on_tag_changed(self, item: QTableWidgetItem) -> None:
         if self._updating or item.column() != 0: return

@@ -1,0 +1,17 @@
+{
+  "anima_base_v1": [
+    {"id":"fast","display_name":"快速","steps":30,"cfg":4.0,"sampler":"euler","scheduler":"normal","notes":"官方建议区间内的低成本起点；仍建议固定 Seed 验证。"},
+    {"id":"balanced","display_name":"平衡","steps":35,"cfg":4.5,"sampler":"er_sde","scheduler":"normal","notes":"沿用 V1 已验证的默认参数。"},
+    {"id":"quality","display_name":"高质量","steps":50,"cfg":5.0,"sampler":"er_sde","scheduler":"normal","notes":"官方建议区间上沿；收益取决于工作流和提示词。"}
+  ],
+  "anima_aesthetic_v1": [
+    {"id":"fast","display_name":"快速","steps":30,"cfg":4.0,"sampler":"euler","scheduler":"normal","notes":"官方建议区间内的低成本起点；仍建议固定 Seed 验证。"},
+    {"id":"balanced","display_name":"平衡","steps":35,"cfg":4.5,"sampler":"euler","scheduler":"normal","notes":"沿用 V1 已验证的默认参数。"},
+    {"id":"quality","display_name":"高质量","steps":50,"cfg":5.0,"sampler":"euler","scheduler":"normal","notes":"官方建议区间上沿；收益取决于工作流和提示词。"}
+  ],
+  "anima_turbo_v1": [
+    {"id":"fast","display_name":"快速","steps":8,"cfg":1.0,"sampler":"euler","scheduler":"normal","notes":"Turbo 官方建议区间下沿，适合快速迭代。"},
+    {"id":"balanced","display_name":"平衡","steps":10,"cfg":1.0,"sampler":"euler","scheduler":"normal","notes":"沿用 V1 已验证的 Turbo 默认参数。"},
+    {"id":"quality","display_name":"高质量","steps":12,"cfg":1.0,"sampler":"euler","scheduler":"normal","notes":"Turbo 官方建议区间上沿，不等同于 Base/Aesthetic 的高步数模式。"}
+  ]
+}

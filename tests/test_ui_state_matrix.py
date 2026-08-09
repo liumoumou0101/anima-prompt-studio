@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QFileDialog, QTableWidgetItem
 
 from anima_prompt_studio.domain.models import (
-    CharacterSlot, CompositionFieldState, EnhancementItem, ItemState, LoRASelection,
+    CharacterSlot, CompositionFieldState, EnhancementItem, GenerationFieldState, ItemState, LoRASelection,
     MatchedTag, PromptJob, SubjectMode,
 )
 from anima_prompt_studio.repositories import SQLiteRepository
@@ -111,6 +111,39 @@ def test_smart_mode_resets_nonlocked_fields_to_auto(window):
     window.composition_mode.setCurrentIndex(window.composition_mode.findData("smart"))
     assert window.job.composition.decision("shot").state == CompositionFieldState.AUTO
     assert window.job.composition.shot == "半身"
+
+
+def test_generation_parameter_edit_becomes_manual_and_survives_model_switch(window):
+    window.steps.setValue(77)
+    assert window.job.generation_params.state("steps") == GenerationFieldState.USER_SELECTED
+    window.model_combo.setCurrentIndex(window.model_combo.findData("anima_aesthetic_v1"))
+    assert window.job.generation_params.steps == 77
+    assert window.steps.value() == 77
+
+
+def test_generation_preset_resets_manual_but_preserves_locked(window):
+    window.job = PromptJob(model_profile_id="anima_turbo_v1")
+    window.pipeline.compiler.apply_model_defaults(window.job)
+    window._load_job_into_ui()
+    window.steps.setValue(77)
+    window.job.generation_params.cfg = 2.5
+    window.job.generation_params.set_state("cfg", GenerationFieldState.LOCKED)
+    window._load_job_into_ui()
+    window.generation_combo.setCurrentIndex(window.generation_combo.findData("quality"))
+    assert window.job.generation_params.steps == 12
+    assert window.job.generation_params.state("steps") == GenerationFieldState.AUTO
+    assert window.job.generation_params.cfg == 2.5
+    assert not window.cfg.isEnabled()
+
+
+def test_dynamic_composition_preset_updates_dimensions(window):
+    window.job = PromptJob(model_profile_id="anima_aesthetic_v1")
+    window.pipeline.compiler.apply_model_defaults(window.job)
+    window._load_job_into_ui()
+    window.composition_preset.setCurrentIndex(window.composition_preset.findData("dynamic_action"))
+    window.apply_composition_preset()
+    assert window.job.composition.aspect == "横图"
+    assert (window.job.generation_params.width, window.job.generation_params.height) == (1152, 896)
 
 
 def test_enhancement_can_be_disabled_and_edited_in_ui(window):

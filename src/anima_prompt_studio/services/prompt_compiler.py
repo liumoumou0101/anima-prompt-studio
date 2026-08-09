@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import re
 
-from anima_prompt_studio.domain.models import CharacterSlot, GenerationParams, MatchedTag, PromptJob, SubjectMode
+from anima_prompt_studio.domain.models import (
+    CharacterSlot, GenerationFieldState, MatchedTag, PromptJob, SubjectMode,
+)
 from .config_service import ConfigService
 
 
@@ -39,19 +41,33 @@ class PromptCompiler:
                 result.append(clean)
         return result
 
-    def apply_model_defaults(self, job: PromptJob) -> None:
+    def apply_model_defaults(self, job: PromptJob, reset_user_selected: bool = False) -> None:
         profile = self.configs.get_model(job.model_profile_id)
-        old = job.generation_params
-        defaults = GenerationParams(
-            width=profile.default_width, height=profile.default_height, steps=profile.default_steps,
-            cfg=profile.default_cfg, sampler=profile.default_sampler, scheduler=profile.default_scheduler,
-            seed=old.seed, batch_size=old.batch_size, locked_fields=old.locked_fields,
-        )
-        for field in old.locked_fields:
-            if hasattr(old, field):
-                setattr(defaults, field, getattr(old, field))
-        job.generation_params = defaults
+        try:
+            preset = self.configs.get_generation_preset(job.model_profile_id, job.generation_preset_id)
+        except ValueError:
+            job.generation_preset_id = "balanced"
+            preset = self.configs.get_generation_preset(job.model_profile_id, "balanced")
+        params = job.generation_params
+        defaults = {
+            "width": profile.default_width,
+            "height": profile.default_height,
+            "steps": preset.steps,
+            "cfg": preset.cfg,
+            "sampler": preset.sampler,
+            "scheduler": preset.scheduler,
+        }
+        for field, value in defaults.items():
+            if reset_user_selected and params.state(field) == GenerationFieldState.USER_SELECTED:
+                params.set_state(field, GenerationFieldState.AUTO)
+            if params.is_automatic(field):
+                setattr(params, field, value)
         job.workflow_template_id = profile.workflow_template_id
+
+    def apply_generation_preset(self, job: PromptJob, preset_id: str) -> None:
+        self.configs.get_generation_preset(job.model_profile_id, preset_id)
+        job.generation_preset_id = preset_id
+        self.apply_model_defaults(job, reset_user_selected=True)
 
     def _people_tag(self, job: PromptJob) -> str:
         n = job.composition.people_count

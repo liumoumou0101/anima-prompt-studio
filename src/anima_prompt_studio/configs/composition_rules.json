@@ -36,7 +36,7 @@
     "aspect": [
       {"value":"方形","zh":["方形构图","方图"],"en":["square composition"],"reason":"用户明确要求方形画幅"},
       {"value":"竖图","zh":["竖图","竖幅"],"en":["portrait orientation"],"reason":"用户明确要求竖幅"},
-      {"value":"横图","zh":["横图","横幅"],"en":["landscape orientation"],"reason":"用户明确要求横幅"}
+      {"value":"横图","zh":["横向构图","横向画面","宽幅构图","横图","横幅"],"en":["landscape orientation","landscape composition","wide composition"],"reason":"用户明确要求横幅"}
     ],
     "subject_position": [
       {"value":"左","zh":["主体在左","人物在左"],"en":["subject on the left"],"reason":"用户明确指定主体位于左侧"},

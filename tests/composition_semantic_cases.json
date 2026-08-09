@@ -34,5 +34,6 @@
   {"id":"run_toward_left_chao_variant","input":"女孩朝画面左边冲去","expect":{"shot":"全身","angle":"侧面","gaze":"看向画外","aspect":"横图","subject_position":"右"},"expect_context":{"movement_direction":"left","explicit_subject_position":"none"},"forbid_tags":["looking at viewer"],"only_one_main_angle":true},
   {"id":"reverse_subject_position","input":"画面右边坐着一个女孩","expect":{"subject_position":"右"},"expect_context":{"movement_direction":"none","explicit_subject_position":"right"}},
   {"id":"possessive_hair_flowing_relation","input":"她的长发在她身后飘扬","forbid_tags":["back","from behind"],"expect_context":{"motion_relation_spans":true}},
-  {"id":"generic_dynamic_jump_gaze","input":"女孩纵身跳过水沟","expect":{"shot":"全身","angle":"侧面","gaze":"看向画外","aspect":"横图"},"expect_context":{"dynamic_action":true},"forbid_tags":["looking at viewer"],"only_one_main_angle":true}
+  {"id":"generic_dynamic_jump_gaze","input":"女孩纵身跳过水沟","expect":{"shot":"全身","angle":"侧面","gaze":"看向画外","aspect":"横图"},"expect_context":{"dynamic_action":true},"forbid_tags":["looking at viewer"],"only_one_main_angle":true},
+  {"id":"explicit_motorcycle_landscape","input":"一个女孩骑着摩托车高速冲过雨夜城市街道，身体前倾，长发和围巾向后飞扬，横向构图。","expect":{"aspect":"横图"},"dimension":"landscape"}
 ]

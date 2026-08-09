@@ -38,6 +38,12 @@ class CompositionFieldState(StrEnum):
     LOCKED = "locked"
 
 
+class GenerationFieldState(StrEnum):
+    AUTO = "auto"
+    USER_SELECTED = "user_selected"
+    LOCKED = "locked"
+
+
 class ProtectedEntity(BaseModel):
     placeholder: str
     original: str
@@ -154,6 +160,33 @@ class GenerationParams(BaseModel):
     seed: int = -1
     batch_size: int = 1
     locked_fields: list[str] = Field(default_factory=list)
+    field_states: dict[str, GenerationFieldState] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def migrate_legacy_locks(self):
+        for field in self.locked_fields:
+            self.field_states[field] = GenerationFieldState.LOCKED
+        self.locked_fields = [
+            field for field, state in self.field_states.items()
+            if state == GenerationFieldState.LOCKED
+        ]
+        return self
+
+    def state(self, field: str) -> GenerationFieldState:
+        if field in self.locked_fields:
+            return GenerationFieldState.LOCKED
+        return self.field_states.get(field, GenerationFieldState.AUTO)
+
+    def set_state(self, field: str, state: GenerationFieldState) -> None:
+        self.field_states[field] = state
+        if state == GenerationFieldState.LOCKED:
+            if field not in self.locked_fields:
+                self.locked_fields.append(field)
+        elif field in self.locked_fields:
+            self.locked_fields.remove(field)
+
+    def is_automatic(self, field: str) -> bool:
+        return self.state(field) == GenerationFieldState.AUTO
 
 
 class ModelProfile(BaseModel):
@@ -190,6 +223,23 @@ class QualityProfile(BaseModel):
 
     def all_tags(self) -> list[str]:
         return self.base_quality_tags + self.rendering_style_tags + self.detail_tags + self.composition_tags + self.atmosphere_tags
+
+
+class GenerationPreset(BaseModel):
+    id: str
+    display_name: str
+    steps: int = Field(ge=1, le=200)
+    cfg: float = Field(ge=0, le=30)
+    sampler: str
+    scheduler: str
+    notes: str = ""
+
+
+class CompositionPreset(BaseModel):
+    id: str
+    display_name: str
+    values: dict[str, str]
+    notes: str = ""
 
 
 class CompositionDecision(BaseModel):
@@ -293,6 +343,7 @@ class PromptJob(BaseModel):
     artist_selection_sources: dict[str, Literal["manual", "text_derived", "locked"]] = Field(default_factory=dict)
     lora_selection: list[LoRASelection] = Field(default_factory=list)
     model_profile_id: str = "anima_turbo_v1"
+    generation_preset_id: str = "balanced"
     quality_profile_id: str = "standard"
     composition: Composition = Field(default_factory=Composition)
     composition_context: CompositionContext = Field(default_factory=CompositionContext)
@@ -310,12 +361,13 @@ class PromptJob(BaseModel):
 
     def task_package(self) -> dict[str, Any]:
         return {
-            "schema_version": "1.3",
+            "schema_version": "1.4",
             "job_id": self.id,
             "model_profile": self.model_profile_id,
             "positive_prompt": self.positive_prompt,
             "negative_prompt": self.negative_prompt,
-            **self.generation_params.model_dump(exclude={"locked_fields"}),
+            "generation_preset": self.generation_preset_id,
+            **self.generation_params.model_dump(exclude={"locked_fields", "field_states"}),
             "loras": [x.model_dump() for x in self.lora_selection],
             "characters": (
                 [] if self.effective_subject_mode() == SubjectMode.SCENE

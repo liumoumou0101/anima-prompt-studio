@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
 from typing import Protocol
@@ -9,6 +10,11 @@ class TranslationEngine(Protocol):
     name: str
     def zh_to_en(self, text: str) -> str: ...
     def en_to_zh(self, text: str) -> str: ...
+
+
+def marian_runtime_available() -> bool:
+    """Return whether the optional local-model runtime is actually installed."""
+    return all(importlib.util.find_spec(name) is not None for name in ("torch", "transformers", "sentencepiece"))
 
 
 class LocalMarianEngine:

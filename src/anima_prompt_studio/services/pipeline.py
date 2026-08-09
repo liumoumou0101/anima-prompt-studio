@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import re
 
-from anima_prompt_studio.domain.models import ItemState, LoRAProfile, PromptJob, SemanticWarning, SubjectMode, WarningLevel
+from anima_prompt_studio.domain.models import (
+    CompositionFieldState, ItemState, LoRAProfile, PromptJob, SemanticWarning, SubjectMode, WarningLevel,
+)
 from .canonical_prose import CanonicalProseBuilder
 from .config_service import ConfigService
 from .concept_resolver import ConceptResolver
@@ -15,6 +17,7 @@ from .final_consistency import FinalConsistencyService
 from .lora_resolver import LoRAResolver
 from .multi_scope import MultiScopeService
 from .prompt_compiler import PromptCompiler
+from .prompt_complexity import PromptComplexityService
 from .semantic_diff import SemanticDiffService
 from .semantic_frame import SemanticFrameResolver
 from .tag_matcher import TagMatcher
@@ -40,6 +43,7 @@ class PromptPipeline:
         self.final_consistency = FinalConsistencyService()
         self.diff = SemanticDiffService()
         self.compiler = PromptCompiler(self.configs)
+        self.prompt_complexity = PromptComplexityService()
 
     def translate(self, job: PromptJob, known_entities: list[tuple[str, str]] | None = None) -> PromptJob:
         if job.translation_state == ItemState.LOCKED and job.translated_en:
@@ -141,6 +145,9 @@ class PromptPipeline:
             SemanticWarning(level=WarningLevel.YELLOW, concept="英文清洁性", message=message)
             for message in cleanliness
         )
+        complexity_warning = self.prompt_complexity.analyze(source_zh)
+        if complexity_warning:
+            job.semantic_warnings.append(complexity_warning)
         return job
 
     def set_lora_profiles(self, profiles: list[LoRAProfile]) -> None:
@@ -198,5 +205,25 @@ class PromptPipeline:
     def switch_model(self, job: PromptJob, model_profile_id: str) -> PromptJob:
         job.model_profile_id = model_profile_id
         self.compiler.apply_model_defaults(job)
+        self.composition_recommender.apply_aspect_dimensions(job)
+        return self.compiler.compile(job)
+
+    def apply_generation_preset(self, job: PromptJob, preset_id: str) -> PromptJob:
+        self.compiler.apply_generation_preset(job, preset_id)
+        self.composition_recommender.apply_aspect_dimensions(job)
+        return self.compiler.compile(job)
+
+    def apply_composition_preset(self, job: PromptJob, preset_id: str) -> PromptJob:
+        preset = self.configs.get_composition_preset(preset_id)
+        for field, value in preset.values.items():
+            decision = job.composition.decision(field)
+            if decision.state == CompositionFieldState.LOCKED:
+                continue
+            setattr(job.composition, field, value)
+            decision.state = CompositionFieldState.USER_SELECTED
+            decision.reason = f"构图预设：{preset.display_name}"
+            decision.source_rule_ids = [f"preset_{preset.id}"]
+            decision.score = 1000
+        job.composition.mode = "mixed"
         self.composition_recommender.apply_aspect_dimensions(job)
         return self.compiler.compile(job)

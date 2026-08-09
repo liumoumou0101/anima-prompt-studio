@@ -190,7 +190,7 @@ class CompositionRecommendationService:
 
     def apply_aspect_dimensions(self, job: PromptJob) -> None:
         params = job.generation_params
-        if "width" in params.locked_fields or "height" in params.locked_fields:
+        if not params.is_automatic("width") or not params.is_automatic("height"):
             return
         profile = self.configs.get_model(job.model_profile_id)
         short, long = sorted((profile.default_width, profile.default_height))

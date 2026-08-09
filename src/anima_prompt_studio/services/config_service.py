@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from anima_prompt_studio.domain.models import ModelProfile, QualityProfile
+from anima_prompt_studio.domain.models import CompositionPreset, GenerationPreset, ModelProfile, QualityProfile
 
 
 class ConfigService:
@@ -13,6 +13,8 @@ class ConfigService:
         self.config_dir = requested if (requested / "model_profiles").is_dir() and (requested / "quality_profiles.json").is_file() else packaged
         self.model_profiles = self._load_models()
         self.quality_profiles = self._load_quality()
+        self.generation_presets = self._load_generation_presets()
+        self.composition_presets = self._load_composition_presets()
 
     def _load_models(self) -> dict[str, ModelProfile]:
         profiles: dict[str, ModelProfile] = {}
@@ -27,6 +29,18 @@ class ConfigService:
         raw = json.loads((self.config_dir / "quality_profiles.json").read_text(encoding="utf-8"))
         return {item.id: item for item in map(QualityProfile.model_validate, raw)}
 
+    def _load_generation_presets(self) -> dict[str, dict[str, GenerationPreset]]:
+        path = self.config_dir / "generation_presets.json"
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return {
+            model_id: {item.id: item for item in map(GenerationPreset.model_validate, presets)}
+            for model_id, presets in raw.items()
+        }
+
+    def _load_composition_presets(self) -> dict[str, CompositionPreset]:
+        raw = json.loads((self.config_dir / "composition_presets.json").read_text(encoding="utf-8"))
+        return {item.id: item for item in map(CompositionPreset.model_validate, raw)}
+
     def get_model(self, profile_id: str) -> ModelProfile:
         try:
             return self.model_profiles[profile_id]
@@ -38,3 +52,15 @@ class ConfigService:
             return self.quality_profiles[profile_id]
         except KeyError as exc:
             raise ValueError(f"未知质量预设：{profile_id}") from exc
+
+    def get_generation_preset(self, model_id: str, preset_id: str) -> GenerationPreset:
+        try:
+            return self.generation_presets[model_id][preset_id]
+        except KeyError as exc:
+            raise ValueError(f"模型 {model_id} 没有生成预设：{preset_id}") from exc
+
+    def get_composition_preset(self, preset_id: str) -> CompositionPreset:
+        try:
+            return self.composition_presets[preset_id]
+        except KeyError as exc:
+            raise ValueError(f"未知构图预设：{preset_id}") from exc
