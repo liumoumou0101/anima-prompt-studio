@@ -146,7 +146,11 @@ def test_english_authority_nsfw_tags_round_trip():
         "1girl, nude, medium breasts, nipples, standing, looking at viewer, indoors, bathroom",
     )
     matched = tags_of(job)
-    assert {"nude", "nipples", "looking at viewer", "1girl"} <= matched
+    # Content tags come from matcher; count tag may be matcher and/or compiler people tag.
+    assert {"nude", "nipples", "looking at viewer"} <= matched
+    head = job.positive_prompt.partition("\n\n")[0]
+    assert "1girl" in head
+    assert "nude" in head and "nipples" in head
 
 
 def test_expanded_clothing_and_body_concepts():
