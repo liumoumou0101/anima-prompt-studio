@@ -123,7 +123,17 @@ class SemanticFrameResolver:
         entities = list(entities)
         lower = text.casefold()
         person_pattern = r"\b(?:girl|girls|boy|boys|woman|women|man|men|person|people|character|characters|she|he|they|angel|elf|maid|knight|princess|prince)\b"
-        has_person = bool(re.search(person_pattern, lower)) or any(x.entity_type == "character" for x in entities)
+        # Danbooru count tags are person signals even when "girl" is glued as 1girl.
+        has_1girl = bool(re.search(r"\b1girl\b", lower))
+        has_1boy = bool(re.search(r"\b1boy\b", lower))
+        has_2girls = bool(re.search(r"\b2girls\b", lower))
+        has_3girls = bool(re.search(r"\b3girls\b", lower))
+        has_2boys = bool(re.search(r"\b2boys\b", lower))
+        has_person = (
+            bool(re.search(person_pattern, lower))
+            or has_1girl or has_1boy or has_2girls or has_3girls or has_2boys
+            or any(x.entity_type == "character" for x in entities)
+        )
         scene_pattern = r"\b(?:scene|landscape|city|forest|room|indoors|outdoors|beach|sky|mountain|river|night|day|daylight|moonlight|sunset|dawn|rain|snow)\b"
         has_scene = bool(re.search(scene_pattern, lower))
         subject_mode = SubjectMode.CHARACTER if has_person else SubjectMode.SCENE
@@ -132,16 +142,17 @@ class SemanticFrameResolver:
 
         count_match = re.search(r"\b(one|two|three|four|\d+)\s+(?:girls?|boys?|women|men|people|persons?|characters?)\b", lower)
         number_words = {"one": 1, "two": 2, "three": 3, "four": 4}
-        has_1girl = bool(re.search(r"\b1girl\b", lower))
-        has_1boy = bool(re.search(r"\b1boy\b", lower))
-        has_2girls = bool(re.search(r"\b2girls\b", lower))
         if count_match:
             token = count_match.group(1)
             people_count = number_words.get(token, int(token) if token.isdigit() else 1)
-        elif has_2girls or re.search(r"\b(?:couple|a man and a (?:woman|girl)|a woman and a man|a girl and a boy|a boy and a girl)\b", lower):
+        elif has_3girls:
+            people_count = 3
+        elif has_2girls or has_2boys or re.search(r"\b(?:couple|a man and a (?:woman|girl)|a woman and a man|a girl and a boy|a boy and a girl)\b", lower):
             people_count = 2
         elif has_1girl and has_1boy:
             people_count = 2
+        elif has_1girl or has_1boy:
+            people_count = 1
         elif re.search(r"\b(?:a|an|the)\s+(?:girl|boy|woman|man|person|character|angel|elf|maid|knight|princess|prince)\b|\b(?:she|he)\b", lower):
             people_count = 1
         else:

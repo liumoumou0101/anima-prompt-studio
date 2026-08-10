@@ -9,6 +9,7 @@
       "女孩"
     ],
     "en": [
+      "1girl",
       "one girl",
       "a girl"
     ]
@@ -22,6 +23,7 @@
       "男孩"
     ],
     "en": [
+      "1boy",
       "one boy",
       "a boy"
     ]
@@ -34,6 +36,7 @@
       "两名女孩"
     ],
     "en": [
+      "2girls",
       "two girls"
     ]
   },
@@ -45,6 +48,7 @@
       "三名女孩"
     ],
     "en": [
+      "3girls",
       "three girls"
     ]
   },
