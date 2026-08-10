@@ -24,7 +24,8 @@ class ConceptResolver:
                 candidates.append((rule.get("priority", 0), len(trigger), chinese.rfind(trigger), trigger, rule))
         for _, _, _, trigger, rule in sorted(candidates, key=lambda item: item[:4], reverse=True):
             category = rule.get("category", "general")
-            if category in {"race", "body"} and category in occupied_categories:
+            # Single-valued appearance slots keep one winner (highest priority / longest trigger).
+            if category in {"race", "body", "hair", "eyes"} and category in occupied_categories:
                 continue
             occupied_categories.add(category)
             matches.append(ResolvedConcept(
@@ -44,13 +45,30 @@ class ConceptResolver:
                     translated = updated
                     break
             canonical = rule["canonical_en"]
-            canonical_present = canonical in translated.lower()
+            ensure_tokens = list(rule.get("ensure_en") or [])
+            if not ensure_tokens:
+                ensure_tokens = [canonical]
+            present = any(self._token_present(translated, token) for token in ensure_tokens)
             if rule.get("category") == "hair" and canonical.endswith(" hair"):
                 colour = re.escape(canonical.removesuffix(" hair"))
-                canonical_present = bool(re.search(rf"\b{colour}(?: hair|-haired)\b", translated, flags=re.I))
-            if not canonical_present and rule.get("category") in {"race", "body", "hair", "eyes"}:
+                present = present or bool(re.search(rf"\b{colour}(?: hair|-haired)\b", translated, flags=re.I))
+            if present:
+                continue
+            if rule.get("category") in {"race", "body", "hair", "eyes"}:
                 translated = translated.rstrip(". ") + f". The character has {canonical}."
+            elif rule.get("ensure_phrase") or rule.get("ensure_en"):
+                phrase = rule.get("ensure_phrase") or f"{canonical}."
+                translated = translated.rstrip(". ") + f" {phrase}"
         return self._clean(translated)
+
+    @staticmethod
+    def _token_present(text: str, token: str) -> bool:
+        token = token.strip()
+        if not token:
+            return False
+        if re.search(r"[\u4e00-\u9fff]", token):
+            return token in text
+        return bool(re.search(rf"(?<!\w){re.escape(token)}(?!\w)", text, flags=re.I))
 
     @staticmethod
     def _clean(text: str) -> str:
@@ -64,5 +82,15 @@ class ConceptResolver:
 
     @staticmethod
     def as_tags(concepts: list[ResolvedConcept]) -> list[MatchedTag]:
-        return [MatchedTag(tag=tag, category=concept.category, source_type="derived", source_text=concept.source_text, confidence=1.0)
-                for concept in concepts for tag in concept.tags]
+        seen: set[str] = set()
+        result: list[MatchedTag] = []
+        for concept in concepts:
+            for tag in concept.tags:
+                if tag in seen:
+                    continue
+                seen.add(tag)
+                result.append(MatchedTag(
+                    tag=tag, category=concept.category, source_type="derived",
+                    source_text=concept.source_text, confidence=1.0,
+                ))
+        return result

@@ -41,6 +41,7 @@ from anima_prompt_studio.ui.remote_dialogs import (
     build_auto_workflow_profile,
 )
 from anima_prompt_studio.ui.remote_workers import ConnectionTestWorker, GenerationWorker
+from anima_prompt_studio.ui.tag_browser_dialog import TagBrowserDialog
 
 log = logging.getLogger(__name__)
 
@@ -171,6 +172,11 @@ class MainWindow(QMainWindow):
         open_gallery_root = QAction("打开图片保存根目录", self)
         open_gallery_root.triggered.connect(self.open_gallery_root)
         gallery.addAction(open_gallery_root)
+        tags_menu = self.menuBar().addMenu("标签")
+        browse_tags = QAction("浏览内置标签（灵感库）…", self)
+        browse_tags.setShortcut("Ctrl+T")
+        browse_tags.triggered.connect(self.open_tag_browser)
+        tags_menu.addAction(browse_tags)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -1076,6 +1082,10 @@ class MainWindow(QMainWindow):
             self.repository.set_setting("zh_en_model_path", zh_en); self.repository.set_setting("en_zh_model_path", en_zh)
             self.statusBar().showMessage("本地 Marian 翻译模型已加载。", 5000)
         except Exception as exc: self._show_error("模型加载失败", exc)
+
+    def open_tag_browser(self) -> None:
+        dialog = TagBrowserDialog(self)
+        dialog.exec()
 
     def open_entity_library(self, initial: type) -> None:
         dialog = EntityLibraryDialog(self.repository, initial, self)

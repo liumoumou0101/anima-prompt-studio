@@ -69,11 +69,23 @@ class LazyLocalMarianEngine:
         return self._get().en_to_zh(text)
 
 
+def _load_extra_lexicon() -> dict[str, str]:
+    path = Path(__file__).resolve().parent.parent / "configs" / "builtin_lexicon_extra.json"
+    if not path.is_file():
+        return {}
+    try:
+        import json
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return dict(data.get("zh_en") or {})
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
 class BuiltinOfflineEngine:
-    """Small deterministic fallback so the app remains useful before model setup."""
+    """Deterministic offline fallback; core phrases + expanded lexicon config."""
 
     name = "内置离线基础翻译"
-    _zh_en = {
+    _zh_en_core = {
         "一个女孩": "one girl", "一名女孩": "one girl", "一个": "one ", "一名": "one ", "女孩": "girl", "男孩": "boy",
         "两个女孩": "two girls", "三个女孩": "three girls", "白色头发": "white hair", "白发": "white hair",
         "黑色头发": "black hair", "黑发": "black hair", "金色头发": "blonde hair", "金发": "blonde hair",
@@ -89,9 +101,28 @@ class BuiltinOfflineEngine:
         "探出窗外": "leaning out of the window", "靠在窗边": "leaning by the window", "清晨": "early morning",
         "雨夜": "rainy night", "雨天": "rainy day", "下雨": "raining", "黄昏": "sunset", "夕阳": "sunset",
         "夜晚": "night", "月光": "moonlight", "右手": "right hand", "左手": "left hand", "拿着": "holding",
-        "穿着": "wearing", "裙子": "dress", "短裙": "short skirt", "衬衫": "shirt", "外套": "coat",
+        "穿着": "wearing", "裙子": "dress", "短裙": "miniskirt", "衬衫": "shirt", "外套": "coat",
         "全身": "full body", "半身": "upper body", "侧面": "side view", "背面": "back view",
         "在左边": "on the left", "在右边": "on the right", "在中间": "in the center", "和": " and ", "的": " ",
+        "比基尼": "bikini", "黑色内衣": "black lingerie", "内衣": "lingerie", "内裤": "panties",
+        "丁字裤": "thong", "吊带袜": "thighhighs", "长筒袜": "thighhighs", "过膝袜": "thighhighs",
+        "黑丝": "black thighhighs", "丝袜": "stockings", "吊袜带": "garter belt",
+        "乳沟": "cleavage", "低胸礼服": "low-cut dress", "低胸": "low-cut",
+        "露脐短上衣": "crop top", "露脐装": "crop top", "露脐": "navel", "热裤": "short shorts",
+        "湿透的白衬衫": "wet white shirt", "湿衬衫": "wet shirt", "湿透的衬衫": "wet shirt",
+        "透过衣服能看到内衣轮廓": "see-through clothes showing lingerie outline",
+        "裸体": "nude", "全裸": "nude", "赤裸上身": "topless", "一丝不挂": "completely nude",
+        "乳头": "nipples", "胸部": "breasts", "臀部特写": "ass focus",
+        "从背后拍摄": "from behind", "从背后": "from behind",
+        "做爱": "having sex", "性交": "sex", "性爱": "sex", "男上位": "missionary position",
+        "口交": "fellatio", "阿嘿颜": "ahegao", "啊嘿颜": "ahegao", "高潮中": "orgasm", "高潮": "orgasm",
+        "舌头伸出": "tongue out", "眼睛上翻": "rolling eyes",
+        "被绳子捆绑": "bound with rope", "捆绑": "bound", "绳缚": "bondage",
+        "眼睛被布蒙住": "blindfolded", "蒙住眼睛": "blindfolded", "蒙眼": "blindfold",
+        "一对男女": "a man and a woman", "一男一女": "a man and a woman", "一女一男": "a woman and a man",
+        "看向画外": "looking away",
+        "双腿交叠": "legs crossed", "跪着": "kneeling", "浴室": "bathroom", "沙滩": "beach",
+        "床单": "bed sheet", "床上": "on bed", "宴会厅": "banquet hall",
     }
     _en_zh = {
         "one girl": "一个女孩", "two girls": "两个女孩", "three girls": "三个女孩", "white hair": "白发",
@@ -103,7 +134,19 @@ class BuiltinOfflineEngine:
         "looking back": "回头看", "early morning": "清晨", "rainy night": "雨夜", "sunset": "黄昏",
         "moonlight": "月光", "right hand": "右手", "left hand": "左手", "holding": "拿着", "wearing": "穿着",
         "full body": "全身", "upper body": "半身", "side view": "侧面", "back view": "背面",
+        "bikini": "比基尼", "lingerie": "内衣", "panties": "内裤", "thong": "丁字裤",
+        "thighhighs": "吊带袜", "garter belt": "吊袜带", "cleavage": "乳沟", "crop top": "露脐短上衣",
+        "nude": "裸体", "topless": "赤裸上身", "nipples": "乳头", "breasts": "胸部",
+        "having sex": "做爱", "sex": "性爱", "missionary position": "男上位", "fellatio": "口交",
+        "ahegao": "阿嘿颜", "orgasm": "高潮", "bound with rope": "被绳子捆绑", "blindfold": "蒙眼",
+        "looking away": "看向画外", "a man and a woman": "一对男女",
+        "cowgirl position": "女上位", "doggy style": "后入", "large breasts": "巨乳", "school uniform": "校服",
+        "maid outfit": "女仆装", "yuri": "百合", "twintails": "双马尾",
     }
+
+    def __init__(self) -> None:
+        # Extra lexicon overrides core on key collision so curated expansions win.
+        self._zh_en = {**self._zh_en_core, **_load_extra_lexicon()}
 
     @staticmethod
     def _replace_longest(text: str, mapping: dict[str, str]) -> str:
@@ -115,10 +158,19 @@ class BuiltinOfflineEngine:
         return re.sub(r"[ \t]+", " ", text).strip(" ,")
 
     def zh_to_en(self, text: str) -> str:
-        return self._replace_longest(text, self._zh_en)
+        # Longest-phrase replace, then drop residual CJK so English field stays pure English.
+        # Semantics for unmatched Chinese are recovered later via concept ensure + tags.
+        translated = self._replace_longest(text, self._zh_en)
+        translated = re.sub(r"[\u4e00-\u9fff]+", " ", translated)
+        translated = re.sub(r"\s+([,.;!?])", r"\1", translated)
+        translated = re.sub(r"\s{2,}", " ", translated)
+        return translated.strip(" ,.;")
 
     def en_to_zh(self, text: str) -> str:
-        return self._replace_longest(text, self._en_zh)
+        # Prefer reverse map from zh_en plus curated en_zh overrides.
+        reverse = {v: k for k, v in self._zh_en.items() if v and not v.endswith(" ")}
+        reverse.update(self._en_zh)
+        return self._replace_longest(text, reverse)
 
 
 class TranslationService:
@@ -197,6 +249,120 @@ class TranslationService:
                 r"(?:,?\s*and\s+|,?\s*)(?:she\s+)?(?:doesn't|does not|didn't|did not) have (?:a |any )?(?:foot|feet)",
                 ", with her feet off the ground", translated, flags=re.I,
             )
+        translated = TranslationService._guard_nsfw_and_composition_terms(source, translated)
+        return translated
+
+    @staticmethod
+    def _guard_nsfw_and_composition_terms(source: str, translated: str) -> str:
+        """Fix high-impact NSFW and composition mistranslations without inventing intent."""
+        # 画外 is off-screen / away from viewer, never a painting object.
+        if any(token in source for token in ("看向画外", "不看镜头", "看向远方", "眺望远方")):
+            translated = re.sub(
+                r"\blooking outside the painting\b|\blooks outside the painting\b|"
+                r"\blooking out of the painting\b|\boutside the painting\b",
+                "looking away",
+                translated,
+                flags=re.I,
+            )
+            translated = re.sub(r"\bthe painting\b", "off-screen", translated, flags=re.I)
+        # Crop-top / navel drift (OPUS often emits "umbilical").
+        if any(token in source for token in ("露脐", "露脐装", "露脐短上衣")):
+            translated = re.sub(r"\bumbilical(?:\s+top)?\b", "crop top", translated, flags=re.I)
+            if not re.search(r"\b(?:crop top|navel|midriff)\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " Wearing a crop top with navel visible."
+        # Stocking / garter duplication drift.
+        if any(token in source for token in ("吊带袜", "长筒袜", "过膝袜", "黑丝", "丝袜")):
+            translated = re.sub(r"\bgarters and garters\b", "thighhighs and a garter belt", translated, flags=re.I)
+            if not re.search(r"\b(?:thighhighs?|stockings?|pantyhose)\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " Wearing thighhighs."
+        # Cleavage phrasing.
+        if any(token in source for token in ("乳沟", "低胸")):
+            translated = re.sub(r"\blow-breast\b", "low-cut", translated, flags=re.I)
+            translated = re.sub(r"\bshowing her breasts\b", "showing cleavage", translated, flags=re.I)
+            if not re.search(r"\bcleavage\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " Showing cleavage."
+        # Ahegao / climax expression blackspeech.
+        if any(token in source for token in ("阿嘿颜", "啊嘿颜")):
+            translated = re.sub(r"\bshowed a face\b|\ba face\b", "an ahegao expression", translated, flags=re.I)
+            if not re.search(r"\bahegao\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " Ahegao expression, tongue out, rolling eyes."
+        if "眼睛上翻" in source:
+            translated = re.sub(r"\ban eye out\b|\beye out\b", "rolling eyes", translated, flags=re.I)
+        # Couple phrasing for 一对男女 style inputs.
+        if any(token in source for token in ("一对男女", "一男一女", "一女一男")):
+            if not re.search(r"\b(?:man and a woman|woman and a man|couple|1boy|a boy)\b", translated, flags=re.I):
+                translated = re.sub(r"\bA couple\b", "A man and a woman", translated, count=1, flags=re.I)
+                if not re.search(r"\b(?:man and a woman|couple)\b", translated, flags=re.I):
+                    translated = translated.rstrip(". ") + " A man and a woman."
+        if "男上位" in source and not re.search(r"\bmissionary\b", translated, flags=re.I):
+            translated = re.sub(r"\ba man in top\b|\bman on top\b", "missionary position", translated, flags=re.I)
+            if not re.search(r"\bmissionary\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " Missionary position."
+        if any(token in source for token in ("女上位", "骑乘位")) and not re.search(r"\bcowgirl\b", translated, flags=re.I):
+            translated = translated.rstrip(". ") + " Cowgirl position."
+        if any(token in source for token in ("后入", "后入式")) and not re.search(r"\bdoggy\b", translated, flags=re.I):
+            translated = translated.rstrip(". ") + " Doggy style."
+        if any(token in source for token in ("巨乳", "丰满胸部", "大胸部")) and not re.search(
+            r"\b(?:large|big|huge) breasts\b", translated, flags=re.I
+        ):
+            translated = translated.rstrip(". ") + " Large breasts."
+        if any(token in source for token in ("贫乳", "小胸部")) and not re.search(r"\bsmall breasts\b", translated, flags=re.I):
+            translated = translated.rstrip(". ") + " Small breasts."
+        if any(token in source for token in ("张开双腿", "张腿", "双腿张开", "M字开腿")) and not re.search(
+            r"\bspread legs\b", translated, flags=re.I
+        ):
+            translated = translated.rstrip(". ") + " Spread legs."
+        if "跪着" in source and not re.search(r"\bkneel", translated, flags=re.I):
+            translated = re.sub(r"\bon her knees\b", "kneeling", translated, flags=re.I)
+            if not re.search(r"\bkneel", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " Kneeling."
+        # 火车便当 is sex-position slang; Marian often emits "train lunch" / bento.
+        if "火车便当" in source:
+            translated = re.sub(r"\btrain lunches?\b", "full nelson", translated, flags=re.I)
+            translated = re.sub(r"\blunch boxes?\b", "full nelson", translated, flags=re.I)
+            translated = re.sub(r"\bbento\b", "", translated, flags=re.I)
+            translated = re.sub(r"\btrain interior\b", "", translated, flags=re.I)
+            translated = re.sub(r"\bcrowd\b", "", translated, flags=re.I)
+            translated = re.sub(r"\s{2,}", " ", translated).strip(" ,.")
+            if not re.search(r"\bfull nelson\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " Full nelson."
+        # Cold / slang positions that Marian often fails to map.
+        slang_positions = (
+            (("反骑乘", "反向女上位", "背向女上位"), r"\breverse cowgirl\b", "Reverse cowgirl."),
+            (("架腿位", "打桩位", "压腿位"), r"\bmating press\b", "Mating press."),
+            (("火车便当", "全尼尔森"), r"\bfull nelson\b", "Full nelson."),
+            (("俯卧位", "趴着后入"), r"\bprone bone\b", "Prone bone."),
+            (("六九式", "六九"), r"\b(?:69|sixty-?nine)\b", "69 position."),
+            (("坐脸", "颜面骑乘", "骑脸"), r"\bfacesitting\b|\bface sitting\b", "Facesitting."),
+            (("肛交", "后庭"), r"\banal\b", "Anal."),
+            (("微型比基尼", "极小比基尼", "线比基尼"), r"\bmicro bikini\b", "Wearing a micro bikini."),
+            (("乳胶衣", "胶衣"), r"\blatex\b", "Wearing latex."),
+            (("处男杀手毛衣", "露背毛衣"), r"\bvirgin killer sweater\b", "Wearing a virgin killer sweater."),
+            (("开档", "开裆内裤", "开档连裤袜"), r"\bcrotchless\b", "Crotchless clothing."),
+            (("巫女服", "巫女装", "巫女"), r"\bmiko\b", "Wearing a miko outfit."),
+            (("布鲁马", "体操服短裤"), r"\bburuma\b", "Wearing buruma."),
+            (("飞机场", "平板"), r"\bflat chest\b", "Flat chest."),
+            (("欧派", "大欧派"), r"\b(?:large|huge|big) breasts\b", "Large breasts."),
+            (("晒痕", "泳装晒痕"), r"\btanlines\b", "Tanlines."),
+            (("野战", "公开做爱"), r"\bpublic (?:sex|indecency)\b", "Public sex."),
+            (("只穿围裙", "裸体围裙"), r"\bnaked apron\b", "Naked apron."),
+            (("内裤拨到一边", "内裤拉开"), r"\bpanties aside\b", "Panties aside."),
+            (("肩带滑落", "吊带滑落", "一边掉肩"), r"\bstrap slip\b", "Strap slip."),
+            (("衬衫半解", "扣子解开", "领口拉开"), r"\bunbuttoned\b|\bclothes pull\b", "Unbuttoned / open shirt."),
+            (("口水丝", "津液拉丝", "唾液拉丝"), r"\bsaliva\b", "Saliva trail."),
+            (("含手指", "吮手指"), r"\bfinger to mouth\b|\bfinger in (?:her )?mouth\b", "Finger to mouth."),
+            (("从身后环抱", "背后抱住"), r"\bhug from behind\b", "Hug from behind."),
+            (("膝枕",), r"\blap pillow\b", "Lap pillow."),
+            (("绳艺", "龟甲缚"), r"\bshibari\b", "Shibari."),
+            (("自拍",), r"\bselfie\b", "Selfie."),
+            (("OL", "职业女性", "女职员"), r"\boffice lady\b", "Office lady."),
+            (("正坐", "正座"), r"\bseiza\b", "Seiza."),
+            (("泪痣",), r"\bmole under eye\b", "Mole under eye."),
+            (("虎牙",), r"\bfangs?\b", "Fangs."),
+        )
+        for triggers, pattern, phrase in slang_positions:
+            if any(token in source for token in triggers) and not re.search(pattern, translated, flags=re.I):
+                translated = translated.rstrip(". ") + f" {phrase}"
         return translated
 
     @staticmethod
@@ -217,9 +383,11 @@ class TranslationService:
     @staticmethod
     def _sanitize(text: str) -> str:
         text = text.replace("♪", "").replace("♫", "").replace("�", "")
+        # Keep translated_en English-only; leftover CJK is recovered via concepts/tags.
+        text = re.sub(r"[\u4e00-\u9fff]+", " ", text)
         text = re.sub(r"\s+", " ", text)
         text = re.sub(r"\s+([,.;!?])", r"\1", text)
-        return text.strip()
+        return text.strip(" ,.;")
 
     def en_to_zh(self, text: str) -> str:
         if not text.strip():

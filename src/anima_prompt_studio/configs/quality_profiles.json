@@ -1,7 +1,366 @@
 [
-  {"id":"draft","display_name":"草稿","base_quality_tags":["safe"]},
-  {"id":"standard","display_name":"标准","base_quality_tags":["masterpiece","best quality","safe"]},
-  {"id":"portrait_detail","display_name":"精致人物","base_quality_tags":["masterpiece","best quality","safe"],"rendering_style_tags":["anime illustration"],"detail_tags":["delicate details","detailed face","detailed eyes","detailed hair"]},
-  {"id":"ornate_illustration","display_name":"华丽插画","base_quality_tags":["masterpiece","best quality","safe"],"rendering_style_tags":["anime illustration","vivid colors"],"detail_tags":["beautiful lighting","delicate details"]},
-  {"id":"atmospheric","display_name":"氛围叙事","base_quality_tags":["masterpiece","best quality","safe"],"rendering_style_tags":["anime illustration"],"atmosphere_tags":["atmospheric lighting","moody atmosphere"]}
+  {
+    "id": "draft",
+    "display_name": "草稿",
+    "base_quality_tags": [
+      "safe"
+    ]
+  },
+  {
+    "id": "standard",
+    "display_name": "标准",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ]
+  },
+  {
+    "id": "portrait_detail",
+    "display_name": "精致人物",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "detail_tags": [
+      "delicate details",
+      "detailed face",
+      "detailed eyes",
+      "detailed hair"
+    ]
+  },
+  {
+    "id": "ornate_illustration",
+    "display_name": "华丽插画",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration",
+      "vivid colors"
+    ],
+    "detail_tags": [
+      "beautiful lighting",
+      "delicate details"
+    ]
+  },
+  {
+    "id": "atmospheric",
+    "display_name": "氛围叙事",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "atmosphere_tags": [
+      "atmospheric lighting",
+      "moody atmosphere"
+    ]
+  },
+  {
+    "id": "soft_sensual",
+    "display_name": "柔感氛围",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration",
+      "soft focus"
+    ],
+    "detail_tags": [
+      "detailed skin",
+      "soft lighting"
+    ],
+    "atmosphere_tags": [
+      "romantic atmosphere",
+      "warm lighting"
+    ]
+  },
+  {
+    "id": "body_detail",
+    "display_name": "身体细节",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "detail_tags": [
+      "detailed skin",
+      "shiny skin",
+      "detailed breasts",
+      "detailed navel",
+      "detailed legs",
+      "detailed fingers"
+    ]
+  },
+  {
+    "id": "glossy_wet",
+    "display_name": "水光汗湿",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "detail_tags": [
+      "wet skin",
+      "shiny skin",
+      "sweat",
+      "glistening"
+    ],
+    "atmosphere_tags": [
+      "dramatic lighting"
+    ]
+  },
+  {
+    "id": "night_neon",
+    "display_name": "夜景霓虹",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration",
+      "vivid colors"
+    ],
+    "atmosphere_tags": [
+      "neon lights",
+      "night",
+      "cyberpunk atmosphere",
+      "rim lighting"
+    ]
+  },
+  {
+    "id": "dramatic_light",
+    "display_name": "戏剧光影",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "detail_tags": [
+      "high contrast",
+      "volumetric lighting"
+    ],
+    "atmosphere_tags": [
+      "dramatic lighting",
+      "cinematic lighting",
+      "god rays"
+    ]
+  },
+  {
+    "id": "cinematic",
+    "display_name": "电影质感",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "cinematic",
+      "anime illustration"
+    ],
+    "detail_tags": [
+      "film grain",
+      "depth of field"
+    ],
+    "atmosphere_tags": [
+      "cinematic lighting",
+      "atmospheric perspective"
+    ]
+  },
+  {
+    "id": "sharp_focus",
+    "display_name": "锐利清晰",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "detail_tags": [
+      "sharp focus",
+      "highly detailed",
+      "crisp lines",
+      "clean lineart"
+    ]
+  },
+  {
+    "id": "painterly",
+    "display_name": "厚涂绘画",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "painterly",
+      "illustration"
+    ],
+    "detail_tags": [
+      "brush strokes",
+      "textured skin",
+      "rich colors"
+    ],
+    "atmosphere_tags": [
+      "artistic lighting"
+    ]
+  },
+  {
+    "id": "flat_color",
+    "display_name": "赛璐璐平涂",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "cel shading",
+      "anime coloring",
+      "flat color"
+    ],
+    "detail_tags": [
+      "clean lineart",
+      "vibrant colors"
+    ]
+  },
+  {
+    "id": "dark_moody",
+    "display_name": "暗黑情绪",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "atmosphere_tags": [
+      "dark atmosphere",
+      "moody lighting",
+      "low key lighting",
+      "shadows"
+    ]
+  },
+  {
+    "id": "sunrise_warm",
+    "display_name": "暖金晨光",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "detail_tags": [
+      "golden hour",
+      "warm highlights"
+    ],
+    "atmosphere_tags": [
+      "warm lighting",
+      "soft morning light",
+      "lens flare"
+    ]
+  },
+  {
+    "id": "lingerie_focus",
+    "display_name": "服饰质感",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "detail_tags": [
+      "detailed clothes",
+      "fabric folds",
+      "lace details",
+      "sheer fabric",
+      "clothing texture"
+    ]
+  },
+  {
+    "id": "action_dynamic",
+    "display_name": "动态冲击",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration",
+      "dynamic angle"
+    ],
+    "detail_tags": [
+      "motion lines",
+      "speed lines",
+      "dynamic pose"
+    ],
+    "composition_tags": [
+      "action shot"
+    ]
+  },
+  {
+    "id": "intimate_close",
+    "display_name": "亲密近景",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "detail_tags": [
+      "detailed face",
+      "detailed eyes",
+      "detailed skin",
+      "shallow depth of field"
+    ],
+    "atmosphere_tags": [
+      "intimate atmosphere",
+      "soft lighting"
+    ]
+  },
+  {
+    "id": "uncensored_detail",
+    "display_name": "无修正细节",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "detail_tags": [
+      "uncensored",
+      "detailed skin",
+      "anatomical detail"
+    ]
+  }
 ]

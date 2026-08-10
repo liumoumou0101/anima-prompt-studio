@@ -23,10 +23,32 @@ class TagMatcher:
 
     @staticmethod
     def _contains_words(text: str, phrase: str) -> bool:
-        """Match compositional adjective tags such as 'short black hair' -> 'short hair'."""
-        text_words = set(re.findall(r"[a-z0-9]+", text.lower()))
-        phrase_words = set(re.findall(r"[a-z0-9]+", phrase.lower()))
-        return bool(phrase_words) and phrase_words.issubset(text_words)
+        """Match nearby compositional phrases such as 'short black hair' -> 'short hair'.
+
+        Words must appear in order within a small window so unrelated tokens
+        (e.g. 'short crop top' + 'pink hair') do not falsely yield 'short hair'.
+        """
+        phrase_words = re.findall(r"[a-z0-9]+", phrase.lower())
+        if not phrase_words:
+            return False
+        text_words = re.findall(r"[a-z0-9]+", text.lower())
+        if len(phrase_words) == 1:
+            return phrase_words[0] in text_words
+        # Exact adjacent multi-word span.
+        n = len(phrase_words)
+        for index in range(len(text_words) - n + 1):
+            if text_words[index:index + n] == phrase_words:
+                return True
+        # Allow up to one intervening adjective for two-word tags (short black hair).
+        if n == 2:
+            first, second = phrase_words
+            for index, token in enumerate(text_words):
+                if token != first:
+                    continue
+                window = text_words[index + 1:index + 4]
+                if second in window:
+                    return True
+        return False
 
     @staticmethod
     def _negated_english(text: str, phrase: str) -> bool:
@@ -50,11 +72,105 @@ class TagMatcher:
             start = text.find(phrase, start + 1)
         return False
 
+    @classmethod
+    def _context_allowed(
+        cls,
+        tag: str,
+        english: str,
+        chinese: str,
+        context: CompositionContext | None,
+        *,
+        source_is_external: bool,
+        name: str | None = None,
+    ) -> bool:
+        """Shared false-positive guards for builtin and external tags."""
+        lower = english.lower()
+        name = (name or tag).replace("_", " ")
+        if tag == "camera":
+            chinese_gaze = any(x in chinese for x in ("看镜头", "看向镜头", "俯视镜头", "低头看镜头"))
+            english_gaze = bool(re.search(r"\b(?:looks?|looking)\s+(?:at|toward|towards)\s+(?:the )?camera\b", lower))
+            explicit_object = any(x in chinese for x in ("相机", "摄像机", "手持相机", "拿着相机", "单反")) or bool(
+                re.search(r"\b(?:holding|holds|carrying|carries|using|uses)\s+(?:a |the )?camera\b", lower)
+            )
+            if (chinese_gaze or english_gaze) and not explicit_object:
+                return False
+        if tag in {"painting (object)", "painting (action)", "painting"} and (
+            "画外" in chinese or re.search(r"\blooking (?:away|outside)\b", lower)
+        ) and not any(x in chinese for x in ("油画", "绘画", "作画", "画作", "在画画", "画笔")):
+            return False
+        if not source_is_external:
+            return True
+        # Remaining checks are external-DB specific.
+        return cls._external_allowed_body(name, tag, english, chinese, context, lower)
+
     @staticmethod
     def _external_allowed(entry: dict, english: str, chinese: str, context: CompositionContext | None) -> bool:
         name, tag = entry["name"].replace("_", " "), entry["output_name"]
         lower = english.lower()
-        if tag in {"no", "feet", "cast"}:
+        if not TagMatcher._context_allowed(tag, english, chinese, context, source_is_external=True, name=name):
+            return False
+        return True
+
+    @staticmethod
+    def _external_allowed_body(
+        name: str, tag: str, english: str, chinese: str, context: CompositionContext | None, lower: str,
+    ) -> bool:
+        # Function words and common MT debris that exist as rare Danbooru tags.
+        if tag in {
+            "no", "feet", "cast", "can", "folding", "will", "may", "must", "should",
+            "could", "would", "has", "have", "had", "does", "did", "been", "being",
+            "cuts", "outline", "through clothes", "and", "or", "with", "for", "from",
+            "into", "over", "under", "about", "after", "before", "between", "during",
+            "while", "where", "when", "what", "who", "which", "that", "this", "these",
+            "those", "there", "here", "then", "than", "too", "very", "just", "also",
+            "only", "even", "still", "already", "again", "once", "more", "most",
+            "some", "any", "all", "each", "every", "other", "another", "such",
+            "own", "same", "different", "new", "old", "good", "bad", "great",
+            "little", "few", "many", "much", "lot", "bit", "kind", "type", "sort",
+            "thing", "things", "stuff", "way", "time", "times", "day", "days",
+            "get", "got", "gets", "getting", "make", "makes", "made", "making",
+            "take", "takes", "took", "taking", "come", "comes", "came", "coming",
+            "go", "goes", "went", "going", "see", "sees", "saw", "seeing",
+            "look", "looks", "looking",  # bare verb without "at viewer" etc. is noise
+            "use", "uses", "used", "using", "try", "tries", "tried", "trying",
+            "let", "lets", "put", "puts", "keep", "keeps", "kept", "keeping",
+            "seem", "seems", "seemed", "become", "becomes", "became",
+            "start", "starts", "started", "begin", "begins", "began",
+            "end", "ends", "ended", "stop", "stops", "stopped",
+            "show", "shows", "showed", "shown", "showing",
+            "give", "gives", "gave", "given", "giving",
+            "find", "finds", "found", "finding",
+            "want", "wants", "wanted", "need", "needs", "needed",
+            "like", "likes", "liked", "love", "loves", "loved",
+            "know", "knows", "knew", "known", "think", "thinks", "thought",
+            "feel", "feels", "felt", "feeling",
+            "able", "unable", "possible", "impossible",
+            "yes", "yeah", "ok", "okay", "oh", "ah", "um", "uh",
+            "re", "ve", "ll", "don", "doesn", "didn", "isn", "aren", "wasn", "weren",
+            "won", "wouldn", "couldn", "shouldn", "haven", "hasn", "hadn",
+            "in", "on", "at", "to", "of", "by", "as", "if", "so", "up", "out", "off",
+            "down", "away", "back",  # bare "back" handled separately; keep list explicit
+            "front", "side", "top", "bottom", "left", "right", "middle", "center",
+            "high", "low", "big", "small", "large", "tiny", "huge",
+            "open", "close", "closed", "empty", "full",
+            "one", "two", "three", "four", "five", "first", "second", "third",
+            "girl", "boy", "man", "woman", "person", "people", "character",
+            "she", "he", "her", "his", "him", "they", "them", "their", "it", "its",
+            "i", "me", "my", "we", "us", "our", "you", "your",
+        }:
+            return False
+        # Single-character / ultra-short debris that occasionally exists as tags.
+        if len(tag.replace(" ", "")) <= 2 and tag not in {"1girl", "1boy", "2girls", "3girls", "2boys", "3boys", "abs", "ai"}:
+            if not re.search(r"\d", tag):
+                return False
+        # "low-cut dress" should not yield the standalone "cut"/"cuts" tag.
+        if tag in {"cut", "cuts"} and re.search(r"\blow-?cut\b", lower):
+            return False
+        # "under covers" is often a false positive from "on bed" sex/bedroom scenes.
+        if tag == "under covers" and not re.search(r"\bunder (?:the )?covers\b", lower) and "被子" not in chinese and "被窝" not in chinese:
+            return False
+        # Couple sex scenes are not "male focus" unless explicitly requested.
+        if tag == "male focus" and re.search(r"\b(?:sex|couple|hetero|fellatio|missionary)\b", lower):
             return False
         if tag == "skinned" and not any(x in chinese for x in ("皮肤", "肤色", "红皮", "蓝皮", "黑皮")):
             return False
@@ -62,14 +178,10 @@ class TagMatcher:
             return False
         if tag == "photo (object)" and ((context and context.composition_meta_spans) or "画外" in chinese) and not any(x in chinese for x in ("照片", "相片", "相纸")):
             return False
-        if tag == "camera":
-            chinese_gaze = any(x in chinese for x in ("看镜头", "看向镜头", "俯视镜头", "低头看镜头"))
-            english_gaze = bool(re.search(r"\b(?:looks?|looking)\s+(?:at|toward|towards)\s+(?:the )?camera\b", lower))
-            explicit_object = any(x in chinese for x in ("相机", "摄像机", "手持相机", "拿着相机")) or bool(
-                re.search(r"\b(?:holding|holds|carrying|carries|using|uses)\s+(?:a |the )?camera\b", lower)
-            )
-            if (chinese_gaze or english_gaze) and not explicit_object:
-                return False
+        if tag == "male focus" and any(x in chinese for x in ("女孩", "少女", "女")) and not any(
+            x in chinese for x in ("男性为主", "男主视角", "以男性为主")
+        ):
+            return False
         if name == "side" and re.search(r"\b(?:left|right) side of (?:the )?(?:picture|image|frame)\b", lower):
             return False
         if name == "back" and ((context and context.motion_relation_spans) or re.search(r"\bbehind (?:her|his|their)(?: own)? back\b", lower)):
@@ -101,6 +213,9 @@ class TagMatcher:
             if zh_match and self._negated_chinese(chinese, zh_match):
                 zh_match = None
             if exact or word_match or zh_match:
+                # Builtin tags can still be context-false (e.g. "camera" from "looking at the camera").
+                if not self._context_allowed(tag, english, chinese, context, source_is_external=False):
+                    continue
                 result.append(MatchedTag(
                     tag=tag, category=entry.get("category", "general"),
                     source_type="direct" if exact else "synonym", source_text=exact or word_match or zh_match or "",

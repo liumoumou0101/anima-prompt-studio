@@ -1,47 +1,6094 @@
 [
-  {"tag":"1girl","category":"count","zh":["一个女孩","一名女孩","单人女孩","女孩"],"en":["one girl","a girl"]},
-  {"tag":"1boy","category":"count","zh":["一个男孩","一名男孩","男孩"],"en":["one boy","a boy"]},
-  {"tag":"2girls","category":"count","zh":["两个女孩","两名女孩"],"en":["two girls"]},
-  {"tag":"3girls","category":"count","zh":["三个女孩","三名女孩"],"en":["three girls"]},
-  {"tag":"white hair","category":"hair","zh":["白发","白色头发"],"en":["white hair"]},
-  {"tag":"black hair","category":"hair","zh":["黑发","黑色头发","黑色长发","黑色短发"],"en":["black hair","black-haired"]},
-  {"tag":"blonde hair","category":"hair","zh":["金发","金色头发"],"en":["blonde hair","golden hair"]},
-  {"tag":"very long hair","category":"hair_length","zh":["超长发","非常长的头发"],"en":["very long hair"]},
-  {"tag":"long hair","category":"hair_length","zh":["长发","长头发"],"en":["long hair"]},
-  {"tag":"short hair","category":"hair_length","zh":["短发","短头发"],"en":["short hair"]},
-  {"tag":"blue eyes","category":"eyes","zh":["蓝眼睛","蓝瞳"],"en":["blue eyes"]},
-  {"tag":"golden eyes","category":"eyes","zh":["金眼睛","金瞳"],"en":["golden eyes","gold eyes"]},
-  {"tag":"red eyes","category":"eyes","zh":["红眼睛","红瞳"],"en":["red eyes"]},
-  {"tag":"smile","category":"expression","zh":["微笑","笑着"],"en":["smile","smiling"]},
-  {"tag":"crouching","category":"pose","zh":["蹲","蹲着","蹲下","半蹲"],"en":["crouching","crouches"]},
-  {"tag":"floating","category":"pose","zh":["悬浮","漂浮","浮在空中"],"en":["floating","floating in midair"]},
-  {"tag":"leaning forward","category":"pose","zh":["身体前倾","微微前倾"],"en":["leaning forward","leans forward"]},
-  {"tag":"white wings","category":"general","zh":["白色羽翼","白色翅膀","白翅"],"en":["white wings"]},
-  {"tag":"dress","category":"clothing","zh":["连衣裙"],"en":["dress"]},
-  {"tag":"hat","category":"clothing","zh":["帽子"],"en":["hat","wearing a hat"]},
-  {"tag":"looking at viewer","category":"gaze","zh":["看镜头","看向镜头"],"en":["looking at viewer","looks at the camera"]},
-  {"tag":"looking away","category":"gaze","zh":["不看镜头","看向画外"],"en":["looking away","looks away","looks away from the viewer","not looking at viewer","doesn't look at the camera","does not look at the camera"]},
-  {"tag":"sitting","category":"pose","zh":["坐着","坐在"],"en":["sitting","sits"]},
-  {"tag":"standing","category":"pose","zh":["站着","站立"],"en":["standing","stands"]},
-  {"tag":"lying","category":"pose","zh":["躺着","躺下"],"en":["lying","lies down"]},
-  {"tag":"legs dangling","category":"pose","zh":["双腿垂下","脚不着地"],"en":["legs dangling","both legs dangling"]},
-  {"tag":"hand in hair","category":"pose","zh":["撩头发","摸头发","手放在头发上","整理头发"],"en":["touching hair","touches her hair","hand in hair"]},
-  {"tag":"hair tuck","category":"pose","zh":["把头发拨到耳后","拨到耳后","将发丝别到耳后","别到耳后"],"en":["hair tuck","tucking hair behind","tucks a strand of hair behind"]},
-  {"tag":"looking back","category":"gaze","zh":["回头看"],"en":["looking back","looks back"]},
-  {"tag":"open window","category":"scene","zh":["打开的窗户","开着的窗户","窗外"],"en":["open window"]},
-  {"tag":"indoors","category":"scene","zh":["室内","房间里"],"en":["indoors","inside a room"]},
-  {"tag":"outdoors","category":"scene","zh":["室外","户外"],"en":["outdoors"]},
-  {"tag":"forest","category":"scene","zh":["森林"],"en":["forest","in a forest"]},
-  {"tag":"rain","category":"weather","zh":["雨天","下雨","雨夜"],"en":["rain","rainy"]},
-  {"tag":"night","category":"time","zh":["夜晚","夜里","雨夜"],"en":["night","nighttime"]},
-  {"tag":"daylight","category":"time","zh":["白天","日光下"],"en":["daylight","daytime"]},
-  {"tag":"sunset","category":"time","zh":["黄昏","夕阳"],"en":["sunset","dusk"]},
-  {"tag":"moonlight","category":"lighting","zh":["月光"],"en":["moonlight"]},
-  {"tag":"full body","category":"shot","zh":["全身"],"en":["full body"]},
-  {"tag":"upper body","category":"shot","zh":["半身","上半身"],"en":["upper body"]},
-  {"tag":"portrait","category":"shot","zh":["头像","肖像"],"en":["portrait"]},
-  {"tag":"from below","category":"camera","zh":["低机位","仰视"],"en":["from below","low angle"]},
-  {"tag":"from above","category":"camera","zh":["高机位","俯视"],"en":["from above","high angle"]},
-  {"tag":"side view","category":"angle","zh":["侧面","侧视"],"en":["side view"]},
-  {"tag":"back view","category":"angle","zh":["背面","背影"],"en":["back view"]}
+  {
+    "tag": "1girl",
+    "category": "count",
+    "zh": [
+      "一个女孩",
+      "一名女孩",
+      "单人女孩",
+      "女孩"
+    ],
+    "en": [
+      "one girl",
+      "a girl"
+    ]
+  },
+  {
+    "tag": "1boy",
+    "category": "count",
+    "zh": [
+      "一个男孩",
+      "一名男孩",
+      "男孩"
+    ],
+    "en": [
+      "one boy",
+      "a boy"
+    ]
+  },
+  {
+    "tag": "2girls",
+    "category": "count",
+    "zh": [
+      "两个女孩",
+      "两名女孩"
+    ],
+    "en": [
+      "two girls"
+    ]
+  },
+  {
+    "tag": "3girls",
+    "category": "count",
+    "zh": [
+      "三个女孩",
+      "三名女孩"
+    ],
+    "en": [
+      "three girls"
+    ]
+  },
+  {
+    "tag": "white hair",
+    "category": "hair",
+    "zh": [
+      "白发",
+      "白色头发"
+    ],
+    "en": [
+      "white hair"
+    ]
+  },
+  {
+    "tag": "black hair",
+    "category": "hair",
+    "zh": [
+      "黑发",
+      "黑色头发",
+      "黑色长发",
+      "黑色短发"
+    ],
+    "en": [
+      "black hair",
+      "black-haired"
+    ]
+  },
+  {
+    "tag": "blonde hair",
+    "category": "hair",
+    "zh": [
+      "金发",
+      "金色头发"
+    ],
+    "en": [
+      "blonde hair",
+      "golden hair"
+    ]
+  },
+  {
+    "tag": "very long hair",
+    "category": "hair_length",
+    "zh": [
+      "超长发",
+      "非常长的头发"
+    ],
+    "en": [
+      "very long hair"
+    ]
+  },
+  {
+    "tag": "long hair",
+    "category": "hair_length",
+    "zh": [
+      "长发",
+      "长头发"
+    ],
+    "en": [
+      "long hair"
+    ]
+  },
+  {
+    "tag": "short hair",
+    "category": "hair_length",
+    "zh": [
+      "短发",
+      "短头发"
+    ],
+    "en": [
+      "short hair"
+    ]
+  },
+  {
+    "tag": "blue eyes",
+    "category": "eyes",
+    "zh": [
+      "蓝眼睛",
+      "蓝瞳"
+    ],
+    "en": [
+      "blue eyes"
+    ]
+  },
+  {
+    "tag": "golden eyes",
+    "category": "eyes",
+    "zh": [
+      "金眼睛",
+      "金瞳"
+    ],
+    "en": [
+      "golden eyes",
+      "gold eyes"
+    ]
+  },
+  {
+    "tag": "red eyes",
+    "category": "eyes",
+    "zh": [
+      "红眼睛",
+      "红瞳"
+    ],
+    "en": [
+      "red eyes"
+    ]
+  },
+  {
+    "tag": "smile",
+    "category": "expression",
+    "zh": [
+      "微笑",
+      "笑着"
+    ],
+    "en": [
+      "smile",
+      "smiling"
+    ]
+  },
+  {
+    "tag": "crouching",
+    "category": "pose",
+    "zh": [
+      "蹲",
+      "蹲着",
+      "蹲下",
+      "半蹲"
+    ],
+    "en": [
+      "crouching",
+      "crouches"
+    ]
+  },
+  {
+    "tag": "floating",
+    "category": "pose",
+    "zh": [
+      "悬浮",
+      "漂浮",
+      "浮在空中"
+    ],
+    "en": [
+      "floating",
+      "floating in midair"
+    ]
+  },
+  {
+    "tag": "leaning forward",
+    "category": "pose",
+    "zh": [
+      "身体前倾",
+      "微微前倾"
+    ],
+    "en": [
+      "leaning forward",
+      "leans forward"
+    ]
+  },
+  {
+    "tag": "white wings",
+    "category": "general",
+    "zh": [
+      "白色羽翼",
+      "白色翅膀",
+      "白翅"
+    ],
+    "en": [
+      "white wings"
+    ]
+  },
+  {
+    "tag": "dress",
+    "category": "clothing",
+    "zh": [
+      "连衣裙"
+    ],
+    "en": [
+      "dress"
+    ]
+  },
+  {
+    "tag": "hat",
+    "category": "clothing",
+    "zh": [
+      "帽子"
+    ],
+    "en": [
+      "hat",
+      "wearing a hat"
+    ]
+  },
+  {
+    "tag": "looking at viewer",
+    "category": "gaze",
+    "zh": [
+      "看镜头",
+      "看向镜头"
+    ],
+    "en": [
+      "looking at viewer",
+      "looks at the camera"
+    ]
+  },
+  {
+    "tag": "looking away",
+    "category": "gaze",
+    "zh": [
+      "不看镜头",
+      "看向画外"
+    ],
+    "en": [
+      "looking away",
+      "looks away",
+      "looks away from the viewer",
+      "not looking at viewer",
+      "doesn't look at the camera",
+      "does not look at the camera"
+    ]
+  },
+  {
+    "tag": "sitting",
+    "category": "pose",
+    "zh": [
+      "坐着",
+      "坐在"
+    ],
+    "en": [
+      "sitting",
+      "sits"
+    ]
+  },
+  {
+    "tag": "standing",
+    "category": "pose",
+    "zh": [
+      "站着",
+      "站立"
+    ],
+    "en": [
+      "standing",
+      "stands"
+    ]
+  },
+  {
+    "tag": "lying",
+    "category": "pose",
+    "zh": [
+      "躺着",
+      "躺下"
+    ],
+    "en": [
+      "lying",
+      "lies down"
+    ]
+  },
+  {
+    "tag": "legs dangling",
+    "category": "pose",
+    "zh": [
+      "双腿垂下",
+      "脚不着地"
+    ],
+    "en": [
+      "legs dangling",
+      "both legs dangling"
+    ]
+  },
+  {
+    "tag": "hand in hair",
+    "category": "pose",
+    "zh": [
+      "撩头发",
+      "摸头发",
+      "手放在头发上",
+      "整理头发"
+    ],
+    "en": [
+      "touching hair",
+      "touches her hair",
+      "hand in hair"
+    ]
+  },
+  {
+    "tag": "hair tuck",
+    "category": "pose",
+    "zh": [
+      "把头发拨到耳后",
+      "拨到耳后",
+      "将发丝别到耳后",
+      "别到耳后"
+    ],
+    "en": [
+      "hair tuck",
+      "tucking hair behind",
+      "tucks a strand of hair behind"
+    ]
+  },
+  {
+    "tag": "looking back",
+    "category": "gaze",
+    "zh": [
+      "回头看"
+    ],
+    "en": [
+      "looking back",
+      "looks back"
+    ]
+  },
+  {
+    "tag": "open window",
+    "category": "scene",
+    "zh": [
+      "打开的窗户",
+      "开着的窗户",
+      "窗外"
+    ],
+    "en": [
+      "open window"
+    ]
+  },
+  {
+    "tag": "indoors",
+    "category": "scene",
+    "zh": [
+      "室内",
+      "房间里"
+    ],
+    "en": [
+      "indoors"
+    ]
+  },
+  {
+    "tag": "outdoors",
+    "category": "scene",
+    "zh": [
+      "室外",
+      "户外"
+    ],
+    "en": [
+      "outdoors"
+    ]
+  },
+  {
+    "tag": "forest",
+    "category": "scene",
+    "zh": [
+      "森林"
+    ],
+    "en": [
+      "forest",
+      "in a forest"
+    ]
+  },
+  {
+    "tag": "rain",
+    "category": "weather",
+    "zh": [
+      "雨天",
+      "下雨",
+      "雨夜"
+    ],
+    "en": [
+      "rain",
+      "rainy"
+    ]
+  },
+  {
+    "tag": "night",
+    "category": "time",
+    "zh": [
+      "夜晚",
+      "夜里",
+      "雨夜"
+    ],
+    "en": [
+      "night",
+      "nighttime"
+    ]
+  },
+  {
+    "tag": "daylight",
+    "category": "time",
+    "zh": [
+      "白天",
+      "日光下"
+    ],
+    "en": [
+      "daylight",
+      "daytime"
+    ]
+  },
+  {
+    "tag": "sunset",
+    "category": "time",
+    "zh": [
+      "黄昏",
+      "夕阳"
+    ],
+    "en": [
+      "sunset",
+      "dusk"
+    ]
+  },
+  {
+    "tag": "moonlight",
+    "category": "lighting",
+    "zh": [
+      "月光"
+    ],
+    "en": [
+      "moonlight"
+    ]
+  },
+  {
+    "tag": "full body",
+    "category": "shot",
+    "zh": [
+      "全身"
+    ],
+    "en": [
+      "full body"
+    ]
+  },
+  {
+    "tag": "upper body",
+    "category": "shot",
+    "zh": [
+      "半身",
+      "上半身"
+    ],
+    "en": [
+      "upper body"
+    ]
+  },
+  {
+    "tag": "portrait",
+    "category": "shot",
+    "zh": [
+      "头像",
+      "肖像"
+    ],
+    "en": [
+      "portrait"
+    ]
+  },
+  {
+    "tag": "from below",
+    "category": "camera",
+    "zh": [
+      "低机位",
+      "仰视"
+    ],
+    "en": [
+      "from below",
+      "low angle"
+    ]
+  },
+  {
+    "tag": "from above",
+    "category": "camera",
+    "zh": [
+      "高机位",
+      "俯视"
+    ],
+    "en": [
+      "from above",
+      "high angle"
+    ]
+  },
+  {
+    "tag": "side view",
+    "category": "angle",
+    "zh": [
+      "侧面",
+      "侧视"
+    ],
+    "en": [
+      "side view"
+    ]
+  },
+  {
+    "tag": "back view",
+    "category": "angle",
+    "zh": [
+      "背面",
+      "背影"
+    ],
+    "en": [
+      "back view"
+    ]
+  },
+  {
+    "tag": "bikini",
+    "category": "clothing",
+    "zh": [
+      "比基尼"
+    ],
+    "en": [
+      "bikini"
+    ]
+  },
+  {
+    "tag": "lingerie",
+    "category": "clothing",
+    "zh": [
+      "内衣",
+      "黑色内衣",
+      "蕾丝内衣"
+    ],
+    "en": [
+      "lingerie",
+      "underwear"
+    ]
+  },
+  {
+    "tag": "panties",
+    "category": "clothing",
+    "zh": [
+      "内裤"
+    ],
+    "en": [
+      "panties"
+    ]
+  },
+  {
+    "tag": "thong",
+    "category": "clothing",
+    "zh": [
+      "丁字裤"
+    ],
+    "en": [
+      "thong"
+    ]
+  },
+  {
+    "tag": "thighhighs",
+    "category": "clothing",
+    "zh": [
+      "吊带袜",
+      "长筒袜",
+      "过膝袜",
+      "黑丝"
+    ],
+    "en": [
+      "thighhighs",
+      "thighhigh",
+      "stockings"
+    ]
+  },
+  {
+    "tag": "garter belt",
+    "category": "clothing",
+    "zh": [
+      "吊袜带"
+    ],
+    "en": [
+      "garter belt",
+      "garters"
+    ]
+  },
+  {
+    "tag": "cleavage",
+    "category": "clothing",
+    "zh": [
+      "乳沟",
+      "低胸"
+    ],
+    "en": [
+      "cleavage",
+      "low-cut"
+    ]
+  },
+  {
+    "tag": "crop top",
+    "category": "clothing",
+    "zh": [
+      "露脐",
+      "露脐装",
+      "露脐短上衣"
+    ],
+    "en": [
+      "crop top"
+    ]
+  },
+  {
+    "tag": "navel",
+    "category": "state",
+    "zh": [
+      "肚脐"
+    ],
+    "en": [
+      "navel"
+    ]
+  },
+  {
+    "tag": "short shorts",
+    "category": "clothing",
+    "zh": [
+      "热裤"
+    ],
+    "en": [
+      "short shorts",
+      "hot pants"
+    ]
+  },
+  {
+    "tag": "wet clothes",
+    "category": "clothing",
+    "zh": [
+      "湿衣服",
+      "湿衬衫",
+      "湿透的衬衫",
+      "湿透的白衬衫"
+    ],
+    "en": [
+      "wet clothes",
+      "wet shirt",
+      "wet white shirt"
+    ]
+  },
+  {
+    "tag": "see-through",
+    "category": "clothing",
+    "zh": [
+      "透视",
+      "透过衣服"
+    ],
+    "en": [
+      "see-through",
+      "see through",
+      "transparent"
+    ]
+  },
+  {
+    "tag": "nude",
+    "category": "state",
+    "zh": [
+      "裸体",
+      "全裸",
+      "一丝不挂"
+    ],
+    "en": [
+      "nude",
+      "naked",
+      "completely nude"
+    ]
+  },
+  {
+    "tag": "topless",
+    "category": "state",
+    "zh": [
+      "赤裸上身",
+      "裸上身",
+      "上身赤裸"
+    ],
+    "en": [
+      "topless",
+      "bare breasts"
+    ]
+  },
+  {
+    "tag": "nipples",
+    "category": "state",
+    "zh": [
+      "乳头",
+      "乳尖"
+    ],
+    "en": [
+      "nipples"
+    ]
+  },
+  {
+    "tag": "breasts",
+    "category": "state",
+    "zh": [
+      "胸部",
+      "乳房"
+    ],
+    "en": [
+      "breasts"
+    ]
+  },
+  {
+    "tag": "ass",
+    "category": "state",
+    "zh": [
+      "臀部",
+      "翘臀"
+    ],
+    "en": [
+      "ass",
+      "butt",
+      "hips"
+    ]
+  },
+  {
+    "tag": "ass focus",
+    "category": "pose",
+    "zh": [
+      "臀部特写"
+    ],
+    "en": [
+      "ass focus",
+      "hip focus"
+    ]
+  },
+  {
+    "tag": "from behind",
+    "category": "angle",
+    "zh": [
+      "从背后",
+      "从后面"
+    ],
+    "en": [
+      "from behind"
+    ]
+  },
+  {
+    "tag": "ahegao",
+    "category": "expression",
+    "zh": [
+      "阿嘿颜",
+      "啊嘿颜"
+    ],
+    "en": [
+      "ahegao"
+    ]
+  },
+  {
+    "tag": "orgasm",
+    "category": "expression",
+    "zh": [
+      "高潮",
+      "高潮中"
+    ],
+    "en": [
+      "orgasm",
+      "climax"
+    ]
+  },
+  {
+    "tag": "tongue out",
+    "category": "expression",
+    "zh": [
+      "舌头伸出",
+      "吐舌"
+    ],
+    "en": [
+      "tongue out"
+    ]
+  },
+  {
+    "tag": "rolling eyes",
+    "category": "expression",
+    "zh": [
+      "眼睛上翻",
+      "翻白眼"
+    ],
+    "en": [
+      "rolling eyes"
+    ]
+  },
+  {
+    "tag": "sex",
+    "category": "act",
+    "zh": [
+      "做爱",
+      "性交",
+      "性爱"
+    ],
+    "en": [
+      "sex",
+      "having sex",
+      "intercourse"
+    ]
+  },
+  {
+    "tag": "hetero",
+    "category": "act",
+    "zh": [
+      "一对男女",
+      "一男一女",
+      "男女"
+    ],
+    "en": [
+      "hetero",
+      "a man and a woman"
+    ]
+  },
+  {
+    "tag": "missionary",
+    "category": "act",
+    "zh": [
+      "男上位",
+      "传教士"
+    ],
+    "en": [
+      "missionary",
+      "missionary position"
+    ]
+  },
+  {
+    "tag": "fellatio",
+    "category": "act",
+    "zh": [
+      "口交"
+    ],
+    "en": [
+      "fellatio",
+      "blowjob",
+      "oral"
+    ]
+  },
+  {
+    "tag": "bound",
+    "category": "act",
+    "zh": [
+      "捆绑",
+      "被绳子捆绑",
+      "束缚"
+    ],
+    "en": [
+      "bound",
+      "tied"
+    ]
+  },
+  {
+    "tag": "bondage",
+    "category": "act",
+    "zh": [
+      "绳缚",
+      "束缚"
+    ],
+    "en": [
+      "bondage"
+    ]
+  },
+  {
+    "tag": "rope",
+    "category": "act",
+    "zh": [
+      "绳子",
+      "绳缚"
+    ],
+    "en": [
+      "rope"
+    ]
+  },
+  {
+    "tag": "blindfold",
+    "category": "act",
+    "zh": [
+      "蒙眼",
+      "蒙住眼睛",
+      "眼罩",
+      "眼睛被布蒙住"
+    ],
+    "en": [
+      "blindfold",
+      "blindfolded"
+    ]
+  },
+  {
+    "tag": "kneeling",
+    "category": "pose",
+    "zh": [
+      "跪着",
+      "跪下"
+    ],
+    "en": [
+      "kneeling",
+      "on her knees"
+    ]
+  },
+  {
+    "tag": "legs crossed",
+    "category": "pose",
+    "zh": [
+      "双腿交叠",
+      "跷二郎腿"
+    ],
+    "en": [
+      "legs crossed",
+      "crossing her legs",
+      "folding her legs"
+    ]
+  },
+  {
+    "tag": "bathroom",
+    "category": "scene",
+    "zh": [
+      "浴室",
+      "卫生间"
+    ],
+    "en": [
+      "bathroom"
+    ]
+  },
+  {
+    "tag": "beach",
+    "category": "scene",
+    "zh": [
+      "沙滩",
+      "海滩"
+    ],
+    "en": [
+      "beach"
+    ]
+  },
+  {
+    "tag": "on bed",
+    "category": "scene",
+    "zh": [
+      "在床上",
+      "床上"
+    ],
+    "en": [
+      "on bed",
+      "in bed"
+    ]
+  },
+  {
+    "tag": "school uniform",
+    "category": "clothing",
+    "zh": [
+      "校服",
+      "学生装"
+    ],
+    "en": [
+      "school uniform"
+    ]
+  },
+  {
+    "tag": "maid",
+    "category": "clothing",
+    "zh": [
+      "女仆装"
+    ],
+    "en": [
+      "maid",
+      "maid outfit"
+    ]
+  },
+  {
+    "tag": "kimono",
+    "category": "clothing",
+    "zh": [
+      "和服",
+      "浴衣"
+    ],
+    "en": [
+      "kimono"
+    ]
+  },
+  {
+    "tag": "china dress",
+    "category": "clothing",
+    "zh": [
+      "旗袍"
+    ],
+    "en": [
+      "china dress",
+      "cheongsam"
+    ]
+  },
+  {
+    "tag": "miniskirt",
+    "category": "clothing",
+    "zh": [
+      "短裙",
+      "迷你裙"
+    ],
+    "en": [
+      "miniskirt",
+      "mini skirt"
+    ]
+  },
+  {
+    "tag": "skirt",
+    "category": "clothing",
+    "zh": [
+      "裙子"
+    ],
+    "en": [
+      "skirt"
+    ]
+  },
+  {
+    "tag": "white shirt",
+    "category": "clothing",
+    "zh": [
+      "白衬衫"
+    ],
+    "en": [
+      "white shirt"
+    ]
+  },
+  {
+    "tag": "open shirt",
+    "category": "clothing",
+    "zh": [
+      "敞开的衬衫",
+      "衬衫敞开"
+    ],
+    "en": [
+      "open shirt"
+    ]
+  },
+  {
+    "tag": "bra",
+    "category": "clothing",
+    "zh": [
+      "胸罩",
+      "文胸"
+    ],
+    "en": [
+      "bra"
+    ]
+  },
+  {
+    "tag": "no bra",
+    "category": "clothing",
+    "zh": [
+      "无胸罩",
+      "不穿胸罩"
+    ],
+    "en": [
+      "no bra"
+    ]
+  },
+  {
+    "tag": "pantyhose",
+    "category": "clothing",
+    "zh": [
+      "连裤袜",
+      "裤袜",
+      "肉丝"
+    ],
+    "en": [
+      "pantyhose"
+    ]
+  },
+  {
+    "tag": "fishnets",
+    "category": "clothing",
+    "zh": [
+      "渔网袜"
+    ],
+    "en": [
+      "fishnets",
+      "fishnet"
+    ]
+  },
+  {
+    "tag": "high heels",
+    "category": "clothing",
+    "zh": [
+      "高跟鞋"
+    ],
+    "en": [
+      "high heels"
+    ]
+  },
+  {
+    "tag": "boots",
+    "category": "clothing",
+    "zh": [
+      "靴子"
+    ],
+    "en": [
+      "boots"
+    ]
+  },
+  {
+    "tag": "barefoot",
+    "category": "clothing",
+    "zh": [
+      "赤脚",
+      "光脚"
+    ],
+    "en": [
+      "barefoot"
+    ]
+  },
+  {
+    "tag": "gloves",
+    "category": "clothing",
+    "zh": [
+      "手套"
+    ],
+    "en": [
+      "gloves"
+    ]
+  },
+  {
+    "tag": "choker",
+    "category": "clothing",
+    "zh": [
+      "颈环"
+    ],
+    "en": [
+      "choker"
+    ]
+  },
+  {
+    "tag": "collar",
+    "category": "clothing",
+    "zh": [
+      "项圈"
+    ],
+    "en": [
+      "collar"
+    ]
+  },
+  {
+    "tag": "glasses",
+    "category": "clothing",
+    "zh": [
+      "眼镜"
+    ],
+    "en": [
+      "glasses"
+    ]
+  },
+  {
+    "tag": "cat ears",
+    "category": "clothing",
+    "zh": [
+      "猫耳"
+    ],
+    "en": [
+      "cat ears"
+    ]
+  },
+  {
+    "tag": "bunny ears",
+    "category": "clothing",
+    "zh": [
+      "兔耳"
+    ],
+    "en": [
+      "bunny ears"
+    ]
+  },
+  {
+    "tag": "tail",
+    "category": "clothing",
+    "zh": [
+      "尾巴"
+    ],
+    "en": [
+      "tail"
+    ]
+  },
+  {
+    "tag": "horns",
+    "category": "clothing",
+    "zh": [
+      "角",
+      "恶魔角"
+    ],
+    "en": [
+      "horns"
+    ]
+  },
+  {
+    "tag": "swimsuit",
+    "category": "clothing",
+    "zh": [
+      "泳装",
+      "泳衣"
+    ],
+    "en": [
+      "swimsuit"
+    ]
+  },
+  {
+    "tag": "school swimsuit",
+    "category": "clothing",
+    "zh": [
+      "死库水",
+      "学校泳装"
+    ],
+    "en": [
+      "school swimsuit"
+    ]
+  },
+  {
+    "tag": "playboy bunny",
+    "category": "clothing",
+    "zh": [
+      "兔女郎"
+    ],
+    "en": [
+      "playboy bunny",
+      "bunny girl"
+    ]
+  },
+  {
+    "tag": "towel",
+    "category": "clothing",
+    "zh": [
+      "浴巾",
+      "裹着浴巾"
+    ],
+    "en": [
+      "towel"
+    ]
+  },
+  {
+    "tag": "pajamas",
+    "category": "clothing",
+    "zh": [
+      "睡衣"
+    ],
+    "en": [
+      "pajamas"
+    ]
+  },
+  {
+    "tag": "nightgown",
+    "category": "clothing",
+    "zh": [
+      "睡裙"
+    ],
+    "en": [
+      "nightgown"
+    ]
+  },
+  {
+    "tag": "torn clothes",
+    "category": "clothing",
+    "zh": [
+      "撕裂的衣服",
+      "破衣"
+    ],
+    "en": [
+      "torn clothes"
+    ]
+  },
+  {
+    "tag": "sweat",
+    "category": "state",
+    "zh": [
+      "出汗"
+    ],
+    "en": [
+      "sweat"
+    ]
+  },
+  {
+    "tag": "large breasts",
+    "category": "state",
+    "zh": [
+      "巨乳",
+      "丰满胸部",
+      "大胸部"
+    ],
+    "en": [
+      "large breasts",
+      "big breasts"
+    ]
+  },
+  {
+    "tag": "small breasts",
+    "category": "state",
+    "zh": [
+      "贫乳",
+      "小胸部"
+    ],
+    "en": [
+      "small breasts"
+    ]
+  },
+  {
+    "tag": "medium breasts",
+    "category": "state",
+    "zh": [
+      "中等胸部"
+    ],
+    "en": [
+      "medium breasts"
+    ]
+  },
+  {
+    "tag": "sideboob",
+    "category": "state",
+    "zh": [
+      "侧乳"
+    ],
+    "en": [
+      "sideboob",
+      "side boob"
+    ]
+  },
+  {
+    "tag": "underboob",
+    "category": "state",
+    "zh": [
+      "下乳"
+    ],
+    "en": [
+      "underboob"
+    ]
+  },
+  {
+    "tag": "bottomless",
+    "category": "state",
+    "zh": [
+      "赤裸下身",
+      "下身赤裸"
+    ],
+    "en": [
+      "bottomless"
+    ]
+  },
+  {
+    "tag": "completely nude",
+    "category": "state",
+    "zh": [
+      "完全裸体",
+      "一丝不挂"
+    ],
+    "en": [
+      "completely nude"
+    ]
+  },
+  {
+    "tag": "covering breasts",
+    "category": "state",
+    "zh": [
+      "遮住胸部",
+      "双手遮胸"
+    ],
+    "en": [
+      "covering breasts"
+    ]
+  },
+  {
+    "tag": "covering crotch",
+    "category": "state",
+    "zh": [
+      "遮住私处",
+      "遮住下体"
+    ],
+    "en": [
+      "covering crotch"
+    ]
+  },
+  {
+    "tag": "collarbone",
+    "category": "state",
+    "zh": [
+      "锁骨"
+    ],
+    "en": [
+      "collarbone"
+    ]
+  },
+  {
+    "tag": "armpits",
+    "category": "state",
+    "zh": [
+      "腋下",
+      "腋窝"
+    ],
+    "en": [
+      "armpits"
+    ]
+  },
+  {
+    "tag": "long legs",
+    "category": "state",
+    "zh": [
+      "长腿",
+      "美腿"
+    ],
+    "en": [
+      "long legs"
+    ]
+  },
+  {
+    "tag": "thighs",
+    "category": "state",
+    "zh": [
+      "大腿"
+    ],
+    "en": [
+      "thighs"
+    ]
+  },
+  {
+    "tag": "cowgirl position",
+    "category": "act",
+    "zh": [
+      "女上位",
+      "骑乘位"
+    ],
+    "en": [
+      "cowgirl position",
+      "cowgirl"
+    ]
+  },
+  {
+    "tag": "doggy style",
+    "category": "act",
+    "zh": [
+      "后入",
+      "后入式"
+    ],
+    "en": [
+      "doggy style",
+      "doggystyle"
+    ]
+  },
+  {
+    "tag": "spread legs",
+    "category": "act",
+    "zh": [
+      "张开双腿",
+      "张腿",
+      "双腿张开"
+    ],
+    "en": [
+      "spread legs"
+    ]
+  },
+  {
+    "tag": "open mouth",
+    "category": "expression",
+    "zh": [
+      "张开嘴",
+      "嘴巴微张",
+      "张嘴"
+    ],
+    "en": [
+      "open mouth"
+    ]
+  },
+  {
+    "tag": "blush",
+    "category": "expression",
+    "zh": [
+      "脸红",
+      "红着脸"
+    ],
+    "en": [
+      "blush",
+      "blushing"
+    ]
+  },
+  {
+    "tag": "tears",
+    "category": "expression",
+    "zh": [
+      "眼泪",
+      "含泪"
+    ],
+    "en": [
+      "tears"
+    ]
+  },
+  {
+    "tag": "crying",
+    "category": "expression",
+    "zh": [
+      "哭泣",
+      "流泪"
+    ],
+    "en": [
+      "crying"
+    ]
+  },
+  {
+    "tag": "angry",
+    "category": "expression",
+    "zh": [
+      "生气",
+      "愤怒"
+    ],
+    "en": [
+      "angry"
+    ]
+  },
+  {
+    "tag": "sad",
+    "category": "expression",
+    "zh": [
+      "悲伤",
+      "难过"
+    ],
+    "en": [
+      "sad"
+    ]
+  },
+  {
+    "tag": "happy",
+    "category": "expression",
+    "zh": [
+      "开心",
+      "高兴"
+    ],
+    "en": [
+      "happy"
+    ]
+  },
+  {
+    "tag": "kiss",
+    "category": "act",
+    "zh": [
+      "接吻",
+      "亲吻"
+    ],
+    "en": [
+      "kiss",
+      "kissing"
+    ]
+  },
+  {
+    "tag": "hug",
+    "category": "act",
+    "zh": [
+      "拥抱"
+    ],
+    "en": [
+      "hug",
+      "hugging"
+    ]
+  },
+  {
+    "tag": "holding hands",
+    "category": "act",
+    "zh": [
+      "牵手"
+    ],
+    "en": [
+      "holding hands"
+    ]
+  },
+  {
+    "tag": "against wall",
+    "category": "pose",
+    "zh": [
+      "壁咚",
+      "靠墙"
+    ],
+    "en": [
+      "against wall",
+      "against the wall"
+    ]
+  },
+  {
+    "tag": "bent over",
+    "category": "pose",
+    "zh": [
+      "弯腰",
+      "趴在桌上"
+    ],
+    "en": [
+      "bent over"
+    ]
+  },
+  {
+    "tag": "on back",
+    "category": "pose",
+    "zh": [
+      "仰躺",
+      "仰卧"
+    ],
+    "en": [
+      "on back",
+      "lying on back"
+    ]
+  },
+  {
+    "tag": "on stomach",
+    "category": "pose",
+    "zh": [
+      "趴着",
+      "俯卧"
+    ],
+    "en": [
+      "on stomach"
+    ]
+  },
+  {
+    "tag": "arched back",
+    "category": "pose",
+    "zh": [
+      "弓背",
+      "后仰"
+    ],
+    "en": [
+      "arched back"
+    ]
+  },
+  {
+    "tag": "arms up",
+    "category": "pose",
+    "zh": [
+      "举手",
+      "双手举起"
+    ],
+    "en": [
+      "arms up"
+    ]
+  },
+  {
+    "tag": "arms behind back",
+    "category": "pose",
+    "zh": [
+      "双手背后"
+    ],
+    "en": [
+      "arms behind back"
+    ]
+  },
+  {
+    "tag": "masturbation",
+    "category": "act",
+    "zh": [
+      "自慰",
+      "手淫"
+    ],
+    "en": [
+      "masturbation"
+    ]
+  },
+  {
+    "tag": "fingering",
+    "category": "act",
+    "zh": [
+      "手指插入"
+    ],
+    "en": [
+      "fingering"
+    ]
+  },
+  {
+    "tag": "paizuri",
+    "category": "act",
+    "zh": [
+      "乳交"
+    ],
+    "en": [
+      "paizuri",
+      "titjob"
+    ]
+  },
+  {
+    "tag": "handjob",
+    "category": "act",
+    "zh": [
+      "手交"
+    ],
+    "en": [
+      "handjob"
+    ]
+  },
+  {
+    "tag": "cunnilingus",
+    "category": "act",
+    "zh": [
+      "舔阴"
+    ],
+    "en": [
+      "cunnilingus"
+    ]
+  },
+  {
+    "tag": "facial",
+    "category": "act",
+    "zh": [
+      "颜射"
+    ],
+    "en": [
+      "facial"
+    ]
+  },
+  {
+    "tag": "cum",
+    "category": "act",
+    "zh": [
+      "精液"
+    ],
+    "en": [
+      "cum",
+      "semen"
+    ]
+  },
+  {
+    "tag": "yuri",
+    "category": "act",
+    "zh": [
+      "百合",
+      "女女"
+    ],
+    "en": [
+      "yuri"
+    ]
+  },
+  {
+    "tag": "tentacles",
+    "category": "act",
+    "zh": [
+      "触手"
+    ],
+    "en": [
+      "tentacles"
+    ]
+  },
+  {
+    "tag": "pregnant",
+    "category": "state",
+    "zh": [
+      "怀孕",
+      "孕肚"
+    ],
+    "en": [
+      "pregnant"
+    ]
+  },
+  {
+    "tag": "handcuffs",
+    "category": "act",
+    "zh": [
+      "手铐"
+    ],
+    "en": [
+      "handcuffs"
+    ]
+  },
+  {
+    "tag": "leash",
+    "category": "act",
+    "zh": [
+      "狗链",
+      "牵着项圈"
+    ],
+    "en": [
+      "leash"
+    ]
+  },
+  {
+    "tag": "ball gag",
+    "category": "act",
+    "zh": [
+      "口球"
+    ],
+    "en": [
+      "ball gag"
+    ]
+  },
+  {
+    "tag": "twintails",
+    "category": "style",
+    "zh": [
+      "双马尾"
+    ],
+    "en": [
+      "twintails"
+    ]
+  },
+  {
+    "tag": "ponytail",
+    "category": "style",
+    "zh": [
+      "马尾",
+      "单马尾"
+    ],
+    "en": [
+      "ponytail"
+    ]
+  },
+  {
+    "tag": "braid",
+    "category": "style",
+    "zh": [
+      "辫子"
+    ],
+    "en": [
+      "braid"
+    ]
+  },
+  {
+    "tag": "ahoge",
+    "category": "style",
+    "zh": [
+      "呆毛"
+    ],
+    "en": [
+      "ahoge"
+    ]
+  },
+  {
+    "tag": "bangs",
+    "category": "style",
+    "zh": [
+      "刘海"
+    ],
+    "en": [
+      "bangs"
+    ]
+  },
+  {
+    "tag": "red hair",
+    "category": "hair",
+    "zh": [
+      "红发",
+      "红色头发"
+    ],
+    "en": [
+      "red hair"
+    ]
+  },
+  {
+    "tag": "green hair",
+    "category": "hair",
+    "zh": [
+      "绿发",
+      "绿色头发"
+    ],
+    "en": [
+      "green hair"
+    ]
+  },
+  {
+    "tag": "brown hair",
+    "category": "hair",
+    "zh": [
+      "棕发",
+      "棕色头发"
+    ],
+    "en": [
+      "brown hair"
+    ]
+  },
+  {
+    "tag": "purple hair",
+    "category": "hair",
+    "zh": [
+      "紫发",
+      "紫色头发"
+    ],
+    "en": [
+      "purple hair"
+    ]
+  },
+  {
+    "tag": "pink hair",
+    "category": "hair",
+    "zh": [
+      "粉发",
+      "粉色头发"
+    ],
+    "en": [
+      "pink hair"
+    ]
+  },
+  {
+    "tag": "silver hair",
+    "category": "hair",
+    "zh": [
+      "银发",
+      "银色头发"
+    ],
+    "en": [
+      "silver hair"
+    ]
+  },
+  {
+    "tag": "blue hair",
+    "category": "hair",
+    "zh": [
+      "蓝发",
+      "蓝色头发"
+    ],
+    "en": [
+      "blue hair"
+    ]
+  },
+  {
+    "tag": "brown eyes",
+    "category": "eyes",
+    "zh": [
+      "棕瞳",
+      "棕色眼睛"
+    ],
+    "en": [
+      "brown eyes"
+    ]
+  },
+  {
+    "tag": "green eyes",
+    "category": "eyes",
+    "zh": [
+      "绿瞳",
+      "绿色眼睛"
+    ],
+    "en": [
+      "green eyes"
+    ]
+  },
+  {
+    "tag": "purple eyes",
+    "category": "eyes",
+    "zh": [
+      "紫瞳",
+      "紫色眼睛"
+    ],
+    "en": [
+      "purple eyes"
+    ]
+  },
+  {
+    "tag": "closed eyes",
+    "category": "eyes",
+    "zh": [
+      "闭眼",
+      "闭着眼睛"
+    ],
+    "en": [
+      "closed eyes"
+    ]
+  },
+  {
+    "tag": "heterochromia",
+    "category": "eyes",
+    "zh": [
+      "异色瞳"
+    ],
+    "en": [
+      "heterochromia"
+    ]
+  },
+  {
+    "tag": "bedroom",
+    "category": "scene",
+    "zh": [
+      "卧室"
+    ],
+    "en": [
+      "bedroom"
+    ]
+  },
+  {
+    "tag": "classroom",
+    "category": "scene",
+    "zh": [
+      "教室"
+    ],
+    "en": [
+      "classroom"
+    ]
+  },
+  {
+    "tag": "library",
+    "category": "scene",
+    "zh": [
+      "图书馆"
+    ],
+    "en": [
+      "library"
+    ]
+  },
+  {
+    "tag": "office",
+    "category": "scene",
+    "zh": [
+      "办公室"
+    ],
+    "en": [
+      "office"
+    ]
+  },
+  {
+    "tag": "pool",
+    "category": "scene",
+    "zh": [
+      "泳池",
+      "游泳池"
+    ],
+    "en": [
+      "pool"
+    ]
+  },
+  {
+    "tag": "onsen",
+    "category": "scene",
+    "zh": [
+      "温泉"
+    ],
+    "en": [
+      "onsen"
+    ]
+  },
+  {
+    "tag": "rooftop",
+    "category": "scene",
+    "zh": [
+      "屋顶",
+      "天台"
+    ],
+    "en": [
+      "rooftop"
+    ]
+  },
+  {
+    "tag": "street",
+    "category": "scene",
+    "zh": [
+      "街道",
+      "街上"
+    ],
+    "en": [
+      "street"
+    ]
+  },
+  {
+    "tag": "cherry blossoms",
+    "category": "scene",
+    "zh": [
+      "樱花",
+      "樱花树下"
+    ],
+    "en": [
+      "cherry blossoms"
+    ]
+  },
+  {
+    "tag": "wet",
+    "category": "state",
+    "zh": [
+      "湿身"
+    ],
+    "en": [
+      "wet"
+    ]
+  },
+  {
+    "tag": "seductive smile",
+    "category": "expression",
+    "zh": [
+      "诱惑",
+      "魅惑"
+    ],
+    "en": [
+      "seductive smile"
+    ]
+  },
+  {
+    "tag": "heavy breathing",
+    "category": "expression",
+    "zh": [
+      "喘气",
+      "喘息"
+    ],
+    "en": [
+      "heavy breathing"
+    ]
+  },
+  {
+    "tag": "heart-shaped pupils",
+    "category": "expression",
+    "zh": [
+      "心形瞳孔",
+      "爱心瞳"
+    ],
+    "en": [
+      "heart-shaped pupils"
+    ]
+  },
+  {
+    "tag": "biting own lip",
+    "category": "expression",
+    "zh": [
+      "咬嘴唇"
+    ],
+    "en": [
+      "biting own lip"
+    ]
+  },
+  {
+    "tag": "drooling",
+    "category": "expression",
+    "zh": [
+      "流口水"
+    ],
+    "en": [
+      "drooling"
+    ]
+  },
+  {
+    "tag": "reverse cowgirl",
+    "category": "act",
+    "zh": [
+      "反骑乘",
+      "反向女上位"
+    ],
+    "en": [
+      "reverse cowgirl"
+    ]
+  },
+  {
+    "tag": "mating press",
+    "category": "act",
+    "zh": [
+      "架腿位",
+      "打桩位",
+      "压腿位"
+    ],
+    "en": [
+      "mating press"
+    ]
+  },
+  {
+    "tag": "full nelson",
+    "category": "act",
+    "zh": [
+      "火车便当",
+      "全尼尔森"
+    ],
+    "en": [
+      "full nelson"
+    ]
+  },
+  {
+    "tag": "amazon position",
+    "category": "act",
+    "zh": [
+      "女战士位",
+      "亚马逊位"
+    ],
+    "en": [
+      "amazon position"
+    ]
+  },
+  {
+    "tag": "lotus position",
+    "category": "act",
+    "zh": [
+      "莲花坐位",
+      "对面坐位"
+    ],
+    "en": [
+      "lotus position"
+    ]
+  },
+  {
+    "tag": "prone bone",
+    "category": "act",
+    "zh": [
+      "俯卧位",
+      "趴着后入"
+    ],
+    "en": [
+      "prone bone"
+    ]
+  },
+  {
+    "tag": "all fours",
+    "category": "pose",
+    "zh": [
+      "四肢着地",
+      "跪趴"
+    ],
+    "en": [
+      "all fours",
+      "on all fours"
+    ]
+  },
+  {
+    "tag": "69",
+    "category": "act",
+    "zh": [
+      "六九式",
+      "69",
+      "六九"
+    ],
+    "en": [
+      "69",
+      "sixty-nine"
+    ]
+  },
+  {
+    "tag": "facesitting",
+    "category": "act",
+    "zh": [
+      "坐脸",
+      "颜面骑乘"
+    ],
+    "en": [
+      "facesitting",
+      "face sitting"
+    ]
+  },
+  {
+    "tag": "anal",
+    "category": "act",
+    "zh": [
+      "肛交",
+      "后庭"
+    ],
+    "en": [
+      "anal"
+    ]
+  },
+  {
+    "tag": "bukkake",
+    "category": "act",
+    "zh": [
+      "群射"
+    ],
+    "en": [
+      "bukkake"
+    ]
+  },
+  {
+    "tag": "cumdrip",
+    "category": "act",
+    "zh": [
+      "精液流出"
+    ],
+    "en": [
+      "cumdrip",
+      "cum dripping"
+    ]
+  },
+  {
+    "tag": "clothed sex",
+    "category": "act",
+    "zh": [
+      "穿衣做爱"
+    ],
+    "en": [
+      "clothed sex"
+    ]
+  },
+  {
+    "tag": "public indecency",
+    "category": "act",
+    "zh": [
+      "公开做爱",
+      "野战"
+    ],
+    "en": [
+      "public indecency",
+      "public sex"
+    ]
+  },
+  {
+    "tag": "presenting",
+    "category": "act",
+    "zh": [
+      "呈现私处",
+      "主动展示"
+    ],
+    "en": [
+      "presenting"
+    ]
+  },
+  {
+    "tag": "spread pussy",
+    "category": "act",
+    "zh": [
+      "掰开小穴",
+      "掰穴"
+    ],
+    "en": [
+      "spread pussy"
+    ]
+  },
+  {
+    "tag": "spread ass",
+    "category": "act",
+    "zh": [
+      "掰开臀部"
+    ],
+    "en": [
+      "spread ass"
+    ]
+  },
+  {
+    "tag": "cameltoe",
+    "category": "act",
+    "zh": [
+      "骆驼趾"
+    ],
+    "en": [
+      "cameltoe"
+    ]
+  },
+  {
+    "tag": "pantyshot",
+    "category": "act",
+    "zh": [
+      "裙底",
+      "pantyshot"
+    ],
+    "en": [
+      "pantyshot",
+      "panty shot"
+    ]
+  },
+  {
+    "tag": "upskirt",
+    "category": "act",
+    "zh": [
+      "掀裙",
+      "走光裙底"
+    ],
+    "en": [
+      "upskirt"
+    ]
+  },
+  {
+    "tag": "downblouse",
+    "category": "act",
+    "zh": [
+      "俯视领口"
+    ],
+    "en": [
+      "downblouse"
+    ]
+  },
+  {
+    "tag": "netorare",
+    "category": "act",
+    "zh": [
+      "NTR",
+      "绿帽",
+      "寝取"
+    ],
+    "en": [
+      "netorare",
+      "ntr"
+    ]
+  },
+  {
+    "tag": "buruma",
+    "category": "clothing",
+    "zh": [
+      "布鲁马",
+      "体操服短裤"
+    ],
+    "en": [
+      "buruma",
+      "bloomers"
+    ]
+  },
+  {
+    "tag": "gym uniform",
+    "category": "clothing",
+    "zh": [
+      "体操服",
+      "体育服"
+    ],
+    "en": [
+      "gym uniform"
+    ]
+  },
+  {
+    "tag": "serafuku",
+    "category": "clothing",
+    "zh": [
+      "水手校服",
+      "水手服"
+    ],
+    "en": [
+      "serafuku"
+    ]
+  },
+  {
+    "tag": "lolita fashion",
+    "category": "clothing",
+    "zh": [
+      "洛丽塔"
+    ],
+    "en": [
+      "lolita fashion",
+      "lolita"
+    ]
+  },
+  {
+    "tag": "gothic lolita",
+    "category": "clothing",
+    "zh": [
+      "哥特洛丽塔"
+    ],
+    "en": [
+      "gothic lolita"
+    ]
+  },
+  {
+    "tag": "miko",
+    "category": "clothing",
+    "zh": [
+      "巫女服",
+      "巫女装"
+    ],
+    "en": [
+      "miko",
+      "shrine maiden"
+    ]
+  },
+  {
+    "tag": "hanfu",
+    "category": "clothing",
+    "zh": [
+      "汉服"
+    ],
+    "en": [
+      "hanfu"
+    ]
+  },
+  {
+    "tag": "latex",
+    "category": "clothing",
+    "zh": [
+      "乳胶衣",
+      "胶衣",
+      "乳胶"
+    ],
+    "en": [
+      "latex",
+      "latex suit"
+    ]
+  },
+  {
+    "tag": "micro bikini",
+    "category": "clothing",
+    "zh": [
+      "微型比基尼",
+      "极小比基尼"
+    ],
+    "en": [
+      "micro bikini"
+    ]
+  },
+  {
+    "tag": "slingshot swimsuit",
+    "category": "clothing",
+    "zh": [
+      "吊带泳装"
+    ],
+    "en": [
+      "slingshot swimsuit"
+    ]
+  },
+  {
+    "tag": "sarashi",
+    "category": "clothing",
+    "zh": [
+      "缠胸布"
+    ],
+    "en": [
+      "sarashi"
+    ]
+  },
+  {
+    "tag": "fundoshi",
+    "category": "clothing",
+    "zh": [
+      "兜裆布"
+    ],
+    "en": [
+      "fundoshi"
+    ]
+  },
+  {
+    "tag": "crotchless",
+    "category": "clothing",
+    "zh": [
+      "开档",
+      "开裆内裤"
+    ],
+    "en": [
+      "crotchless"
+    ]
+  },
+  {
+    "tag": "crotchless pantyhose",
+    "category": "clothing",
+    "zh": [
+      "开档连裤袜"
+    ],
+    "en": [
+      "crotchless pantyhose"
+    ]
+  },
+  {
+    "tag": "g-string",
+    "category": "clothing",
+    "zh": [
+      "G弦裤"
+    ],
+    "en": [
+      "g-string"
+    ]
+  },
+  {
+    "tag": "pasties",
+    "category": "clothing",
+    "zh": [
+      "乳贴"
+    ],
+    "en": [
+      "pasties"
+    ]
+  },
+  {
+    "tag": "virgin killer sweater",
+    "category": "clothing",
+    "zh": [
+      "处男杀手毛衣",
+      "露背毛衣"
+    ],
+    "en": [
+      "virgin killer sweater"
+    ]
+  },
+  {
+    "tag": "halterneck",
+    "category": "clothing",
+    "zh": [
+      "挂脖",
+      "绕颈装"
+    ],
+    "en": [
+      "halterneck"
+    ]
+  },
+  {
+    "tag": "off shoulder",
+    "category": "clothing",
+    "zh": [
+      "露肩",
+      "一字肩"
+    ],
+    "en": [
+      "off shoulder",
+      "off-shoulder"
+    ]
+  },
+  {
+    "tag": "side slit",
+    "category": "clothing",
+    "zh": [
+      "侧开叉",
+      "高开叉"
+    ],
+    "en": [
+      "side slit"
+    ]
+  },
+  {
+    "tag": "backless dress",
+    "category": "clothing",
+    "zh": [
+      "露背裙"
+    ],
+    "en": [
+      "backless dress"
+    ]
+  },
+  {
+    "tag": "undressing",
+    "category": "act",
+    "zh": [
+      "正在脱衣",
+      "半脱"
+    ],
+    "en": [
+      "undressing",
+      "clothes being removed"
+    ]
+  },
+  {
+    "tag": "huge breasts",
+    "category": "state",
+    "zh": [
+      "超大的胸",
+      "夸张巨乳"
+    ],
+    "en": [
+      "huge breasts"
+    ]
+  },
+  {
+    "tag": "flat chest",
+    "category": "state",
+    "zh": [
+      "平板",
+      "飞机场"
+    ],
+    "en": [
+      "flat chest"
+    ]
+  },
+  {
+    "tag": "thick thighs",
+    "category": "state",
+    "zh": [
+      "粗腿",
+      "肉感大腿"
+    ],
+    "en": [
+      "thick thighs"
+    ]
+  },
+  {
+    "tag": "wide hips",
+    "category": "state",
+    "zh": [
+      "宽髋",
+      "丰胯"
+    ],
+    "en": [
+      "wide hips"
+    ]
+  },
+  {
+    "tag": "shiny skin",
+    "category": "state",
+    "zh": [
+      "油光皮肤",
+      "发亮皮肤"
+    ],
+    "en": [
+      "shiny skin"
+    ]
+  },
+  {
+    "tag": "oiled",
+    "category": "state",
+    "zh": [
+      "涂油",
+      "全身油光"
+    ],
+    "en": [
+      "oiled"
+    ]
+  },
+  {
+    "tag": "tanlines",
+    "category": "state",
+    "zh": [
+      "晒痕",
+      "泳装晒痕"
+    ],
+    "en": [
+      "tanlines"
+    ]
+  },
+  {
+    "tag": "dark skin",
+    "category": "state",
+    "zh": [
+      "黑皮",
+      "深色皮肤"
+    ],
+    "en": [
+      "dark skin"
+    ]
+  },
+  {
+    "tag": "pale skin",
+    "category": "state",
+    "zh": [
+      "苍白皮肤",
+      "白皙"
+    ],
+    "en": [
+      "pale skin"
+    ]
+  },
+  {
+    "tag": "pubic hair",
+    "category": "state",
+    "zh": [
+      "阴毛"
+    ],
+    "en": [
+      "pubic hair"
+    ]
+  },
+  {
+    "tag": "nipple piercing",
+    "category": "clothing",
+    "zh": [
+      "乳钉"
+    ],
+    "en": [
+      "nipple piercing"
+    ]
+  },
+  {
+    "tag": "navel piercing",
+    "category": "clothing",
+    "zh": [
+      "脐环"
+    ],
+    "en": [
+      "navel piercing"
+    ]
+  },
+  {
+    "tag": "single thighhigh",
+    "category": "clothing",
+    "zh": [
+      "单边过膝袜"
+    ],
+    "en": [
+      "single thighhigh"
+    ]
+  },
+  {
+    "tag": "angel",
+    "category": "race",
+    "zh": [
+      "天使"
+    ],
+    "en": [
+      "angel"
+    ]
+  },
+  {
+    "tag": "demon girl",
+    "category": "race",
+    "zh": [
+      "恶魔",
+      "恶魔女孩"
+    ],
+    "en": [
+      "demon girl",
+      "demon"
+    ]
+  },
+  {
+    "tag": "wings",
+    "category": "state",
+    "zh": [
+      "翅膀"
+    ],
+    "en": [
+      "wings"
+    ]
+  },
+  {
+    "tag": "halo",
+    "category": "state",
+    "zh": [
+      "光环"
+    ],
+    "en": [
+      "halo"
+    ]
+  },
+  {
+    "tag": "pointy ears",
+    "category": "state",
+    "zh": [
+      "尖耳",
+      "精灵耳"
+    ],
+    "en": [
+      "pointy ears",
+      "pointed ears"
+    ]
+  },
+  {
+    "tag": "animal ears",
+    "category": "state",
+    "zh": [
+      "兽耳"
+    ],
+    "en": [
+      "animal ears"
+    ]
+  },
+  {
+    "tag": "kemonomimi",
+    "category": "state",
+    "zh": [
+      "兽化",
+      "半兽"
+    ],
+    "en": [
+      "kemonomimi"
+    ]
+  },
+  {
+    "tag": "futanari",
+    "category": "state",
+    "zh": [
+      "扶她",
+      "futa"
+    ],
+    "en": [
+      "futanari",
+      "futa"
+    ]
+  },
+  {
+    "tag": "slime",
+    "category": "state",
+    "zh": [
+      "史莱姆"
+    ],
+    "en": [
+      "slime",
+      "slime girl"
+    ]
+  },
+  {
+    "tag": "cyborg",
+    "category": "state",
+    "zh": [
+      "机械改造",
+      "义体",
+      "赛博"
+    ],
+    "en": [
+      "cyborg"
+    ]
+  },
+  {
+    "tag": "android",
+    "category": "state",
+    "zh": [
+      "机器人女孩",
+      "仿生人"
+    ],
+    "en": [
+      "android",
+      "robot girl"
+    ]
+  },
+  {
+    "tag": "mole under eye",
+    "category": "expression",
+    "zh": [
+      "泪痣"
+    ],
+    "en": [
+      "mole under eye",
+      "teardrop mole"
+    ]
+  },
+  {
+    "tag": "fang",
+    "category": "expression",
+    "zh": [
+      "虎牙",
+      "尖牙"
+    ],
+    "en": [
+      "fang",
+      "fangs"
+    ]
+  },
+  {
+    "tag": "seiza",
+    "category": "pose",
+    "zh": [
+      "正坐",
+      "正座"
+    ],
+    "en": [
+      "seiza"
+    ]
+  },
+  {
+    "tag": "wariza",
+    "category": "pose",
+    "zh": [
+      "鸭子坐"
+    ],
+    "en": [
+      "wariza"
+    ]
+  },
+  {
+    "tag": "squatting",
+    "category": "pose",
+    "zh": [
+      "蹲踞",
+      "蹲着"
+    ],
+    "en": [
+      "squatting"
+    ]
+  },
+  {
+    "tag": "indian style",
+    "category": "pose",
+    "zh": [
+      "盘腿",
+      "盘腿坐"
+    ],
+    "en": [
+      "indian style",
+      "cross-legged"
+    ]
+  },
+  {
+    "tag": "unbuttoned shirt",
+    "category": "clothing",
+    "zh": [
+      "衬衫半解",
+      "扣子解开"
+    ],
+    "en": [
+      "unbuttoned shirt",
+      "unbuttoned"
+    ]
+  },
+  {
+    "tag": "strap slip",
+    "category": "clothing",
+    "zh": [
+      "肩带滑落",
+      "吊带滑落"
+    ],
+    "en": [
+      "strap slip",
+      "slipped strap"
+    ]
+  },
+  {
+    "tag": "open zipper",
+    "category": "clothing",
+    "zh": [
+      "拉链拉开",
+      "拉链开着"
+    ],
+    "en": [
+      "open zipper",
+      "unzipped"
+    ]
+  },
+  {
+    "tag": "clothes lift",
+    "category": "clothing",
+    "zh": [
+      "掀起衣服",
+      "撩起衣服"
+    ],
+    "en": [
+      "clothes lift"
+    ]
+  },
+  {
+    "tag": "skirt lift",
+    "category": "clothing",
+    "zh": [
+      "掀裙",
+      "撩起裙子"
+    ],
+    "en": [
+      "skirt lift"
+    ]
+  },
+  {
+    "tag": "through clothes",
+    "category": "act",
+    "zh": [
+      "隔着衣服",
+      "隔布"
+    ],
+    "en": [
+      "through clothes"
+    ]
+  },
+  {
+    "tag": "grinding",
+    "category": "act",
+    "zh": [
+      "蹭",
+      "磨蹭"
+    ],
+    "en": [
+      "grinding"
+    ]
+  },
+  {
+    "tag": "ejaculation",
+    "category": "act",
+    "zh": [
+      "射精"
+    ],
+    "en": [
+      "ejaculation"
+    ]
+  },
+  {
+    "tag": "lactation",
+    "category": "act",
+    "zh": [
+      "喷奶",
+      "泌乳"
+    ],
+    "en": [
+      "lactation"
+    ]
+  },
+  {
+    "tag": "rainy night",
+    "category": "scene",
+    "zh": [
+      "雨夜"
+    ],
+    "en": [
+      "rainy night"
+    ]
+  },
+  {
+    "tag": "window",
+    "category": "scene",
+    "zh": [
+      "窗边",
+      "窗户"
+    ],
+    "en": [
+      "window",
+      "by the window"
+    ]
+  },
+  {
+    "tag": "clothes pull",
+    "category": "clothing",
+    "zh": [
+      "领口拉开",
+      "扯开领口"
+    ],
+    "en": [
+      "clothes pull"
+    ]
+  },
+  {
+    "tag": "open clothes",
+    "category": "clothing",
+    "zh": [
+      "领口拉开",
+      "扯开领口",
+      "拉开衣领"
+    ],
+    "en": [
+      "open clothes",
+      "clothes pull"
+    ]
+  },
+  {
+    "tag": "socks",
+    "category": "clothing",
+    "zh": [
+      "袜子褪到一半",
+      "丝袜褪到小腿",
+      "袜子半脱"
+    ],
+    "en": [
+      "socks",
+      "socks removed"
+    ]
+  },
+  {
+    "tag": "partially undressed",
+    "category": "clothing",
+    "zh": [
+      "袜子褪到一半",
+      "丝袜褪到小腿",
+      "袜子半脱"
+    ],
+    "en": [
+      "partially undressed",
+      "socks removed"
+    ]
+  },
+  {
+    "tag": "disheveled",
+    "category": "clothing",
+    "zh": [
+      "过膝袜滑落",
+      "长筒袜褪下"
+    ],
+    "en": [
+      "disheveled",
+      "thighhighs"
+    ]
+  },
+  {
+    "tag": "single shoe",
+    "category": "clothing",
+    "zh": [
+      "只穿一只鞋"
+    ],
+    "en": [
+      "single shoe"
+    ]
+  },
+  {
+    "tag": "pants down",
+    "category": "clothing",
+    "zh": [
+      "裤子褪到膝盖",
+      "裤子半脱",
+      "裤子拉到大腿"
+    ],
+    "en": [
+      "pants down",
+      "pants down"
+    ]
+  },
+  {
+    "tag": "skirt around waist",
+    "category": "clothing",
+    "zh": [
+      "裙子堆在腰间"
+    ],
+    "en": [
+      "skirt around waist"
+    ]
+  },
+  {
+    "tag": "bra lift",
+    "category": "clothing",
+    "zh": [
+      "胸罩滑落",
+      "内衣滑落",
+      "文胸半脱"
+    ],
+    "en": [
+      "bra lift",
+      "bra lift"
+    ]
+  },
+  {
+    "tag": "panties aside",
+    "category": "clothing",
+    "zh": [
+      "内裤拨到一边"
+    ],
+    "en": [
+      "panties aside"
+    ]
+  },
+  {
+    "tag": "almost nude",
+    "category": "clothing",
+    "zh": [
+      "浴巾滑落",
+      "浴巾要掉了"
+    ],
+    "en": [
+      "almost nude",
+      "towel slip"
+    ]
+  },
+  {
+    "tag": "sheet grab",
+    "category": "clothing",
+    "zh": [
+      "用床单遮挡",
+      "被子遮胸",
+      "被单裹身"
+    ],
+    "en": [
+      "sheet grab",
+      "covered by blanket"
+    ]
+  },
+  {
+    "tag": "under covers",
+    "category": "clothing",
+    "zh": [
+      "用床单遮挡",
+      "被子遮胸",
+      "被单裹身"
+    ],
+    "en": [
+      "under covers",
+      "covered by blanket"
+    ]
+  },
+  {
+    "tag": "wind",
+    "category": "clothing",
+    "zh": [
+      "被风吹起裙子",
+      "裙摆被吹起"
+    ],
+    "en": [
+      "wind",
+      "wind lift"
+    ]
+  },
+  {
+    "tag": "flashing",
+    "category": "act",
+    "zh": [
+      "不小心走光",
+      "不慎走光",
+      "意外走光"
+    ],
+    "en": [
+      "flashing",
+      "flashing"
+    ]
+  },
+  {
+    "tag": "teeth",
+    "category": "act",
+    "zh": [
+      "手套咬着脱",
+      "用嘴脱手套"
+    ],
+    "en": [
+      "teeth",
+      "glove biting"
+    ]
+  },
+  {
+    "tag": "torn pantyhose",
+    "category": "clothing",
+    "zh": [
+      "丝袜破了",
+      "丝袜勾丝",
+      "袜子弹丝"
+    ],
+    "en": [
+      "torn pantyhose",
+      "torn pantyhose"
+    ]
+  },
+  {
+    "tag": "necktie",
+    "category": "clothing",
+    "zh": [
+      "只系领带",
+      "裸体打领带"
+    ],
+    "en": [
+      "necktie",
+      "necktie"
+    ]
+  },
+  {
+    "tag": "open coat",
+    "category": "clothing",
+    "zh": [
+      "敞开大衣里面真空",
+      "风衣真空"
+    ],
+    "en": [
+      "open coat",
+      "open coat"
+    ]
+  },
+  {
+    "tag": "naked apron",
+    "category": "clothing",
+    "zh": [
+      "只穿围裙",
+      "裸体围裙"
+    ],
+    "en": [
+      "naked apron"
+    ]
+  },
+  {
+    "tag": "bathrobe",
+    "category": "clothing",
+    "zh": [
+      "浴袍敞开"
+    ],
+    "en": [
+      "bathrobe",
+      "open bathrobe"
+    ]
+  },
+  {
+    "tag": "yukata",
+    "category": "clothing",
+    "zh": [
+      "浴衣凌乱",
+      "浴衣半解"
+    ],
+    "en": [
+      "yukata",
+      "open yukata"
+    ]
+  },
+  {
+    "tag": "clothes aside",
+    "category": "clothing",
+    "zh": [
+      "死库水拉到一边",
+      "泳装拨开"
+    ],
+    "en": [
+      "clothes aside",
+      "swimsuit aside"
+    ]
+  },
+  {
+    "tag": "untied",
+    "category": "clothing",
+    "zh": [
+      "比基尼绳结解开",
+      "泳装带子松了"
+    ],
+    "en": [
+      "untied",
+      "untied bikini"
+    ]
+  },
+  {
+    "tag": "shoes",
+    "category": "clothing",
+    "zh": [
+      "左右脚鞋子不同"
+    ],
+    "en": [
+      "shoes",
+      "mismatched footwear"
+    ]
+  },
+  {
+    "tag": "clothes on floor",
+    "category": "clothing",
+    "zh": [
+      "刚脱完衣服",
+      "衣服丢在地上"
+    ],
+    "en": [
+      "clothes on floor",
+      "removed clothes"
+    ]
+  },
+  {
+    "tag": "bedroom eyes",
+    "category": "expression",
+    "zh": [
+      "迷离眼神",
+      "媚眼"
+    ],
+    "en": [
+      "bedroom eyes"
+    ]
+  },
+  {
+    "tag": "half-closed eyes",
+    "category": "expression",
+    "zh": [
+      "迷离眼神",
+      "半睁眼色气"
+    ],
+    "en": [
+      "half-closed eyes",
+      "bedroom eyes"
+    ]
+  },
+  {
+    "tag": "smug",
+    "category": "expression",
+    "zh": [
+      "得意脸",
+      "坏笑"
+    ],
+    "en": [
+      "smug"
+    ]
+  },
+  {
+    "tag": "pout",
+    "category": "expression",
+    "zh": [
+      "嘟嘴",
+      "鼓嘴"
+    ],
+    "en": [
+      "pout",
+      "pouting"
+    ]
+  },
+  {
+    "tag": "licking lips",
+    "category": "expression",
+    "zh": [
+      "舔嘴唇",
+      "舔唇"
+    ],
+    "en": [
+      "licking lips",
+      "licking lips"
+    ]
+  },
+  {
+    "tag": "tongue",
+    "category": "expression",
+    "zh": [
+      "舔嘴唇",
+      "舔唇"
+    ],
+    "en": [
+      "tongue",
+      "licking lips"
+    ]
+  },
+  {
+    "tag": "finger to mouth",
+    "category": "expression",
+    "zh": [
+      "含手指"
+    ],
+    "en": [
+      "finger to mouth"
+    ]
+  },
+  {
+    "tag": "oral invitation",
+    "category": "expression",
+    "zh": [
+      "含手指",
+      "吮手指",
+      "手指含在嘴里"
+    ],
+    "en": [
+      "oral invitation",
+      "finger to mouth"
+    ]
+  },
+  {
+    "tag": "nervous",
+    "category": "expression",
+    "zh": [
+      "咬指甲"
+    ],
+    "en": [
+      "nervous",
+      "nail biting"
+    ]
+  },
+  {
+    "tag": "hand over own mouth",
+    "category": "expression",
+    "zh": [
+      "捂嘴",
+      "手捂着嘴"
+    ],
+    "en": [
+      "hand over own mouth",
+      "hand over own mouth"
+    ]
+  },
+  {
+    "tag": "peeking",
+    "category": "expression",
+    "zh": [
+      "从指缝看",
+      "偷瞄"
+    ],
+    "en": [
+      "peeking",
+      "peeking"
+    ]
+  },
+  {
+    "tag": "crazy eyes",
+    "category": "expression",
+    "zh": [
+      "血丝眼",
+      "疯狂眼神"
+    ],
+    "en": [
+      "crazy eyes",
+      "crazy eyes"
+    ]
+  },
+  {
+    "tag": "spiral eyes",
+    "category": "expression",
+    "zh": [
+      "螺旋眼",
+      "催眠眼"
+    ],
+    "en": [
+      "spiral eyes",
+      "spiral eyes"
+    ]
+  },
+  {
+    "tag": "mind control",
+    "category": "expression",
+    "zh": [
+      "螺旋眼",
+      "催眠眼"
+    ],
+    "en": [
+      "mind control",
+      "spiral eyes"
+    ]
+  },
+  {
+    "tag": "x eyes",
+    "category": "expression",
+    "zh": [
+      "晕厥眼",
+      "XX眼",
+      "昏过去的表情"
+    ],
+    "en": [
+      "x eyes",
+      "x-shaped eyes"
+    ]
+  },
+  {
+    "tag": "unconscious",
+    "category": "expression",
+    "zh": [
+      "晕厥眼",
+      "XX眼",
+      "昏过去的表情"
+    ],
+    "en": [
+      "unconscious",
+      "x-shaped eyes"
+    ]
+  },
+  {
+    "tag": "saliva",
+    "category": "expression",
+    "zh": [
+      "口水丝",
+      "津液拉丝"
+    ],
+    "en": [
+      "saliva",
+      "saliva trail"
+    ]
+  },
+  {
+    "tag": "sweatdrop",
+    "category": "expression",
+    "zh": [
+      "冷汗",
+      "额角汗滴",
+      "尴尬汗"
+    ],
+    "en": [
+      "sweatdrop",
+      "sweatdrop"
+    ]
+  },
+  {
+    "tag": "streaming tears",
+    "category": "expression",
+    "zh": [
+      "泪痕",
+      "哭花的妆",
+      "泪水流下"
+    ],
+    "en": [
+      "streaming tears",
+      "tears"
+    ]
+  },
+  {
+    "tag": "running makeup",
+    "category": "expression",
+    "zh": [
+      "妆花了",
+      "眼线晕开"
+    ],
+    "en": [
+      "running makeup",
+      "makeup"
+    ]
+  },
+  {
+    "tag": "nosebleed",
+    "category": "expression",
+    "zh": [
+      "流鼻血"
+    ],
+    "en": [
+      "nosebleed"
+    ]
+  },
+  {
+    "tag": "steam",
+    "category": "expression",
+    "zh": [
+      "脸冒热气",
+      "害羞冒烟"
+    ],
+    "en": [
+      "steam",
+      "steam"
+    ]
+  },
+  {
+    "tag": "pussy juice",
+    "category": "state",
+    "zh": [
+      "爱液拉丝",
+      "淫水拉丝",
+      "黏液"
+    ],
+    "en": [
+      "pussy juice",
+      "pussy juice"
+    ]
+  },
+  {
+    "tag": "sticky",
+    "category": "state",
+    "zh": [
+      "精液丝",
+      "白丝拉丝"
+    ],
+    "en": [
+      "sticky",
+      "cum"
+    ]
+  },
+  {
+    "tag": "cum on face",
+    "category": "state",
+    "zh": [
+      "脸上沾着",
+      "脸部白浊",
+      "颜射痕迹"
+    ],
+    "en": [
+      "cum on face",
+      "facial"
+    ]
+  },
+  {
+    "tag": "cum on tongue",
+    "category": "state",
+    "zh": [
+      "舌头上有精液",
+      "伸舌展示精液"
+    ],
+    "en": [
+      "cum on tongue",
+      "cum on tongue"
+    ]
+  },
+  {
+    "tag": "cum on breasts",
+    "category": "state",
+    "zh": [
+      "胸口沾着精液",
+      "乳上白浊"
+    ],
+    "en": [
+      "cum on breasts",
+      "cum on breasts"
+    ]
+  },
+  {
+    "tag": "cum on ass",
+    "category": "state",
+    "zh": [
+      "臀部沾着精液"
+    ],
+    "en": [
+      "cum on ass",
+      "cum on ass"
+    ]
+  },
+  {
+    "tag": "after sex",
+    "category": "state",
+    "zh": [
+      "从里面流出",
+      "事后流出"
+    ],
+    "en": [
+      "after sex",
+      "after sex"
+    ]
+  },
+  {
+    "tag": "blood",
+    "category": "state",
+    "zh": [
+      "少量血迹",
+      "破处血"
+    ],
+    "en": [
+      "blood",
+      "blood"
+    ]
+  },
+  {
+    "tag": "breast milk",
+    "category": "state",
+    "zh": [
+      "乳汁",
+      "溢奶"
+    ],
+    "en": [
+      "breast milk",
+      "lactation"
+    ]
+  },
+  {
+    "tag": "exhausted",
+    "category": "state",
+    "zh": [
+      "事后余韵",
+      "高潮余韵",
+      "脱力"
+    ],
+    "en": [
+      "exhausted",
+      "after sex"
+    ]
+  },
+  {
+    "tag": "trembling",
+    "category": "state",
+    "zh": [
+      "身体发抖",
+      "颤抖"
+    ],
+    "en": [
+      "trembling"
+    ]
+  },
+  {
+    "tag": "limp",
+    "category": "state",
+    "zh": [
+      "瘫软",
+      "软倒",
+      "没力气"
+    ],
+    "en": [
+      "limp",
+      "limp"
+    ]
+  },
+  {
+    "tag": "empty eyes",
+    "category": "expression",
+    "zh": [
+      "精神崩溃",
+      "玩坏了",
+      "失神高潮"
+    ],
+    "en": [
+      "empty eyes",
+      "mind break"
+    ]
+  },
+  {
+    "tag": "drunk",
+    "category": "state",
+    "zh": [
+      "醉酒",
+      "喝醉",
+      "微醺"
+    ],
+    "en": [
+      "drunk",
+      "drunk"
+    ]
+  },
+  {
+    "tag": "hickey",
+    "category": "state",
+    "zh": [
+      "吻痕",
+      "草莓印"
+    ],
+    "en": [
+      "hickey"
+    ]
+  },
+  {
+    "tag": "love bite",
+    "category": "state",
+    "zh": [
+      "吻痕",
+      "草莓印"
+    ],
+    "en": [
+      "love bite",
+      "hickey"
+    ]
+  },
+  {
+    "tag": "scratch marks",
+    "category": "state",
+    "zh": [
+      "抓痕",
+      "背上抓痕"
+    ],
+    "en": [
+      "scratch marks",
+      "scratch"
+    ]
+  },
+  {
+    "tag": "bite mark",
+    "category": "state",
+    "zh": [
+      "咬痕"
+    ],
+    "en": [
+      "bite mark",
+      "bite mark"
+    ]
+  },
+  {
+    "tag": "red marks",
+    "category": "state",
+    "zh": [
+      "绳痕",
+      "捆绑红痕"
+    ],
+    "en": [
+      "red marks",
+      "restraint"
+    ]
+  },
+  {
+    "tag": "wet hair",
+    "category": "style",
+    "zh": [
+      "湿发贴脸",
+      "刘海湿贴"
+    ],
+    "en": [
+      "wet hair",
+      "wet hair"
+    ]
+  },
+  {
+    "tag": "hair on face",
+    "category": "style",
+    "zh": [
+      "湿发贴脸",
+      "刘海湿贴"
+    ],
+    "en": [
+      "hair on face",
+      "wet hair"
+    ]
+  },
+  {
+    "tag": "messy hair",
+    "category": "style",
+    "zh": [
+      "头发凌乱",
+      "乱发",
+      "刚睡醒头发"
+    ],
+    "en": [
+      "messy hair",
+      "messy hair"
+    ]
+  },
+  {
+    "tag": "glowing eyes",
+    "category": "eyes",
+    "zh": [
+      "发光的眼睛",
+      "眼中闪着光"
+    ],
+    "en": [
+      "glowing eyes",
+      "glowing eyes"
+    ]
+  },
+  {
+    "tag": "motorcycle",
+    "category": "scene",
+    "zh": [
+      "摩托车",
+      "机车"
+    ],
+    "en": [
+      "motorcycle"
+    ]
+  },
+  {
+    "tag": "bicycle",
+    "category": "scene",
+    "zh": [
+      "自行车",
+      "单车"
+    ],
+    "en": [
+      "bicycle",
+      "bicycle"
+    ]
+  },
+  {
+    "tag": "sword",
+    "category": "state",
+    "zh": [
+      "刀剑",
+      "长剑",
+      "握着剑"
+    ],
+    "en": [
+      "sword",
+      "sword"
+    ]
+  },
+  {
+    "tag": "katana",
+    "category": "state",
+    "zh": [
+      "武士刀",
+      "日本刀"
+    ],
+    "en": [
+      "katana"
+    ]
+  },
+  {
+    "tag": "dagger",
+    "category": "state",
+    "zh": [
+      "匕首",
+      "短刀"
+    ],
+    "en": [
+      "dagger",
+      "dagger"
+    ]
+  },
+  {
+    "tag": "gun",
+    "category": "state",
+    "zh": [
+      "手枪",
+      "拿枪",
+      "持枪"
+    ],
+    "en": [
+      "gun",
+      "gun"
+    ]
+  },
+  {
+    "tag": "handgun",
+    "category": "state",
+    "zh": [
+      "手枪",
+      "拿枪",
+      "持枪"
+    ],
+    "en": [
+      "handgun",
+      "gun"
+    ]
+  },
+  {
+    "tag": "umbrella",
+    "category": "state",
+    "zh": [
+      "伞",
+      "撑伞"
+    ],
+    "en": [
+      "umbrella"
+    ]
+  },
+  {
+    "tag": "cellphone",
+    "category": "state",
+    "zh": [
+      "手机"
+    ],
+    "en": [
+      "cellphone",
+      "phone"
+    ]
+  },
+  {
+    "tag": "phone",
+    "category": "state",
+    "zh": [
+      "手机",
+      "看手机",
+      "玩手机"
+    ],
+    "en": [
+      "phone",
+      "cellphone"
+    ]
+  },
+  {
+    "tag": "selfie",
+    "category": "act",
+    "zh": [
+      "自拍"
+    ],
+    "en": [
+      "selfie"
+    ]
+  },
+  {
+    "tag": "camera",
+    "category": "state",
+    "zh": [
+      "手持相机",
+      "拿着相机",
+      "单反"
+    ],
+    "en": [
+      "camera",
+      "camera"
+    ]
+  },
+  {
+    "tag": "book",
+    "category": "state",
+    "zh": [
+      "书",
+      "捧着书",
+      "翻书"
+    ],
+    "en": [
+      "book",
+      "book"
+    ]
+  },
+  {
+    "tag": "wine glass",
+    "category": "state",
+    "zh": [
+      "红酒杯",
+      "酒杯",
+      "香槟"
+    ],
+    "en": [
+      "wine glass",
+      "wine glass"
+    ]
+  },
+  {
+    "tag": "drinking",
+    "category": "state",
+    "zh": [
+      "红酒杯",
+      "酒杯",
+      "香槟"
+    ],
+    "en": [
+      "drinking",
+      "wine glass"
+    ]
+  },
+  {
+    "tag": "cigarette",
+    "category": "state",
+    "zh": [
+      "香烟",
+      "抽烟",
+      "衔着烟"
+    ],
+    "en": [
+      "cigarette",
+      "cigarette"
+    ]
+  },
+  {
+    "tag": "smoking",
+    "category": "state",
+    "zh": [
+      "香烟",
+      "抽烟",
+      "衔着烟"
+    ],
+    "en": [
+      "smoking",
+      "cigarette"
+    ]
+  },
+  {
+    "tag": "lollipop",
+    "category": "state",
+    "zh": [
+      "棒棒糖",
+      "舔棒棒糖"
+    ],
+    "en": [
+      "lollipop",
+      "lollipop"
+    ]
+  },
+  {
+    "tag": "microphone",
+    "category": "state",
+    "zh": [
+      "麦克风",
+      "话筒",
+      "唱歌"
+    ],
+    "en": [
+      "microphone",
+      "microphone"
+    ]
+  },
+  {
+    "tag": "singing",
+    "category": "state",
+    "zh": [
+      "麦克风",
+      "话筒",
+      "唱歌"
+    ],
+    "en": [
+      "singing",
+      "microphone"
+    ]
+  },
+  {
+    "tag": "headphones",
+    "category": "state",
+    "zh": [
+      "耳机",
+      "头戴耳机"
+    ],
+    "en": [
+      "headphones",
+      "headphones"
+    ]
+  },
+  {
+    "tag": "bag",
+    "category": "state",
+    "zh": [
+      "手提包",
+      "书包",
+      "挎包"
+    ],
+    "en": [
+      "bag",
+      "bag"
+    ]
+  },
+  {
+    "tag": "handbag",
+    "category": "state",
+    "zh": [
+      "手提包",
+      "书包",
+      "挎包"
+    ],
+    "en": [
+      "handbag",
+      "bag"
+    ]
+  },
+  {
+    "tag": "chain",
+    "category": "state",
+    "zh": [
+      "铁链",
+      "锁链"
+    ],
+    "en": [
+      "chain",
+      "chain"
+    ]
+  },
+  {
+    "tag": "vibrator",
+    "category": "state",
+    "zh": [
+      "跳蛋",
+      "振动棒"
+    ],
+    "en": [
+      "vibrator"
+    ]
+  },
+  {
+    "tag": "sex toy",
+    "category": "state",
+    "zh": [
+      "跳蛋",
+      "振动棒",
+      "按摩棒"
+    ],
+    "en": [
+      "sex toy",
+      "vibrator"
+    ]
+  },
+  {
+    "tag": "dildo",
+    "category": "state",
+    "zh": [
+      "假阳具",
+      "阳具玩具"
+    ],
+    "en": [
+      "dildo",
+      "dildo"
+    ]
+  },
+  {
+    "tag": "shibari",
+    "category": "act",
+    "zh": [
+      "绳艺",
+      "龟甲缚"
+    ],
+    "en": [
+      "shibari"
+    ]
+  },
+  {
+    "tag": "candle",
+    "category": "scene",
+    "zh": [
+      "蜡烛",
+      "烛台"
+    ],
+    "en": [
+      "candle",
+      "candle"
+    ]
+  },
+  {
+    "tag": "candlelight",
+    "category": "scene",
+    "zh": [
+      "蜡烛",
+      "烛台"
+    ],
+    "en": [
+      "candlelight",
+      "candle"
+    ]
+  },
+  {
+    "tag": "mirror",
+    "category": "scene",
+    "zh": [
+      "镜子",
+      "对着镜子",
+      "镜中"
+    ],
+    "en": [
+      "mirror",
+      "mirror"
+    ]
+  },
+  {
+    "tag": "bed sheet",
+    "category": "scene",
+    "zh": [
+      "凌乱床单",
+      "抓着床单"
+    ],
+    "en": [
+      "bed sheet",
+      "bed sheet"
+    ]
+  },
+  {
+    "tag": "after school",
+    "category": "scene",
+    "zh": [
+      "放学后教室",
+      "空教室"
+    ],
+    "en": [
+      "after school",
+      "classroom"
+    ]
+  },
+  {
+    "tag": "school",
+    "category": "scene",
+    "zh": [
+      "学校天台",
+      "教学楼顶"
+    ],
+    "en": [
+      "school",
+      "rooftop"
+    ]
+  },
+  {
+    "tag": "clubroom",
+    "category": "scene",
+    "zh": [
+      "社团室",
+      "活动室"
+    ],
+    "en": [
+      "clubroom",
+      "clubroom"
+    ]
+  },
+  {
+    "tag": "infirmary",
+    "category": "scene",
+    "zh": [
+      "保健室",
+      "校医室"
+    ],
+    "en": [
+      "infirmary",
+      "nurse's office"
+    ]
+  },
+  {
+    "tag": "locker room",
+    "category": "scene",
+    "zh": [
+      "更衣室柜子",
+      "储物柜前"
+    ],
+    "en": [
+      "locker room",
+      "locker"
+    ]
+  },
+  {
+    "tag": "shower",
+    "category": "scene",
+    "zh": [
+      "淋浴间",
+      "洗澡"
+    ],
+    "en": [
+      "shower"
+    ]
+  },
+  {
+    "tag": "bathtub",
+    "category": "scene",
+    "zh": [
+      "浴缸",
+      "泡澡"
+    ],
+    "en": [
+      "bathtub"
+    ]
+  },
+  {
+    "tag": "bath",
+    "category": "scene",
+    "zh": [
+      "浴缸",
+      "泡澡",
+      "浴池"
+    ],
+    "en": [
+      "bath",
+      "bathtub"
+    ]
+  },
+  {
+    "tag": "ferris wheel",
+    "category": "scene",
+    "zh": [
+      "摩天轮"
+    ],
+    "en": [
+      "ferris wheel",
+      "ferris wheel"
+    ]
+  },
+  {
+    "tag": "festival",
+    "category": "scene",
+    "zh": [
+      "祭典",
+      "夏日祭",
+      "烟火大会"
+    ],
+    "en": [
+      "festival",
+      "festival"
+    ]
+  },
+  {
+    "tag": "fireworks",
+    "category": "scene",
+    "zh": [
+      "祭典",
+      "夏日祭",
+      "烟火大会"
+    ],
+    "en": [
+      "fireworks",
+      "festival"
+    ]
+  },
+  {
+    "tag": "shrine",
+    "category": "scene",
+    "zh": [
+      "神社",
+      "鸟居"
+    ],
+    "en": [
+      "shrine",
+      "shrine"
+    ]
+  },
+  {
+    "tag": "torii",
+    "category": "scene",
+    "zh": [
+      "神社",
+      "鸟居"
+    ],
+    "en": [
+      "torii",
+      "shrine"
+    ]
+  },
+  {
+    "tag": "alley",
+    "category": "scene",
+    "zh": [
+      "小巷",
+      "巷子里",
+      "暗巷"
+    ],
+    "en": [
+      "alley",
+      "alley"
+    ]
+  },
+  {
+    "tag": "hotel",
+    "category": "scene",
+    "zh": [
+      "酒店房间",
+      "宾馆",
+      "旅馆房间"
+    ],
+    "en": [
+      "hotel",
+      "hotel room"
+    ]
+  },
+  {
+    "tag": "love hotel",
+    "category": "scene",
+    "zh": [
+      "情人旅馆"
+    ],
+    "en": [
+      "love hotel"
+    ]
+  },
+  {
+    "tag": "train interior",
+    "category": "scene",
+    "zh": [
+      "电车通勤",
+      "拥挤电车"
+    ],
+    "en": [
+      "train interior",
+      "train"
+    ]
+  },
+  {
+    "tag": "crowd",
+    "category": "scene",
+    "zh": [
+      "电车通勤",
+      "拥挤电车"
+    ],
+    "en": [
+      "crowd",
+      "train"
+    ]
+  },
+  {
+    "tag": "elevator",
+    "category": "scene",
+    "zh": [
+      "电梯里",
+      "电梯间"
+    ],
+    "en": [
+      "elevator",
+      "elevator"
+    ]
+  },
+  {
+    "tag": "parking lot",
+    "category": "scene",
+    "zh": [
+      "停车场",
+      "地库"
+    ],
+    "en": [
+      "parking lot",
+      "parking lot"
+    ]
+  },
+  {
+    "tag": "gym",
+    "category": "scene",
+    "zh": [
+      "健身房",
+      "训练馆"
+    ],
+    "en": [
+      "gym",
+      "gym"
+    ]
+  },
+  {
+    "tag": "snow",
+    "category": "scene",
+    "zh": [
+      "雪街",
+      "雪中街道"
+    ],
+    "en": [
+      "snow",
+      "snow"
+    ]
+  },
+  {
+    "tag": "office lady",
+    "category": "clothing",
+    "zh": [
+      "OL",
+      "职业女性"
+    ],
+    "en": [
+      "office lady"
+    ]
+  },
+  {
+    "tag": "business suit",
+    "category": "clothing",
+    "zh": [
+      "OL",
+      "职业女性",
+      "上班族女性"
+    ],
+    "en": [
+      "business suit",
+      "office lady"
+    ]
+  },
+  {
+    "tag": "teacher",
+    "category": "clothing",
+    "zh": [
+      "女教师",
+      "老师装",
+      "教师"
+    ],
+    "en": [
+      "teacher",
+      "teacher"
+    ]
+  },
+  {
+    "tag": "nurse",
+    "category": "clothing",
+    "zh": [
+      "护士",
+      "护士小姐"
+    ],
+    "en": [
+      "nurse",
+      "nurse"
+    ]
+  },
+  {
+    "tag": "lab coat",
+    "category": "clothing",
+    "zh": [
+      "女医生",
+      "白大褂"
+    ],
+    "en": [
+      "lab coat",
+      "doctor"
+    ]
+  },
+  {
+    "tag": "doctor",
+    "category": "clothing",
+    "zh": [
+      "女医生",
+      "白大褂"
+    ],
+    "en": [
+      "doctor",
+      "doctor"
+    ]
+  },
+  {
+    "tag": "police uniform",
+    "category": "clothing",
+    "zh": [
+      "女警",
+      "警察"
+    ],
+    "en": [
+      "police uniform",
+      "police"
+    ]
+  },
+  {
+    "tag": "waitress",
+    "category": "clothing",
+    "zh": [
+      "女服务员",
+      "餐厅服务员",
+      "女仆咖啡"
+    ],
+    "en": [
+      "waitress",
+      "waitress"
+    ]
+  },
+  {
+    "tag": "apron",
+    "category": "clothing",
+    "zh": [
+      "女服务员",
+      "餐厅服务员",
+      "女仆咖啡"
+    ],
+    "en": [
+      "apron",
+      "waitress"
+    ]
+  },
+  {
+    "tag": "idol",
+    "category": "clothing",
+    "zh": [
+      "偶像",
+      "偶像装",
+      "舞台服"
+    ],
+    "en": [
+      "idol",
+      "idol"
+    ]
+  },
+  {
+    "tag": "stage",
+    "category": "clothing",
+    "zh": [
+      "偶像",
+      "偶像装",
+      "舞台服"
+    ],
+    "en": [
+      "stage",
+      "idol"
+    ]
+  },
+  {
+    "tag": "race queen",
+    "category": "clothing",
+    "zh": [
+      "赛车女郎"
+    ],
+    "en": [
+      "race queen"
+    ]
+  },
+  {
+    "tag": "cheerleader",
+    "category": "clothing",
+    "zh": [
+      "啦啦队"
+    ],
+    "en": [
+      "cheerleader"
+    ]
+  },
+  {
+    "tag": "secretary",
+    "category": "clothing",
+    "zh": [
+      "秘书",
+      "女秘书"
+    ],
+    "en": [
+      "secretary",
+      "secretary"
+    ]
+  },
+  {
+    "tag": "cafe",
+    "category": "clothing",
+    "zh": [
+      "女仆咖啡厅",
+      "咖啡馆女仆"
+    ],
+    "en": [
+      "cafe",
+      "maid"
+    ]
+  },
+  {
+    "tag": "nun",
+    "category": "clothing",
+    "zh": [
+      "修女"
+    ],
+    "en": [
+      "nun",
+      "nun"
+    ]
+  },
+  {
+    "tag": "armor",
+    "category": "clothing",
+    "zh": [
+      "女骑士",
+      "骑士铠甲"
+    ],
+    "en": [
+      "armor",
+      "knight"
+    ]
+  },
+  {
+    "tag": "knight",
+    "category": "clothing",
+    "zh": [
+      "女骑士",
+      "骑士铠甲"
+    ],
+    "en": [
+      "knight",
+      "knight"
+    ]
+  },
+  {
+    "tag": "wizard hat",
+    "category": "clothing",
+    "zh": [
+      "魔法师",
+      "魔女袍"
+    ],
+    "en": [
+      "wizard hat",
+      "wizard"
+    ]
+  },
+  {
+    "tag": "robe",
+    "category": "clothing",
+    "zh": [
+      "魔法师",
+      "魔女袍"
+    ],
+    "en": [
+      "robe",
+      "wizard"
+    ]
+  },
+  {
+    "tag": "flight attendant",
+    "category": "clothing",
+    "zh": [
+      "女飞行员",
+      "空姐",
+      "乘务员"
+    ],
+    "en": [
+      "flight attendant",
+      "flight attendant"
+    ]
+  },
+  {
+    "tag": "military uniform",
+    "category": "clothing",
+    "zh": [
+      "女军人",
+      "迷彩服"
+    ],
+    "en": [
+      "military uniform",
+      "soldier"
+    ]
+  },
+  {
+    "tag": "camouflage",
+    "category": "clothing",
+    "zh": [
+      "女军人",
+      "迷彩服"
+    ],
+    "en": [
+      "camouflage",
+      "soldier"
+    ]
+  },
+  {
+    "tag": "coat",
+    "category": "clothing",
+    "zh": [
+      "女侦探",
+      "侦探大衣"
+    ],
+    "en": [
+      "coat",
+      "detective"
+    ]
+  },
+  {
+    "tag": "detective",
+    "category": "clothing",
+    "zh": [
+      "女侦探",
+      "侦探大衣"
+    ],
+    "en": [
+      "detective",
+      "detective"
+    ]
+  },
+  {
+    "tag": "bartender",
+    "category": "clothing",
+    "zh": [
+      "调酒师",
+      "女酒保"
+    ],
+    "en": [
+      "bartender",
+      "bartender"
+    ]
+  },
+  {
+    "tag": "dancer",
+    "category": "clothing",
+    "zh": [
+      "舞者",
+      "舞娘",
+      "钢管舞"
+    ],
+    "en": [
+      "dancer",
+      "dancer"
+    ]
+  },
+  {
+    "tag": "hug from behind",
+    "category": "act",
+    "zh": [
+      "从身后环抱",
+      "背后抱住"
+    ],
+    "en": [
+      "hug from behind"
+    ]
+  },
+  {
+    "tag": "embrace",
+    "category": "act",
+    "zh": [
+      "从身后环抱",
+      "背后抱住",
+      "后背拥抱"
+    ],
+    "en": [
+      "embrace",
+      "hug from behind"
+    ]
+  },
+  {
+    "tag": "hand on own chin",
+    "category": "pose",
+    "zh": [
+      "托腮",
+      "手托着下巴"
+    ],
+    "en": [
+      "hand on own chin",
+      "chin rest"
+    ]
+  },
+  {
+    "tag": "headpat",
+    "category": "act",
+    "zh": [
+      "摸头",
+      "抚摸头发"
+    ],
+    "en": [
+      "headpat",
+      "headpat"
+    ]
+  },
+  {
+    "tag": "lap pillow",
+    "category": "act",
+    "zh": [
+      "膝枕"
+    ],
+    "en": [
+      "lap pillow"
+    ]
+  },
+  {
+    "tag": "piggyback",
+    "category": "act",
+    "zh": [
+      "背着",
+      "背负"
+    ],
+    "en": [
+      "piggyback",
+      "piggyback"
+    ]
+  },
+  {
+    "tag": "biting",
+    "category": "act",
+    "zh": [
+      "咬耳朵",
+      "耳边低语"
+    ],
+    "en": [
+      "biting",
+      "whisper"
+    ]
+  },
+  {
+    "tag": "ear",
+    "category": "act",
+    "zh": [
+      "咬耳朵",
+      "耳边低语"
+    ],
+    "en": [
+      "ear",
+      "whisper"
+    ]
+  },
+  {
+    "tag": "kissing",
+    "category": "act",
+    "zh": [
+      "吻脖",
+      "吻颈部",
+      "舔脖子"
+    ],
+    "en": [
+      "kissing",
+      "necking"
+    ]
+  },
+  {
+    "tag": "neck",
+    "category": "act",
+    "zh": [
+      "吻脖",
+      "吻颈部",
+      "舔脖子"
+    ],
+    "en": [
+      "neck",
+      "necking"
+    ]
+  },
+  {
+    "tag": "towel slip",
+    "category": "clothing",
+    "zh": [
+      "浴巾滑落"
+    ],
+    "en": [
+      "towel slip"
+    ]
+  },
+  {
+    "tag": "socks only",
+    "category": "clothing",
+    "zh": [
+      "只穿袜子"
+    ],
+    "en": [
+      "socks only"
+    ]
+  },
+  {
+    "tag": "thighhighs only",
+    "category": "clothing",
+    "zh": [
+      "只穿过膝袜"
+    ],
+    "en": [
+      "thighhighs only"
+    ]
+  },
+  {
+    "tag": "mind break",
+    "category": "expression",
+    "zh": [
+      "精神崩溃",
+      "玩坏了"
+    ],
+    "en": [
+      "mind break"
+    ]
+  },
+  {
+    "tag": "chin rest",
+    "category": "pose",
+    "zh": [
+      "托腮"
+    ],
+    "en": [
+      "chin rest",
+      "hand on own chin"
+    ]
+  },
+  {
+    "tag": "aqua hair",
+    "category": "hair",
+    "zh": [
+      "水色发",
+      "浅蓝色头发"
+    ],
+    "en": [
+      "aqua hair"
+    ]
+  },
+  {
+    "tag": "orange hair",
+    "category": "hair",
+    "zh": [
+      "橙发"
+    ],
+    "en": [
+      "orange hair"
+    ]
+  },
+  {
+    "tag": "light brown hair",
+    "category": "hair",
+    "zh": [
+      "浅棕发",
+      "茶色头发"
+    ],
+    "en": [
+      "light brown hair",
+      "light brown hair"
+    ]
+  },
+  {
+    "tag": "two-tone hair",
+    "category": "style",
+    "zh": [
+      "双色发"
+    ],
+    "en": [
+      "two-tone hair"
+    ]
+  },
+  {
+    "tag": "multicolored hair",
+    "category": "style",
+    "zh": [
+      "双色发",
+      "两色头发"
+    ],
+    "en": [
+      "multicolored hair",
+      "two-tone hair"
+    ]
+  },
+  {
+    "tag": "streaked hair",
+    "category": "style",
+    "zh": [
+      "挑染",
+      "发片挑染"
+    ],
+    "en": [
+      "streaked hair",
+      "streaked hair"
+    ]
+  },
+  {
+    "tag": "gradient hair",
+    "category": "style",
+    "zh": [
+      "渐变发色",
+      "染发渐变"
+    ],
+    "en": [
+      "gradient hair",
+      "gradient hair"
+    ]
+  },
+  {
+    "tag": "drill hair",
+    "category": "style",
+    "zh": [
+      "钻头卷"
+    ],
+    "en": [
+      "drill hair"
+    ]
+  },
+  {
+    "tag": "hime cut",
+    "category": "style",
+    "zh": [
+      "姬发式",
+      "公主切"
+    ],
+    "en": [
+      "hime cut"
+    ]
+  },
+  {
+    "tag": "bob cut",
+    "category": "style",
+    "zh": [
+      "波波头"
+    ],
+    "en": [
+      "bob cut"
+    ]
+  },
+  {
+    "tag": "pixie cut",
+    "category": "style",
+    "zh": [
+      "精灵短发",
+      "超短发"
+    ],
+    "en": [
+      "pixie cut",
+      "pixie cut"
+    ]
+  },
+  {
+    "tag": "sidelocks",
+    "category": "style",
+    "zh": [
+      "鬓角长发",
+      "侧锁"
+    ],
+    "en": [
+      "sidelocks",
+      "sidelocks"
+    ]
+  },
+  {
+    "tag": "hair bun",
+    "category": "style",
+    "zh": [
+      "发髻",
+      "丸子头"
+    ],
+    "en": [
+      "hair bun"
+    ]
+  },
+  {
+    "tag": "double bun",
+    "category": "style",
+    "zh": [
+      "双丸子"
+    ],
+    "en": [
+      "double bun"
+    ]
+  },
+  {
+    "tag": "high ponytail",
+    "category": "style",
+    "zh": [
+      "高马尾"
+    ],
+    "en": [
+      "high ponytail"
+    ]
+  },
+  {
+    "tag": "low twintails",
+    "category": "style",
+    "zh": [
+      "低双马尾"
+    ],
+    "en": [
+      "low twintails",
+      "low twintails"
+    ]
+  },
+  {
+    "tag": "curly hair",
+    "category": "style",
+    "zh": [
+      "卷发",
+      "微卷"
+    ],
+    "en": [
+      "curly hair",
+      "curly hair"
+    ]
+  },
+  {
+    "tag": "straight hair",
+    "category": "style",
+    "zh": [
+      "直发"
+    ],
+    "en": [
+      "straight hair",
+      "straight hair"
+    ]
+  },
+  {
+    "tag": "hair over one eye",
+    "category": "style",
+    "zh": [
+      "遮眼刘海"
+    ],
+    "en": [
+      "hair over one eye"
+    ]
+  },
+  {
+    "tag": "aqua eyes",
+    "category": "eyes",
+    "zh": [
+      "水色瞳"
+    ],
+    "en": [
+      "aqua eyes"
+    ]
+  },
+  {
+    "tag": "orange eyes",
+    "category": "eyes",
+    "zh": [
+      "橙瞳",
+      "橙色眼睛"
+    ],
+    "en": [
+      "orange eyes",
+      "orange eyes"
+    ]
+  },
+  {
+    "tag": "pink eyes",
+    "category": "eyes",
+    "zh": [
+      "粉瞳"
+    ],
+    "en": [
+      "pink eyes"
+    ]
+  },
+  {
+    "tag": "yellow eyes",
+    "category": "eyes",
+    "zh": [
+      "黄瞳",
+      "金色竖瞳"
+    ],
+    "en": [
+      "yellow eyes",
+      "yellow eyes"
+    ]
+  },
+  {
+    "tag": "slit pupils",
+    "category": "eyes",
+    "zh": [
+      "竖瞳",
+      "猫瞳"
+    ],
+    "en": [
+      "slit pupils"
+    ]
+  },
+  {
+    "tag": "symbol-shaped pupils",
+    "category": "eyes",
+    "zh": [
+      "符号瞳",
+      "特殊瞳孔"
+    ],
+    "en": [
+      "symbol-shaped pupils",
+      "symbol-shaped pupils"
+    ]
+  },
+  {
+    "tag": "sparkle",
+    "category": "eyes",
+    "zh": [
+      "星星眼",
+      "闪亮的眼睛"
+    ],
+    "en": [
+      "sparkle",
+      "sparkling eyes"
+    ]
+  },
+  {
+    "tag": "shiny eyes",
+    "category": "eyes",
+    "zh": [
+      "星星眼",
+      "闪亮的眼睛"
+    ],
+    "en": [
+      "shiny eyes",
+      "sparkling eyes"
+    ]
+  },
+  {
+    "tag": "rim lighting",
+    "category": "lighting",
+    "zh": [
+      "轮廓光",
+      "边缘光"
+    ],
+    "en": [
+      "rim lighting"
+    ]
+  },
+  {
+    "tag": "volumetric lighting",
+    "category": "lighting",
+    "zh": [
+      "体积光",
+      "丁达尔光"
+    ],
+    "en": [
+      "volumetric lighting",
+      "god rays"
+    ]
+  },
+  {
+    "tag": "god rays",
+    "category": "scene",
+    "zh": [
+      "体积光",
+      "丁达尔光",
+      "光束"
+    ],
+    "en": [
+      "god rays",
+      "volumetric lighting"
+    ]
+  },
+  {
+    "tag": "neon lights",
+    "category": "scene",
+    "zh": [
+      "霓虹光",
+      "霓虹灯照"
+    ],
+    "en": [
+      "neon lights",
+      "neon lights"
+    ]
+  },
+  {
+    "tag": "golden hour",
+    "category": "scene",
+    "zh": [
+      "金色夕阳",
+      "夕照"
+    ],
+    "en": [
+      "golden hour",
+      "golden hour"
+    ]
+  },
+  {
+    "tag": "overcast",
+    "category": "scene",
+    "zh": [
+      "阴天光",
+      "柔和阴天"
+    ],
+    "en": [
+      "overcast",
+      "overcast"
+    ]
+  },
+  {
+    "tag": "spotlight",
+    "category": "lighting",
+    "zh": [
+      "聚光灯",
+      "追光"
+    ],
+    "en": [
+      "spotlight"
+    ]
+  },
+  {
+    "tag": "snowing",
+    "category": "weather",
+    "zh": [
+      "下雪",
+      "飘雪"
+    ],
+    "en": [
+      "snowing",
+      "snow"
+    ]
+  },
+  {
+    "tag": "fog",
+    "category": "weather",
+    "zh": [
+      "雾",
+      "薄雾"
+    ],
+    "en": [
+      "fog",
+      "mist"
+    ]
+  },
+  {
+    "tag": "mist",
+    "category": "scene",
+    "zh": [
+      "雾",
+      "薄雾",
+      "雾气"
+    ],
+    "en": [
+      "mist",
+      "fog"
+    ]
+  },
+  {
+    "tag": "storm",
+    "category": "scene",
+    "zh": [
+      "暴风雨",
+      "雷雨"
+    ],
+    "en": [
+      "storm",
+      "storm"
+    ]
+  },
+  {
+    "tag": "blue sky",
+    "category": "scene",
+    "zh": [
+      "晴天",
+      "万里无云"
+    ],
+    "en": [
+      "blue sky",
+      "blue sky"
+    ]
+  },
+  {
+    "tag": "dawn",
+    "category": "time",
+    "zh": [
+      "黎明",
+      "破晓"
+    ],
+    "en": [
+      "dawn"
+    ]
+  },
+  {
+    "tag": "dusk",
+    "category": "time",
+    "zh": [
+      "薄暮",
+      "日暮"
+    ],
+    "en": [
+      "dusk"
+    ]
+  },
+  {
+    "tag": "midnight",
+    "category": "scene",
+    "zh": [
+      "午夜",
+      "深夜"
+    ],
+    "en": [
+      "midnight",
+      "midnight"
+    ]
+  },
+  {
+    "tag": "cowboy shot",
+    "category": "shot",
+    "zh": [
+      "牛仔镜头",
+      "膝上景别"
+    ],
+    "en": [
+      "cowboy shot"
+    ]
+  },
+  {
+    "tag": "profile",
+    "category": "pose",
+    "zh": [
+      "侧脸特写",
+      "侧面脸"
+    ],
+    "en": [
+      "profile",
+      "profile"
+    ]
+  },
+  {
+    "tag": "dutch angle",
+    "category": "camera",
+    "zh": [
+      "倾斜构图",
+      "荷兰角"
+    ],
+    "en": [
+      "dutch angle"
+    ]
+  },
+  {
+    "tag": "fisheye",
+    "category": "pose",
+    "zh": [
+      "鱼眼",
+      "广角畸变"
+    ],
+    "en": [
+      "fisheye",
+      "fisheye"
+    ]
+  },
+  {
+    "tag": "looking to the side",
+    "category": "gaze",
+    "zh": [
+      "看向一侧"
+    ],
+    "en": [
+      "looking to the side"
+    ]
+  },
+  {
+    "tag": "looking up",
+    "category": "gaze",
+    "zh": [
+      "抬头看",
+      "仰视看"
+    ],
+    "en": [
+      "looking up"
+    ]
+  },
+  {
+    "tag": "looking down",
+    "category": "gaze",
+    "zh": [
+      "低头看"
+    ],
+    "en": [
+      "looking down"
+    ]
+  },
+  {
+    "tag": "serious",
+    "category": "expression",
+    "zh": [
+      "认真脸",
+      "严肃"
+    ],
+    "en": [
+      "serious",
+      "serious"
+    ]
+  },
+  {
+    "tag": "surprised",
+    "category": "expression",
+    "zh": [
+      "惊讶",
+      "吃惊",
+      "睁大眼睛"
+    ],
+    "en": [
+      "surprised",
+      "surprised"
+    ]
+  },
+  {
+    "tag": "confused",
+    "category": "expression",
+    "zh": [
+      "困惑",
+      "疑惑"
+    ],
+    "en": [
+      "confused",
+      "confused"
+    ]
+  },
+  {
+    "tag": "sleepy",
+    "category": "expression",
+    "zh": [
+      "困倦",
+      "睡眼惺忪",
+      "打哈欠"
+    ],
+    "en": [
+      "sleepy",
+      "sleepy"
+    ]
+  },
+  {
+    "tag": "petals",
+    "category": "scene",
+    "zh": [
+      "花瓣",
+      "飘落花瓣"
+    ],
+    "en": [
+      "petals"
+    ]
+  },
+  {
+    "tag": "flower",
+    "category": "scene",
+    "zh": [
+      "花瓣",
+      "飘落花瓣"
+    ],
+    "en": [
+      "flower",
+      "petals"
+    ]
+  },
+  {
+    "tag": "leaf",
+    "category": "scene",
+    "zh": [
+      "落叶",
+      "枫叶"
+    ],
+    "en": [
+      "leaf",
+      "falling leaves"
+    ]
+  },
+  {
+    "tag": "autumn",
+    "category": "scene",
+    "zh": [
+      "落叶",
+      "枫叶"
+    ],
+    "en": [
+      "autumn",
+      "falling leaves"
+    ]
+  },
+  {
+    "tag": "fireflies",
+    "category": "scene",
+    "zh": [
+      "萤火虫"
+    ],
+    "en": [
+      "fireflies"
+    ]
+  },
+  {
+    "tag": "starry sky",
+    "category": "scene",
+    "zh": [
+      "星空",
+      "满天星"
+    ],
+    "en": [
+      "starry sky"
+    ]
+  },
+  {
+    "tag": "ocean",
+    "category": "scene",
+    "zh": [
+      "大海",
+      "海面",
+      "波涛"
+    ],
+    "en": [
+      "ocean",
+      "ocean"
+    ]
+  },
+  {
+    "tag": "sea",
+    "category": "scene",
+    "zh": [
+      "大海",
+      "海面",
+      "波涛"
+    ],
+    "en": [
+      "sea",
+      "ocean"
+    ]
+  },
+  {
+    "tag": "mountain",
+    "category": "scene",
+    "zh": [
+      "远山",
+      "群山"
+    ],
+    "en": [
+      "mountain",
+      "mountain"
+    ]
+  },
+  {
+    "tag": "teacup",
+    "category": "state",
+    "zh": [
+      "茶杯",
+      "喝茶"
+    ],
+    "en": [
+      "teacup",
+      "tea"
+    ]
+  },
+  {
+    "tag": "tea",
+    "category": "state",
+    "zh": [
+      "茶杯",
+      "喝茶",
+      "红茶"
+    ],
+    "en": [
+      "tea",
+      "teacup"
+    ]
+  },
+  {
+    "tag": "cake",
+    "category": "state",
+    "zh": [
+      "蛋糕",
+      "甜点"
+    ],
+    "en": [
+      "cake",
+      "cake"
+    ]
+  },
+  {
+    "tag": "ramen",
+    "category": "state",
+    "zh": [
+      "拉面",
+      "吃面"
+    ],
+    "en": [
+      "ramen",
+      "ramen"
+    ]
+  },
+  {
+    "tag": "noodles",
+    "category": "state",
+    "zh": [
+      "拉面",
+      "吃面"
+    ],
+    "en": [
+      "noodles",
+      "ramen"
+    ]
+  },
+  {
+    "tag": "bento",
+    "category": "state",
+    "zh": [
+      "便当"
+    ],
+    "en": [
+      "bento"
+    ]
+  },
+  {
+    "tag": "ice cream",
+    "category": "state",
+    "zh": [
+      "冰淇淋",
+      "冰棍"
+    ],
+    "en": [
+      "ice cream",
+      "ice cream"
+    ]
+  },
+  {
+    "tag": "sofa",
+    "category": "scene",
+    "zh": [
+      "沙发"
+    ],
+    "en": [
+      "sofa",
+      "couch"
+    ]
+  },
+  {
+    "tag": "couch",
+    "category": "scene",
+    "zh": [
+      "沙发",
+      "坐在沙发上"
+    ],
+    "en": [
+      "couch",
+      "sofa"
+    ]
+  },
+  {
+    "tag": "desk",
+    "category": "scene",
+    "zh": [
+      "书桌",
+      "办公桌"
+    ],
+    "en": [
+      "desk",
+      "desk"
+    ]
+  },
+  {
+    "tag": "school desk",
+    "category": "scene",
+    "zh": [
+      "课桌"
+    ],
+    "en": [
+      "school desk",
+      "school desk"
+    ]
+  },
+  {
+    "tag": "chair",
+    "category": "scene",
+    "zh": [
+      "椅子",
+      "坐在椅子上"
+    ],
+    "en": [
+      "chair",
+      "chair"
+    ]
+  },
+  {
+    "tag": "balcony",
+    "category": "scene",
+    "zh": [
+      "阳台",
+      "露台"
+    ],
+    "en": [
+      "balcony"
+    ]
+  },
+  {
+    "tag": "cardigan",
+    "category": "clothing",
+    "zh": [
+      "开衫"
+    ],
+    "en": [
+      "cardigan"
+    ]
+  },
+  {
+    "tag": "scarf",
+    "category": "clothing",
+    "zh": [
+      "冬日围巾",
+      "厚围巾"
+    ],
+    "en": [
+      "scarf",
+      "scarf"
+    ]
+  },
+  {
+    "tag": "beret",
+    "category": "clothing",
+    "zh": [
+      "画家帽",
+      "贝雷"
+    ],
+    "en": [
+      "beret",
+      "beret"
+    ]
+  },
+  {
+    "tag": "mouth mask",
+    "category": "clothing",
+    "zh": [
+      "口罩",
+      "医用口罩"
+    ],
+    "en": [
+      "mouth mask",
+      "mouth mask"
+    ]
+  },
+  {
+    "tag": "hood",
+    "category": "clothing",
+    "zh": [
+      "戴着兜帽",
+      "兜帽遮脸"
+    ],
+    "en": [
+      "hood",
+      "hood up"
+    ]
+  },
+  {
+    "tag": "hoodie",
+    "category": "clothing",
+    "zh": [
+      "戴着兜帽",
+      "兜帽遮脸"
+    ],
+    "en": [
+      "hoodie",
+      "hood up"
+    ]
+  },
+  {
+    "tag": "mermaid",
+    "category": "race",
+    "zh": [
+      "人鱼",
+      "美人鱼"
+    ],
+    "en": [
+      "mermaid"
+    ]
+  },
+  {
+    "tag": "fairy",
+    "category": "race",
+    "zh": [
+      "妖精",
+      "小仙子"
+    ],
+    "en": [
+      "fairy"
+    ]
+  },
+  {
+    "tag": "werewolf",
+    "category": "race",
+    "zh": [
+      "狼人",
+      "女狼人"
+    ],
+    "en": [
+      "werewolf",
+      "werewolf"
+    ]
+  },
+  {
+    "tag": "ghost",
+    "category": "race",
+    "zh": [
+      "幽灵",
+      "鬼魂"
+    ],
+    "en": [
+      "ghost"
+    ]
+  },
+  {
+    "tag": "doll joints",
+    "category": "race",
+    "zh": [
+      "人偶",
+      "洋娃娃般"
+    ],
+    "en": [
+      "doll joints",
+      "doll"
+    ]
+  },
+  {
+    "tag": "doll",
+    "category": "race",
+    "zh": [
+      "人偶",
+      "洋娃娃般"
+    ],
+    "en": [
+      "doll",
+      "doll"
+    ]
+  },
+  {
+    "tag": "hood up",
+    "category": "clothing",
+    "zh": [
+      "戴着兜帽"
+    ],
+    "en": [
+      "hood up"
+    ]
+  }
 ]

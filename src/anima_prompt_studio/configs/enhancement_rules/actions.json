@@ -1,120 +1,1607 @@
 [
   {
-    "id":"crouching", "type":"动作", "priority":140,
-    "triggers":["蹲","蹲着","蹲下","半蹲","蹲在地上"],
-    "content":"She crouches low to the ground.", "canonical_phrases":["crouches","crouching"],
-    "emit_tags_when_canonical":true, "tags":["crouching"], "suppress_tags":["sitting"], "suppress_patterns":[],
-    "natural_replacements":[["\\bsits\\b","crouches"],["\\bsit\\b","crouch"],["\\bsitting\\b","crouching"]],
-    "composition_recommendations":{"shot":[["全身",80,"蹲姿需要显示腿部和地面关系"]],"camera_height":[["高机位",45,"略高视点有利于显示蹲姿周围的地面"]]}
+    "id": "crouching",
+    "type": "动作",
+    "priority": 140,
+    "triggers": [
+      "蹲",
+      "蹲着",
+      "蹲下",
+      "半蹲",
+      "蹲在地上"
+    ],
+    "content": "She crouches low to the ground.",
+    "canonical_phrases": [
+      "crouches",
+      "crouching"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "crouching"
+    ],
+    "suppress_tags": [
+      "sitting"
+    ],
+    "suppress_patterns": [],
+    "natural_replacements": [
+      [
+        "\\bsits\\b",
+        "crouches"
+      ],
+      [
+        "\\bsit\\b",
+        "crouch"
+      ],
+      [
+        "\\bsitting\\b",
+        "crouching"
+      ]
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "全身",
+          80,
+          "蹲姿需要显示腿部和地面关系"
+        ]
+      ],
+      "camera_height": [
+        [
+          "高机位",
+          45,
+          "略高视点有利于显示蹲姿周围的地面"
+        ]
+      ]
+    }
   },
   {
-    "id":"mushroom_search", "type":"动作", "priority":138,
-    "triggers_all":[["采蘑菇","摘蘑菇","捡蘑菇"],["寻找","搜索","仔细找"]],
-    "content":"", "canonical_phrases":["searches the grass for mushrooms","searching the grass for mushrooms"],
-    "emit_tags_when_canonical":true, "tags":["mushroom"], "suppress_tags":[], "suppress_patterns":[],
-    "natural_replacements":[["(?:picks?|gathers?) mushrooms and (?:carefully )?looks down for mushrooms in the grass","carefully searches the grass for mushrooms"],["(?:picks?|gathers?) mushrooms and (?:carefully )?searches? (?:through )?the grass for mushrooms","carefully searches the grass for mushrooms"]]
-  },
-  {
-    "id":"wings_spread", "type":"动作", "priority":136,
-    "triggers_all":[["白色羽翼","白色翅膀","白翅"],["展开","张开"]],
-    "content":"", "canonical_phrases":["white wings fully spread","white wings spread wide"],
-    "emit_tags_when_canonical":true, "tags":["white wings"], "suppress_tags":["wings","giant"], "suppress_patterns":[],
-    "natural_replacements":[["the (?:giant|huge|large) white wing was fully spread","her huge white wings fully spread"],["(?:a |the )?white wing(?:s)? (?:was|were) (?:fully )?spread","her white wings fully spread"]]
-  },
-  {
-    "id":"floating_midair", "type":"动作", "priority":135,
-    "triggers":["悬浮在空中","漂浮在空中","悬浮半空","漂浮半空"],
-    "content":"", "canonical_phrases":["floating in midair","body floating in midair"],
-    "emit_tags_when_canonical":true, "tags":["floating"], "suppress_tags":["suspension"], "suppress_patterns":[],
-    "natural_replacements":[["the body was suspended in the air","her body floating in midair"],["(?:her )?body (?:is|was) suspended (?:in the air|midair)","her body floating in midair"]]
-  },
-  {
-    "id":"descending", "type":"动作", "priority":134,
-    "triggers":["从天而降","降落","降下","缓缓降落","飘落","下落","降临"],
-    "content":"", "canonical_phrases":["descends","descending"],
-    "emit_tags_when_canonical":true, "tags":[], "suppress_tags":[], "suppress_patterns":[],
-    "natural_replacements":[["\\bfell slowly from\\b","slowly descends from"],["\\bslowly fell from\\b","slowly descends from"],[", and (her (?:huge )?white wings fully spread) and (her body floating in midair)"," with \\1, \\2"]]
-  },
-  {
-    "id":"directional_running", "type":"动作", "priority":132,
-    "triggers":["奔跑","跑动","快速跑","向前冲"],
-    "content":"", "canonical_phrases":["runs quickly","running quickly","sprinting"],
-    "emit_tags_when_canonical":true, "tags":["running","leaning forward"], "suppress_tags":["photo (object)","back"], "suppress_patterns":[],
-    "natural_replacements":[["running fast on the right side of the (?:picture|image|frame)","runs quickly toward the right"],["running fast on the left side of the (?:picture|image|frame)","runs quickly toward the left"],["\\blong hairs\\b","long hair"],["\\bscarfs\\b","scarf"],[",? (?:long hair|hair) and (?:a )?scarf(?:ves)? (?:running|flying|flowing) behind (?:her|his)(?: back)?",", with her long hair and scarf flowing behind her"]]
-  },
-  {
-    "id":"hug_knees", "type":"动作", "priority":100,
-    "triggers":["双手抱膝","抱着膝盖","抱膝坐着","双臂环抱膝盖","缩着腿抱膝","抱膝"],
-    "content":"She sits with her knees drawn close, both arms wrapped around her knees.",
-    "canonical_phrases":["arms wrapped around her knees","arms wrapped around her legs","hugging her knees"],
-    "emit_tags_when_canonical":true,
-    "tags":["sitting","hugging own legs"], "suppress_tags":["knees","sitting on person"],
-    "composition_recommendations":{"shot":[["膝上",75,"膝上景别可完整显示抱膝姿势"]],"angle":[["三分之四",55,"斜向视角更容易显示手臂和膝盖关系"]]},
-    "suppress_patterns":[",?\\s*with (?:both )?(?:her )?hands on (?:her )?knees", "sitting on (?:her )?knees", "with (?:her )?hands on (?:her )?knees"],
-    "natural_replacements":[
-      ["A girl sitting on her knees","A girl sits with her knees drawn close, both arms wrapped around her knees"],
-      ["A girl sits on the floor with her knees","A girl sits on the floor with her knees drawn close, both arms wrapped around her knees"],
-      ["The girl's arms and arms and knees are shrunk together","She sits with her knees drawn close, both arms wrapped around her knees"],
-      ["The girl sits by the window with her legs shrunk","The girl sits by the window with her knees drawn close, both arms wrapped around her knees"]
+    "id": "mushroom_search",
+    "type": "动作",
+    "priority": 138,
+    "triggers_all": [
+      [
+        "采蘑菇",
+        "摘蘑菇",
+        "捡蘑菇"
+      ],
+      [
+        "寻找",
+        "搜索",
+        "仔细找"
+      ]
+    ],
+    "content": "",
+    "canonical_phrases": [
+      "searches the grass for mushrooms",
+      "searching the grass for mushrooms"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "mushroom"
+    ],
+    "suppress_tags": [],
+    "suppress_patterns": [],
+    "natural_replacements": [
+      [
+        "(?:picks?|gathers?) mushrooms and (?:carefully )?looks down for mushrooms in the grass",
+        "carefully searches the grass for mushrooms"
+      ],
+      [
+        "(?:picks?|gathers?) mushrooms and (?:carefully )?searches? (?:through )?the grass for mushrooms",
+        "carefully searches the grass for mushrooms"
+      ]
     ]
   },
   {
-    "id":"table_dangling", "type":"动作", "priority":100,
-    "triggers":["双腿垂下","两腿垂下","脚不着地"],
-    "content":"She sits with both legs dangling freely, her feet off the ground.",
-    "canonical_phrases":["feet off the ground","legs dangling"], "emit_tags_when_canonical":true,
-    "tags":["legs dangling"], "suppress_tags":["legs"],
-    "composition_recommendations":{"shot":[["全身",100,"垂下的双腿和地面关系需要全身景别"]]},
-    "suppress_patterns":["with (?:her )?legs down", "with both legs down"]
+    "id": "wings_spread",
+    "type": "动作",
+    "priority": 136,
+    "triggers_all": [
+      [
+        "白色羽翼",
+        "白色翅膀",
+        "白翅"
+      ],
+      [
+        "展开",
+        "张开"
+      ]
+    ],
+    "content": "",
+    "canonical_phrases": [
+      "white wings fully spread",
+      "white wings spread wide"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "white wings"
+    ],
+    "suppress_tags": [
+      "wings",
+      "giant"
+    ],
+    "suppress_patterns": [],
+    "natural_replacements": [
+      [
+        "the (?:giant|huge|large) white wing was fully spread",
+        "her huge white wings fully spread"
+      ],
+      [
+        "(?:a |the )?white wing(?:s)? (?:was|were) (?:fully )?spread",
+        "her white wings fully spread"
+      ]
+    ]
   },
   {
-    "id":"touching_hair", "type":"动作", "priority":94,
-    "triggers":["撩头发","摸头发","手放在头发上","整理头发"],
-    "content":"She raises one hand to her hair.",
-    "canonical_phrases":["touches her hair","touching her hair","hand to her hair"], "emit_tags_when_canonical":true,
-    "tags":["hand in hair"], "suppress_tags":[], "suppress_patterns":[],
-    "composition_recommendations":{"shot":[["半身",65,"半身景别能清楚显示手与头发的互动"]]}
+    "id": "floating_midair",
+    "type": "动作",
+    "priority": 135,
+    "triggers": [
+      "悬浮在空中",
+      "漂浮在空中",
+      "悬浮半空",
+      "漂浮半空"
+    ],
+    "content": "",
+    "canonical_phrases": [
+      "floating in midair",
+      "body floating in midair"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "floating"
+    ],
+    "suppress_tags": [
+      "suspension"
+    ],
+    "suppress_patterns": [],
+    "natural_replacements": [
+      [
+        "the body was suspended in the air",
+        "her body floating in midair"
+      ],
+      [
+        "(?:her )?body (?:is|was) suspended (?:in the air|midair)",
+        "her body floating in midair"
+      ]
+    ]
   },
   {
-    "id":"hair_tuck", "type":"动作", "priority":95,
-    "triggers":["把头发拨到耳后","拨到耳后","将发丝别到耳后","别到耳后"],
-    "content":"She gently raises one hand and tucks a strand of hair behind her ear.",
-    "tags":["hair tuck"], "suppress_tags":[], "suppress_patterns":[]
-    ,"composition_recommendations":{"shot":[["半身",70,"半身景别能清楚显示手部和头发动作"]]}
+    "id": "descending",
+    "type": "动作",
+    "priority": 134,
+    "triggers": [
+      "从天而降",
+      "降落",
+      "降下",
+      "缓缓降落",
+      "飘落",
+      "下落",
+      "降临"
+    ],
+    "content": "",
+    "canonical_phrases": [
+      "descends",
+      "descending"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [],
+    "suppress_tags": [],
+    "suppress_patterns": [],
+    "natural_replacements": [
+      [
+        "\\bfell slowly from\\b",
+        "slowly descends from"
+      ],
+      [
+        "\\bslowly fell from\\b",
+        "slowly descends from"
+      ],
+      [
+        ", and (her (?:huge )?white wings fully spread) and (her body floating in midair)",
+        " with \\1, \\2"
+      ]
+    ]
   },
   {
-    "id":"fingers_through_hair", "type":"动作", "priority":95,
-    "triggers":["手指穿过发丝","手指穿过头发"],
-    "content":"She gently runs her fingers through her hair.",
-    "tags":["hand in hair"], "suppress_tags":[], "suppress_patterns":[]
+    "id": "directional_running",
+    "type": "动作",
+    "priority": 132,
+    "triggers": [
+      "奔跑",
+      "跑动",
+      "快速跑",
+      "向前冲"
+    ],
+    "content": "",
+    "canonical_phrases": [
+      "runs quickly",
+      "running quickly",
+      "sprinting"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "running",
+      "leaning forward"
+    ],
+    "suppress_tags": [
+      "photo (object)",
+      "back"
+    ],
+    "suppress_patterns": [],
+    "natural_replacements": [
+      [
+        "running fast on the right side of the (?:picture|image|frame)",
+        "runs quickly toward the right"
+      ],
+      [
+        "running fast on the left side of the (?:picture|image|frame)",
+        "runs quickly toward the left"
+      ],
+      [
+        "\\blong hairs\\b",
+        "long hair"
+      ],
+      [
+        "\\bscarfs\\b",
+        "scarf"
+      ],
+      [
+        ",? (?:long hair|hair) and (?:a )?scarf(?:ves)? (?:running|flying|flowing) behind (?:her|his)(?: back)?",
+        ", with her long hair and scarf flowing behind her"
+      ]
+    ]
   },
   {
-    "id":"look_down_camera", "type":"镜头", "priority":100,
-    "triggers":["低头看镜头","低头看下方镜头","看向下方镜头","俯视镜头","俯视下方镜头"],
-    "content":"She lowers her head and looks directly at the camera positioned below her.",
-    "tags":["looking at viewer","from below"], "suppress_tags":["camera"],
-    "composition_recommendations":{"camera_height":[["低机位",110,"镜头明确位于人物下方"]],"gaze":[["看镜头",110,"人物明确看向下方镜头"]]},
-    "suppress_patterns":["looks down at the camera", "looking down at the camera"]
+    "id": "hug_knees",
+    "type": "动作",
+    "priority": 100,
+    "triggers": [
+      "双手抱膝",
+      "抱着膝盖",
+      "抱膝坐着",
+      "双臂环抱膝盖",
+      "缩着腿抱膝",
+      "抱膝"
+    ],
+    "content": "She sits with her knees drawn close, both arms wrapped around her knees.",
+    "canonical_phrases": [
+      "arms wrapped around her knees",
+      "arms wrapped around her legs",
+      "hugging her knees"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "sitting",
+      "hugging own legs"
+    ],
+    "suppress_tags": [
+      "knees",
+      "sitting on person"
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "膝上",
+          75,
+          "膝上景别可完整显示抱膝姿势"
+        ]
+      ],
+      "angle": [
+        [
+          "三分之四",
+          55,
+          "斜向视角更容易显示手臂和膝盖关系"
+        ]
+      ]
+    },
+    "suppress_patterns": [
+      ",?\\s*with (?:both )?(?:her )?hands on (?:her )?knees",
+      "sitting on (?:her )?knees",
+      "with (?:her )?hands on (?:her )?knees"
+    ],
+    "natural_replacements": [
+      [
+        "A girl sitting on her knees",
+        "A girl sits with her knees drawn close, both arms wrapped around her knees"
+      ],
+      [
+        "A girl sits on the floor with her knees",
+        "A girl sits on the floor with her knees drawn close, both arms wrapped around her knees"
+      ],
+      [
+        "The girl's arms and arms and knees are shrunk together",
+        "She sits with her knees drawn close, both arms wrapped around her knees"
+      ],
+      [
+        "The girl sits by the window with her legs shrunk",
+        "The girl sits by the window with her knees drawn close, both arms wrapped around her knees"
+      ]
+    ]
   },
   {
-    "id":"against_wall", "type":"动作", "priority":90,
-    "triggers":["靠墙站立","靠着墙站","背靠墙站"],
-    "content":"She stands with her back lightly against the wall, her posture relaxed and natural.",
-    "tags":["standing"], "suppress_tags":[], "suppress_patterns":[]
+    "id": "table_dangling",
+    "type": "动作",
+    "priority": 100,
+    "triggers": [
+      "双腿垂下",
+      "两腿垂下",
+      "脚不着地"
+    ],
+    "content": "She sits with both legs dangling freely, her feet off the ground.",
+    "canonical_phrases": [
+      "feet off the ground",
+      "legs dangling"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "legs dangling"
+    ],
+    "suppress_tags": [
+      "legs"
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "全身",
+          100,
+          "垂下的双腿和地面关系需要全身景别"
+        ]
+      ]
+    },
+    "suppress_patterns": [
+      "with (?:her )?legs down",
+      "with both legs down"
+    ]
   },
   {
-    "id":"looking_back", "type":"动作", "priority":90,
-    "triggers":["回头看","回眸"],
-    "content":"She turns her head back over her shoulder.",
-    "tags":["looking back"], "suppress_tags":[], "suppress_patterns":[]
+    "id": "touching_hair",
+    "type": "动作",
+    "priority": 94,
+    "triggers": [
+      "撩头发",
+      "摸头发",
+      "手放在头发上",
+      "整理头发"
+    ],
+    "content": "She raises one hand to her hair.",
+    "canonical_phrases": [
+      "touches her hair",
+      "touching her hair",
+      "hand to her hair"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "hand in hair"
+    ],
+    "suppress_tags": [],
+    "suppress_patterns": [],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "半身",
+          65,
+          "半身景别能清楚显示手与头发的互动"
+        ]
+      ]
+    }
   },
   {
-    "id":"lean_window", "type":"动作", "priority":90,
-    "triggers":["把头伸出窗外","探出窗外"],
-    "content":"She leans out of the open window, resting one hand on the frame as she looks outside.",
-    "canonical_phrases":["leans out of the open window","leaning out of the window"], "emit_tags_when_canonical":true,
-    "tags":["open window"], "suppress_tags":[], "suppress_patterns":[],
-    "natural_replacements":[["The girl came out (?:of )?the window and looked at the view","The girl leans out of the open window, resting one hand on the frame as she looks outside"]],
-    "composition_recommendations":{"shot":[["半身",85,"半身能同时表现人物和窗框"]],"angle":[["三分之四",80,"斜向视角更适合探出窗外的动作"]],"gaze":[["看向画外",85,"探窗动作的视线应跟随窗外环境"]],"aspect":[["横图",65,"横图可容纳窗框和视线方向"]]}
+    "id": "hair_tuck",
+    "type": "动作",
+    "priority": 95,
+    "triggers": [
+      "把头发拨到耳后",
+      "拨到耳后",
+      "将发丝别到耳后",
+      "别到耳后"
+    ],
+    "content": "She gently raises one hand and tucks a strand of hair behind her ear.",
+    "tags": [
+      "hair tuck"
+    ],
+    "suppress_tags": [],
+    "suppress_patterns": [],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "半身",
+          70,
+          "半身景别能清楚显示手部和头发动作"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "fingers_through_hair",
+    "type": "动作",
+    "priority": 95,
+    "triggers": [
+      "手指穿过发丝",
+      "手指穿过头发"
+    ],
+    "content": "She gently runs her fingers through her hair.",
+    "tags": [
+      "hand in hair"
+    ],
+    "suppress_tags": [],
+    "suppress_patterns": []
+  },
+  {
+    "id": "look_down_camera",
+    "type": "镜头",
+    "priority": 100,
+    "triggers": [
+      "低头看镜头",
+      "低头看下方镜头",
+      "看向下方镜头",
+      "俯视镜头",
+      "俯视下方镜头"
+    ],
+    "content": "She lowers her head and looks directly at the camera positioned below her.",
+    "tags": [
+      "looking at viewer",
+      "from below"
+    ],
+    "suppress_tags": [
+      "camera"
+    ],
+    "composition_recommendations": {
+      "camera_height": [
+        [
+          "低机位",
+          110,
+          "镜头明确位于人物下方"
+        ]
+      ],
+      "gaze": [
+        [
+          "看镜头",
+          110,
+          "人物明确看向下方镜头"
+        ]
+      ]
+    },
+    "suppress_patterns": [
+      "looks down at the camera",
+      "looking down at the camera"
+    ]
+  },
+  {
+    "id": "against_wall",
+    "type": "动作",
+    "priority": 90,
+    "triggers": [
+      "靠墙站立",
+      "靠着墙站",
+      "背靠墙站"
+    ],
+    "content": "She stands with her back lightly against the wall, her posture relaxed and natural.",
+    "tags": [
+      "standing"
+    ],
+    "suppress_tags": [],
+    "suppress_patterns": []
+  },
+  {
+    "id": "looking_back",
+    "type": "动作",
+    "priority": 90,
+    "triggers": [
+      "回头看",
+      "回眸"
+    ],
+    "content": "She turns her head back over her shoulder.",
+    "tags": [
+      "looking back"
+    ],
+    "suppress_tags": [],
+    "suppress_patterns": []
+  },
+  {
+    "id": "lean_window",
+    "type": "动作",
+    "priority": 90,
+    "triggers": [
+      "把头伸出窗外",
+      "探出窗外"
+    ],
+    "content": "She leans out of the open window, resting one hand on the frame as she looks outside.",
+    "canonical_phrases": [
+      "leans out of the open window",
+      "leaning out of the window"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "open window"
+    ],
+    "suppress_tags": [],
+    "suppress_patterns": [],
+    "natural_replacements": [
+      [
+        "The girl came out (?:of )?the window and looked at the view",
+        "The girl leans out of the open window, resting one hand on the frame as she looks outside"
+      ]
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "半身",
+          85,
+          "半身能同时表现人物和窗框"
+        ]
+      ],
+      "angle": [
+        [
+          "三分之四",
+          80,
+          "斜向视角更适合探出窗外的动作"
+        ]
+      ],
+      "gaze": [
+        [
+          "看向画外",
+          85,
+          "探窗动作的视线应跟随窗外环境"
+        ]
+      ],
+      "aspect": [
+        [
+          "横图",
+          65,
+          "横图可容纳窗框和视线方向"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "kneeling_pose",
+    "type": "动作",
+    "priority": 92,
+    "triggers": [
+      "跪着",
+      "跪下",
+      "跪坐",
+      "跪在"
+    ],
+    "content": "She is kneeling.",
+    "canonical_phrases": [
+      "kneeling",
+      "on her knees",
+      "kneels"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "kneeling"
+    ],
+    "suppress_tags": [
+      "sitting"
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "膝上",
+          80,
+          "跪姿需要显示膝部与躯干关系"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "spread_legs_pose",
+    "type": "动作",
+    "priority": 96,
+    "triggers": [
+      "张开双腿",
+      "张腿",
+      "双腿张开",
+      "M字开腿"
+    ],
+    "content": "She spreads her legs.",
+    "canonical_phrases": [
+      "spread legs",
+      "spreads her legs",
+      "legs spread"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "spread legs"
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "膝上",
+          85,
+          "张腿姿势需要足够下半身空间"
+        ],
+        [
+          "半身",
+          70,
+          "半身可保留张腿上半身关系"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "lying_on_bed",
+    "type": "动作",
+    "priority": 91,
+    "triggers": [
+      "躺在床上",
+      "躺在床单上",
+      "仰躺在床"
+    ],
+    "content": "She lies on the bed.",
+    "canonical_phrases": [
+      "lies on the bed",
+      "lying on the bed",
+      "lying on bed"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "lying",
+      "on bed"
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "半身",
+          70,
+          "床上躺姿默认半身"
+        ],
+        [
+          "膝上",
+          60,
+          "膝上可表现更多肢体"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "against_wall_pose",
+    "type": "动作",
+    "priority": 90,
+    "triggers": [
+      "壁咚",
+      "被按在墙上",
+      "靠墙"
+    ],
+    "content": "She is pressed against the wall.",
+    "canonical_phrases": [
+      "against the wall",
+      "against wall",
+      "pinned against the wall"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "against wall"
+    ]
+  },
+  {
+    "id": "bent_over_pose",
+    "type": "动作",
+    "priority": 93,
+    "triggers": [
+      "弯腰",
+      "趴在桌上",
+      "俯身"
+    ],
+    "content": "She bends over.",
+    "canonical_phrases": [
+      "bent over",
+      "bends over",
+      "bending over"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "bent over"
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "膝上",
+          80,
+          "弯腰姿势需要显示躯干与下半身"
+        ],
+        [
+          "全身",
+          70,
+          "全身可完整表现弯腰"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "ahegao_face",
+    "type": "表情",
+    "priority": 100,
+    "triggers": [
+      "阿嘿颜",
+      "啊嘿颜"
+    ],
+    "content": "She has an ahegao expression with her tongue out and rolling eyes.",
+    "canonical_phrases": [
+      "ahegao"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "ahegao",
+      "tongue out",
+      "rolling eyes"
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "头像",
+          75,
+          "阿嘿颜表情细节需要近景"
+        ],
+        [
+          "胸像",
+          70,
+          "胸像可同时保留表情与上身"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "blush_soft",
+    "type": "表情",
+    "priority": 70,
+    "triggers": [
+      "脸红",
+      "红着脸",
+      "害羞脸红"
+    ],
+    "content": "Her face is blushing.",
+    "canonical_phrases": [
+      "blush",
+      "blushing",
+      "flushed cheeks"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "blush"
+    ]
+  },
+  {
+    "id": "open_mouth_soft",
+    "type": "表情",
+    "priority": 72,
+    "triggers": [
+      "嘴巴微张",
+      "微张着嘴",
+      "张开嘴",
+      "张嘴"
+    ],
+    "content": "Her mouth is slightly open.",
+    "canonical_phrases": [
+      "open mouth",
+      "mouth open",
+      "slightly open mouth"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "open mouth"
+    ]
+  },
+  {
+    "id": "from_behind_pose",
+    "type": "镜头",
+    "priority": 95,
+    "triggers": [
+      "从背后拍摄",
+      "从后面拍摄",
+      "背面拍摄"
+    ],
+    "content": "Viewed from behind.",
+    "canonical_phrases": [
+      "from behind",
+      "viewed from behind",
+      "back view"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "from behind"
+    ],
+    "composition_recommendations": {
+      "angle": [
+        [
+          "背面",
+          105,
+          "背面拍摄应使用背面视角"
+        ]
+      ],
+      "gaze": [
+        [
+          "看向画外",
+          80,
+          "背面人物默认不看镜头"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "ass_focus_action",
+    "type": "镜头",
+    "priority": 96,
+    "triggers": [
+      "臀部特写",
+      "翘臀特写",
+      "屁股特写"
+    ],
+    "content": "Ass focus.",
+    "canonical_phrases": [
+      "ass focus",
+      "hip focus",
+      "butt focus"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "ass",
+      "ass focus"
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "膝上",
+          95,
+          "臀部焦点需要下半身景别"
+        ]
+      ],
+      "angle": [
+        [
+          "背面",
+          90,
+          "臀部焦点默认背面"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "cowgirl_position",
+    "type": "动作",
+    "priority": 98,
+    "triggers": [
+      "女上位",
+      "骑乘位"
+    ],
+    "content": "She is in cowgirl position.",
+    "canonical_phrases": [
+      "cowgirl position",
+      "cowgirl"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "cowgirl position",
+      "sex"
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "膝上",
+          85,
+          "性行为场景需要肢体空间"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "doggy_position",
+    "type": "动作",
+    "priority": 98,
+    "triggers": [
+      "后入",
+      "后入式"
+    ],
+    "content": "Doggy style position.",
+    "canonical_phrases": [
+      "doggy style",
+      "doggystyle"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "doggy style",
+      "sex",
+      "from behind"
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "膝上",
+          85,
+          "后入需要显示身体关系"
+        ]
+      ],
+      "angle": [
+        [
+          "侧面",
+          70,
+          "侧面更容易表现后入结构"
+        ],
+        [
+          "背面",
+          65,
+          "背面也可表现后入"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "missionary_position",
+    "type": "动作",
+    "priority": 98,
+    "triggers": [
+      "男上位",
+      "传教士"
+    ],
+    "content": "Missionary position.",
+    "canonical_phrases": [
+      "missionary",
+      "missionary position"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "missionary",
+      "sex"
+    ]
+  },
+  {
+    "id": "fellatio_action",
+    "type": "动作",
+    "priority": 98,
+    "triggers": [
+      "口交"
+    ],
+    "content": "She is performing fellatio.",
+    "canonical_phrases": [
+      "fellatio",
+      "blowjob",
+      "oral"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "fellatio",
+      "oral"
+    ],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "半身",
+          75,
+          "口交动作适合半身或更近景别"
+        ],
+        [
+          "胸像",
+          70,
+          "近景可表现面部与动作"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "bound_action",
+    "type": "动作",
+    "priority": 94,
+    "triggers": [
+      "被绳子捆绑",
+      "绳缚",
+      "捆绑"
+    ],
+    "content": "She is bound with rope.",
+    "canonical_phrases": [
+      "bound",
+      "bondage",
+      "tied with rope",
+      "bound with rope"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "bound",
+      "bondage",
+      "rope"
+    ]
+  },
+  {
+    "id": "legs_crossed_pose",
+    "type": "动作",
+    "priority": 88,
+    "triggers": [
+      "双腿交叠",
+      "跷二郎腿"
+    ],
+    "content": "She crosses her legs.",
+    "canonical_phrases": [
+      "legs crossed",
+      "crossing her legs",
+      "crossed legs"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "legs crossed"
+    ]
+  },
+  {
+    "id": "reverse_cowgirl",
+    "type": "动作",
+    "priority": 98,
+    "triggers": [
+      "反骑乘",
+      "反向女上位",
+      "背向女上位"
+    ],
+    "content": "Reverse cowgirl position.",
+    "canonical_phrases": [
+      "reverse cowgirl"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "reverse cowgirl",
+      "sex"
+    ]
+  },
+  {
+    "id": "mating_press",
+    "type": "动作",
+    "priority": 98,
+    "triggers": [
+      "架腿位",
+      "打桩位",
+      "压腿位"
+    ],
+    "content": "Mating press position.",
+    "canonical_phrases": [
+      "mating press"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "mating press",
+      "sex"
+    ]
+  },
+  {
+    "id": "full_nelson",
+    "type": "动作",
+    "priority": 97,
+    "triggers": [
+      "火车便当",
+      "全尼尔森"
+    ],
+    "content": "Full nelson position.",
+    "canonical_phrases": [
+      "full nelson"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "full nelson",
+      "sex"
+    ]
+  },
+  {
+    "id": "prone_bone",
+    "type": "动作",
+    "priority": 97,
+    "triggers": [
+      "俯卧位",
+      "趴着后入"
+    ],
+    "content": "Prone bone position.",
+    "canonical_phrases": [
+      "prone bone"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "prone bone",
+      "sex",
+      "from behind"
+    ]
+  },
+  {
+    "id": "all_fours",
+    "type": "动作",
+    "priority": 94,
+    "triggers": [
+      "四肢着地",
+      "跪趴",
+      "塌腰抬臀"
+    ],
+    "content": "She is on all fours.",
+    "canonical_phrases": [
+      "all fours",
+      "on all fours",
+      "face down ass up"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "all fours"
+    ]
+  },
+  {
+    "id": "sixtynine",
+    "type": "动作",
+    "priority": 97,
+    "triggers": [
+      "六九式",
+      "六九"
+    ],
+    "content": "69 position.",
+    "canonical_phrases": [
+      "69",
+      "sixty-nine"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "69",
+      "oral"
+    ]
+  },
+  {
+    "id": "facesitting",
+    "type": "动作",
+    "priority": 96,
+    "triggers": [
+      "坐脸",
+      "颜面骑乘"
+    ],
+    "content": "Facesitting.",
+    "canonical_phrases": [
+      "facesitting",
+      "face sitting"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "facesitting"
+    ]
+  },
+  {
+    "id": "anal_act",
+    "type": "动作",
+    "priority": 96,
+    "triggers": [
+      "肛交",
+      "后庭"
+    ],
+    "content": "Anal sex.",
+    "canonical_phrases": [
+      "anal"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "anal"
+    ]
+  },
+  {
+    "id": "presenting_pose",
+    "type": "动作",
+    "priority": 94,
+    "triggers": [
+      "呈现私处",
+      "主动展示",
+      "掰开展示"
+    ],
+    "content": "She is presenting.",
+    "canonical_phrases": [
+      "presenting"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "presenting"
+    ]
+  },
+  {
+    "id": "micro_bikini",
+    "type": "服装",
+    "priority": 92,
+    "triggers": [
+      "微型比基尼",
+      "极小比基尼",
+      "线比基尼"
+    ],
+    "content": "Wearing a micro bikini.",
+    "canonical_phrases": [
+      "micro bikini"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "micro bikini",
+      "bikini"
+    ]
+  },
+  {
+    "id": "latex_suit",
+    "type": "服装",
+    "priority": 92,
+    "triggers": [
+      "乳胶衣",
+      "胶衣"
+    ],
+    "content": "Wearing a latex suit.",
+    "canonical_phrases": [
+      "latex"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "latex"
+    ]
+  },
+  {
+    "id": "miko_outfit",
+    "type": "服装",
+    "priority": 91,
+    "triggers": [
+      "巫女服",
+      "巫女装"
+    ],
+    "content": "Wearing a miko outfit.",
+    "canonical_phrases": [
+      "miko"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "miko"
+    ]
+  },
+  {
+    "id": "buruma_outfit",
+    "type": "服装",
+    "priority": 91,
+    "triggers": [
+      "布鲁马",
+      "体操服短裤"
+    ],
+    "content": "Wearing buruma.",
+    "canonical_phrases": [
+      "buruma"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "buruma",
+      "gym uniform"
+    ]
+  },
+  {
+    "id": "virgin_killer",
+    "type": "服装",
+    "priority": 92,
+    "triggers": [
+      "处男杀手毛衣",
+      "露背毛衣"
+    ],
+    "content": "Wearing a virgin killer sweater.",
+    "canonical_phrases": [
+      "virgin killer sweater"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "virgin killer sweater"
+    ]
+  },
+  {
+    "id": "crotchless_wear",
+    "type": "服装",
+    "priority": 94,
+    "triggers": [
+      "开档",
+      "开裆内裤",
+      "开档连裤袜"
+    ],
+    "content": "Wearing crotchless clothing.",
+    "canonical_phrases": [
+      "crotchless"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "crotchless"
+    ]
+  },
+  {
+    "id": "undressing_action",
+    "type": "动作",
+    "priority": 90,
+    "triggers": [
+      "正在脱衣",
+      "半脱"
+    ],
+    "content": "She is undressing.",
+    "canonical_phrases": [
+      "undressing",
+      "half-undressed"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "undressing"
+    ]
+  },
+  {
+    "id": "shiny_oiled",
+    "type": "状态",
+    "priority": 88,
+    "triggers": [
+      "涂油",
+      "全身油光",
+      "油光皮肤"
+    ],
+    "content": "Her skin is shiny and oiled.",
+    "canonical_phrases": [
+      "oiled",
+      "shiny skin"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "oiled",
+      "shiny skin"
+    ]
+  },
+  {
+    "id": "tanlines_state",
+    "type": "状态",
+    "priority": 88,
+    "triggers": [
+      "晒痕",
+      "泳装晒痕"
+    ],
+    "content": "She has tanlines.",
+    "canonical_phrases": [
+      "tanlines"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "tanlines"
+    ]
+  },
+  {
+    "id": "upskirt_peek",
+    "type": "镜头",
+    "priority": 90,
+    "triggers": [
+      "裙底",
+      "掀裙",
+      "pantyshot"
+    ],
+    "content": "Pantyshot / upskirt view.",
+    "canonical_phrases": [
+      "pantyshot",
+      "upskirt"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "pantyshot",
+      "upskirt"
+    ]
+  },
+  {
+    "id": "naked_apron",
+    "type": "服装",
+    "priority": 94,
+    "triggers": [
+      "只穿围裙",
+      "裸体围裙"
+    ],
+    "content": "Wearing only a naked apron.",
+    "canonical_phrases": [
+      "naked apron"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "naked apron"
+    ]
+  },
+  {
+    "id": "panties_aside",
+    "type": "服装",
+    "priority": 95,
+    "triggers": [
+      "内裤拨到一边",
+      "内裤拉开"
+    ],
+    "content": "Panties pulled aside.",
+    "canonical_phrases": [
+      "panties aside"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "panties aside"
+    ]
+  },
+  {
+    "id": "strap_slip_enh",
+    "type": "服装",
+    "priority": 93,
+    "triggers": [
+      "肩带滑落",
+      "吊带滑落",
+      "一边掉肩"
+    ],
+    "content": "Strap slip.",
+    "canonical_phrases": [
+      "strap slip"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "strap slip"
+    ]
+  },
+  {
+    "id": "unbuttoned_shirt_enh",
+    "type": "服装",
+    "priority": 92,
+    "triggers": [
+      "衬衫半解",
+      "扣子解开",
+      "领口拉开"
+    ],
+    "content": "Shirt unbuttoned / pulled open.",
+    "canonical_phrases": [
+      "unbuttoned",
+      "clothes pull"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "unbuttoned shirt",
+      "open shirt"
+    ]
+  },
+  {
+    "id": "saliva_trail",
+    "type": "表情",
+    "priority": 90,
+    "triggers": [
+      "口水丝",
+      "津液拉丝",
+      "唾液拉丝"
+    ],
+    "content": "Saliva trail from the mouth.",
+    "canonical_phrases": [
+      "saliva"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "saliva",
+      "drooling"
+    ]
+  },
+  {
+    "id": "finger_in_mouth",
+    "type": "表情",
+    "priority": 91,
+    "triggers": [
+      "含手指",
+      "吮手指"
+    ],
+    "content": "Finger held to her mouth.",
+    "canonical_phrases": [
+      "finger to mouth"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "finger to mouth"
+    ]
+  },
+  {
+    "id": "mind_break_expr",
+    "type": "表情",
+    "priority": 93,
+    "triggers": [
+      "精神崩溃",
+      "玩坏了",
+      "失神高潮"
+    ],
+    "content": "Mind-break expression.",
+    "canonical_phrases": [
+      "mind break"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "mind break",
+      "ahegao"
+    ]
+  },
+  {
+    "id": "hug_from_behind",
+    "type": "关系",
+    "priority": 94,
+    "triggers": [
+      "从身后环抱",
+      "背后抱住",
+      "后背拥抱"
+    ],
+    "content": "Hug from behind.",
+    "canonical_phrases": [
+      "hug from behind"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "hug from behind"
+    ]
+  },
+  {
+    "id": "lap_pillow",
+    "type": "关系",
+    "priority": 90,
+    "triggers": [
+      "膝枕"
+    ],
+    "content": "Lap pillow.",
+    "canonical_phrases": [
+      "lap pillow"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "lap pillow"
+    ]
+  },
+  {
+    "id": "selfie_pose",
+    "type": "动作",
+    "priority": 88,
+    "triggers": [
+      "自拍",
+      "举着手机自拍"
+    ],
+    "content": "Taking a selfie.",
+    "canonical_phrases": [
+      "selfie"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "selfie",
+      "cellphone"
+    ]
+  },
+  {
+    "id": "shibari_pose",
+    "type": "动作",
+    "priority": 94,
+    "triggers": [
+      "绳艺",
+      "龟甲缚"
+    ],
+    "content": "Shibari rope bondage.",
+    "canonical_phrases": [
+      "shibari"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "shibari",
+      "bondage",
+      "rope"
+    ]
+  },
+  {
+    "id": "shower_scene",
+    "type": "场景",
+    "priority": 88,
+    "triggers": [
+      "淋浴间",
+      "花洒下",
+      "洗澡"
+    ],
+    "content": "In the shower, wet.",
+    "canonical_phrases": [
+      "shower"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "shower",
+      "wet"
+    ]
+  },
+  {
+    "id": "ol_outfit",
+    "type": "服装",
+    "priority": 88,
+    "triggers": [
+      "OL",
+      "职业女性",
+      "女职员"
+    ],
+    "content": "Office lady outfit.",
+    "canonical_phrases": [
+      "office lady"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "office lady"
+    ]
   }
 ]
