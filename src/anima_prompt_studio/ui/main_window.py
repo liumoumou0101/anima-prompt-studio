@@ -24,6 +24,7 @@ from anima_prompt_studio.services.pipeline import PromptPipeline
 from anima_prompt_studio.services.translation_service import LazyLocalMarianEngine, TranslationService, marian_runtime_available
 from anima_prompt_studio.services.resource_manager import ResourceManager
 from anima_prompt_studio.ui.library_dialog import EntityLibraryDialog
+from anima_prompt_studio.ui.tag_browser_dialog import TagBrowserDialog
 
 log = logging.getLogger(__name__)
 
@@ -118,6 +119,16 @@ class MainWindow(QMainWindow):
         model_action = QAction("配置本地 Marian 翻译模型…", self)
         model_action.triggered.connect(self.configure_translation)
         settings.addAction(model_action)
+        # 画廊预留给后续生图历史；标签页用于浏览内置词表找灵感。
+        gallery_menu = self.menuBar().addMenu("画廊")
+        gallery_placeholder = QAction("画廊功能即将推出…", self)
+        gallery_placeholder.setEnabled(False)
+        gallery_menu.addAction(gallery_placeholder)
+        tags_menu = self.menuBar().addMenu("标签")
+        browse_tags = QAction("浏览内置标签（灵感库）…", self)
+        browse_tags.setShortcut("Ctrl+T")
+        browse_tags.triggered.connect(self.open_tag_browser)
+        tags_menu.addAction(browse_tags)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -808,6 +819,10 @@ class MainWindow(QMainWindow):
             self.repository.set_setting("zh_en_model_path", zh_en); self.repository.set_setting("en_zh_model_path", en_zh)
             self.statusBar().showMessage("本地 Marian 翻译模型已加载。", 5000)
         except Exception as exc: self._show_error("模型加载失败", exc)
+
+    def open_tag_browser(self) -> None:
+        dialog = TagBrowserDialog(self)
+        dialog.exec()
 
     def open_entity_library(self, initial: type) -> None:
         dialog = EntityLibraryDialog(self.repository, initial, self)

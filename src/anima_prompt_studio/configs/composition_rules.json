@@ -9,7 +9,9 @@
   },
   "explicit_terms": {
     "shot": [
-      {"value":"头像","zh":["头像构图","头像","脸部特写","正面特写","特写"],"en":["headshot","close-up"],"reason":"用户明确要求头像或特写构图"},
+      {"value":"头像","zh":["头像构图","头像","脸部特写","正面特写","面部特写","脸特写"],"en":["headshot","face close-up","facial close-up"],"reason":"用户明确要求头像或脸部特写构图"},
+      {"value":"胸像","zh":["胸部特写","胸部特写构图","乳沟特写"],"en":["breast focus","chest close-up","cleavage focus"],"reason":"用户明确要求胸部/胸像焦点"},
+      {"value":"半身","zh":["上半身特写"],"en":["upper body close-up"],"reason":"用户明确要求上半身特写"},
       {"value":"胸像","zh":["胸像"],"en":["bust shot"],"reason":"用户明确要求胸像"},
       {"value":"半身","zh":["半身","上半身"],"en":["upper body"],"reason":"用户明确要求半身构图"},
       {"value":"膝上","zh":["膝上","中近景"],"en":["cowboy shot"],"reason":"用户明确要求膝上构图"},
@@ -142,6 +144,41 @@
     {
       "id":"face_details", "zh_any":["瞳孔图案","星形瞳孔","脸部纹样","精致妆容","耳饰"], "en_any":["pattern in her pupils","facial markings","detailed makeup"],
       "recommendations":{"shot":[["胸像",65,"面部和瞳孔细节需要较近景别"],["半身",55,"半身仍可保留主要面部细节"]]}
+    },
+    {
+      "id":"ass_focus_shot", "zh_any":["臀部特写","翘臀特写","屁股特写","臀部焦点"], "en_any":["ass focus","hip focus","butt focus","ass close-up"],
+      "recommendations":{
+        "shot":[["膝上",95,"臀部焦点需要足够的下半身景别"],["半身",70,"半身也可表现臀部焦点"]],
+        "angle":[["背面",90,"臀部焦点默认背面视角更合理"]],
+        "gaze":[["看向画外",50,"背面臀部焦点时视线通常离开镜头"]]
+      }
+    },
+    {
+      "id":"breast_focus_shot", "zh_any":["胸部特写","乳沟特写","胸部焦点"], "en_any":["breast focus","cleavage focus","chest focus"],
+      "recommendations":{"shot":[["胸像",100,"胸部焦点使用胸像景别"],["半身",80,"半身可保留胸部与表情"]]}
+    },
+    {
+      "id":"navel_focus_shot", "zh_any":["小腹特写","肚脐特写","腰部特写"], "en_any":["navel focus","midriff focus"],
+      "recommendations":{"shot":[["半身",90,"腰腹焦点适合半身景别"],["膝上",70,"膝上可同时表现腰腹与腿部"]]}
+    },
+    {
+      "id":"lying_on_bed", "zh_any":["躺在床上","躺在床单上","仰躺在床"], "en_any":["lying on the bed","lying on bed","on the bed"],
+      "recommendations":{"shot":[["半身",70,"床上躺姿默认半身"],["膝上",60,"膝上可表现更多肢体"]],"angle":[["三分之四",55,"斜向视角更适合躺姿"]]}
+    },
+    {
+      "id":"sex_scene_framing", "zh_any":["做爱","性交","性爱","男上位","女上位","后入"], "en_any":["having sex","missionary","cowgirl","doggy"],
+      "recommendations":{
+        "shot":[["膝上",85,"性行为场景需要足够肢体空间"],["半身",70,"半身可保留互动"]],
+        "aspect":[["横图",60,"双人互动时常更适合横图"]]
+      }
+    },
+    {
+      "id":"kneeling_pose", "zh_any":["跪着","跪下","跪坐"], "en_any":["kneeling","on her knees","on his knees"],
+      "recommendations":{"shot":[["膝上",80,"跪姿需要显示膝部与躯干关系"],["半身",65,"半身也可表现跪姿上半身"]]}
+    },
+    {
+      "id":"ahegao_face", "zh_any":["阿嘿颜","啊嘿颜"], "en_any":["ahegao"],
+      "recommendations":{"shot":[["头像",75,"阿嘿颜表情细节需要近景"],["胸像",70,"胸像可同时保留表情与上身"]]}
     },
     {
       "id":"environment_large", "zh_any":["广阔的城市","巨大建筑","广阔风景","连绵群山","宏大场景"], "en_any":["vast city","huge building","wide landscape","mountain range"],

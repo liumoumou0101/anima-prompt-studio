@@ -131,7 +131,8 @@ class PromptPipeline:
             suppress = {tag for concept in job.resolved_concepts for tag in concept.suppresses_tags}
             concept_tags = self.concepts.as_tags(job.resolved_concepts)
             job.matched_tags = [x for x in job.matched_tags if x.tag not in suppress and x.tag not in {y.tag for y in concept_tags}]
-            job.matched_tags.extend(x for x in concept_tags if x.tag not in semantic_exclusions)
+            excluded_now = set(job.excluded_tags) | semantic_exclusions
+            job.matched_tags.extend(x for x in concept_tags if x.tag not in excluded_now)
         self.composition_recommender.recommend(job)
         self.compiler.compile(job)
         diff_source = job.back_translated_zh if english_authority else source_zh
@@ -181,7 +182,11 @@ class PromptPipeline:
             return
         if any(token in text for token in ("三个女孩", "三名女孩", "三个人", "三人")):
             job.composition.people_count = 3
-        elif any(token in text for token in ("两个女孩", "两名女孩", "两个人", "两人", "一个女孩和一个男孩", "一个男孩和一个女孩")):
+        elif any(token in text for token in (
+            "两个女孩", "两名女孩", "两个人", "两人",
+            "一个女孩和一个男孩", "一个男孩和一个女孩",
+            "一对男女", "一对情侣", "一男一女", "一女一男", "男女在",
+        )):
             job.composition.people_count = 2
         else:
             character_count = len({x.original for x in entities if x.entity_type == "character"})

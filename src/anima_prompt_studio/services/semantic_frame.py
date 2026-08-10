@@ -55,7 +55,14 @@ class SemanticFrameResolver:
         character_entity_count = len({x.original for x in entities if x.entity_type == "character"})
         if any(token in text for token in ("三个女孩", "三名女孩", "三个人", "三人")):
             people_count = 3
-        elif any(token in text for token in ("两个女孩", "两名女孩", "两个人", "两人", "一个女孩和一个男孩", "一个男孩和一个女孩")):
+        elif any(token in text for token in ("3P", "三人行")):
+            people_count = 3
+        elif any(token in text for token in (
+            "两个女孩", "两名女孩", "两个人", "两人", "两位女孩",
+            "一个女孩和一个男孩", "一个男孩和一个女孩",
+            "一对男女", "一对情侣", "一男一女", "一女一男", "男女在",
+            "两个女孩亲吻", "两个女孩做爱",
+        )):
             people_count = 2
         elif character_entity_count > 1:
             people_count = character_entity_count
@@ -125,13 +132,23 @@ class SemanticFrameResolver:
 
         count_match = re.search(r"\b(one|two|three|four|\d+)\s+(?:girls?|boys?|women|men|people|persons?|characters?)\b", lower)
         number_words = {"one": 1, "two": 2, "three": 3, "four": 4}
+        has_1girl = bool(re.search(r"\b1girl\b", lower))
+        has_1boy = bool(re.search(r"\b1boy\b", lower))
+        has_2girls = bool(re.search(r"\b2girls\b", lower))
         if count_match:
             token = count_match.group(1)
             people_count = number_words.get(token, int(token) if token.isdigit() else 1)
+        elif has_2girls or re.search(r"\b(?:couple|a man and a (?:woman|girl)|a woman and a man|a girl and a boy|a boy and a girl)\b", lower):
+            people_count = 2
+        elif has_1girl and has_1boy:
+            people_count = 2
         elif re.search(r"\b(?:a|an|the)\s+(?:girl|boy|woman|man|person|character|angel|elf|maid|knight|princess|prince)\b|\b(?:she|he)\b", lower):
             people_count = 1
         else:
             people_count = 1 if has_person else 0
+        # Explicit dual count tags outrank a leading singular noun phrase.
+        if has_1girl and has_1boy:
+            people_count = max(people_count or 0, 2)
         frame = SemanticFrame(subject_mode=subject_mode, people_count=people_count)
 
         colours = "white|black|blue|blonde|golden|red|pink|purple|silver|green|brown"
