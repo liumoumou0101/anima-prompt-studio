@@ -198,6 +198,40 @@ def test_short_crop_top_does_not_invent_short_hair():
     assert "crop top" in names or "navel" in names or "short shorts" in names
 
 
+def test_short_hair_survives_multiple_modifiers():
+    result = TagMatcher().match(
+        "A short, slightly messy, black-haired girl.",
+        "一个略显凌乱的黑发女孩",
+    )
+    names = {item.tag for item in result}
+    assert "short hair" in names
+    assert "black hair" in names
+
+
+def test_marian_nsfw_drift_is_replaced_not_duplicated():
+    class DriftEngine:
+        name = "Marian drift fixture"
+
+        def zh_to_en(self, text: str) -> str:
+            return "A naked girl in miniature bikini and emulsions, backriding."
+
+        def en_to_zh(self, text: str) -> str:
+            return text
+
+    result = TranslationService(DriftEngine()).zh_to_en(
+        "一个裸体女孩穿着微型比基尼和乳胶，反骑乘"
+    )
+    lower = result.lower()
+    assert "micro bikini" in lower
+    assert "latex" in lower
+    assert "reverse cowgirl" in lower
+    assert "miniature bikini" not in lower
+    assert "emulsion" not in lower
+    assert "backriding" not in lower
+    assert lower.count("micro bikini") == 1
+    assert lower.count("reverse cowgirl") == 1
+
+
 def test_yuri_sex_is_not_forced_hetero():
     job = PromptJob(original_zh="两个女孩做爱")
     pipeline().translate(job)
@@ -251,3 +285,17 @@ def test_builtin_translation_is_english_only():
     text = TranslationService().zh_to_en("一个银发女仆装女孩站在教室里看镜头")
     assert text
     assert not re.search(r"[\u4e00-\u9fff]", text)
+
+
+def test_builtin_translation_preserves_unknown_chinese_instead_of_erasing_it():
+    text = TranslationService().zh_to_en("一个霜火花女孩")
+    assert "霜火花" in text
+    assert "girl" in text.lower()
+
+
+def test_builtin_translation_separates_adjacent_english_tokens():
+    text = TranslationService().zh_to_en("一个金发蓝瞳女孩穿着比基尼站在沙滩")
+    lower = text.lower()
+    assert "girlwearing" not in lower
+    assert "wearingbikini" not in lower
+    assert "hairblue" not in lower

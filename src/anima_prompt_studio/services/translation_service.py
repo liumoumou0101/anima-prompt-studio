@@ -103,7 +103,7 @@ class BuiltinOfflineEngine:
         "夜晚": "night", "月光": "moonlight", "右手": "right hand", "左手": "left hand", "拿着": "holding",
         "穿着": "wearing", "裙子": "dress", "短裙": "miniskirt", "衬衫": "shirt", "外套": "coat",
         "全身": "full body", "半身": "upper body", "侧面": "side view", "背面": "back view",
-        "在左边": "on the left", "在右边": "on the right", "在中间": "in the center", "和": " and ", "的": " ",
+        "在左边": "on the left", "在右边": "on the right", "在中间": "in the center", "和": " and ", "的": " ", "里": " ",
         "比基尼": "bikini", "黑色内衣": "black lingerie", "内衣": "lingerie", "内裤": "panties",
         "丁字裤": "thong", "吊带袜": "thighhighs", "长筒袜": "thighhighs", "过膝袜": "thighhighs",
         "黑丝": "black thighhighs", "丝袜": "stockings", "吊袜带": "garter belt",
@@ -151,17 +151,25 @@ class BuiltinOfflineEngine:
     @staticmethod
     def _replace_longest(text: str, mapping: dict[str, str]) -> str:
         for source in sorted(mapping, key=len, reverse=True):
-            text = text.replace(source, mapping[source])
+            replacement = mapping[source]
+            # Chinese source phrases are often adjacent (女孩穿着比基尼).  Pad
+            # Chinese -> Latin replacements before the next phrase is replaced,
+            # otherwise the resulting English tokens collapse into
+            # "girlwearingbikini" and can no longer be matched reliably.
+            if re.search(r"[\u4e00-\u9fff]", source) and re.search(r"[A-Za-z0-9]", replacement):
+                replacement = f" {replacement.strip()} "
+            text = text.replace(source, replacement)
         text = re.sub(r"(?<=[\u4e00-\u9fff])(?=[A-Za-z0-9_@])", " ", text)
         text = re.sub(r"(?<=[A-Za-z0-9_])(?=[\u4e00-\u9fff])", " ", text)
         text = re.sub(r"\s+([,.;!?])", r"\1", text)
         return re.sub(r"[ \t]+", " ", text).strip(" ,")
 
     def zh_to_en(self, text: str) -> str:
-        # Longest-phrase replace, then drop residual CJK so English field stays pure English.
-        # Semantics for unmatched Chinese are recovered later via concept ensure + tags.
+        # Keep unknown CJK visible instead of silently deleting user intent.  A
+        # configured Marian model can translate those spans; the builtin engine
+        # cannot, so retaining them is safer and makes the gap editable.
         translated = self._replace_longest(text, self._zh_en)
-        translated = re.sub(r"[\u4e00-\u9fff]+", " ", translated)
+        translated = translated.translate(str.maketrans({"，": ", ", "。": ". ", "；": "; ", "：": ": ", "！": "! ", "？": "? "}))
         translated = re.sub(r"\s+([,.;!?])", r"\1", translated)
         translated = re.sub(r"\s{2,}", " ", translated)
         return translated.strip(" ,.;")
@@ -255,6 +263,20 @@ class TranslationService:
     @staticmethod
     def _guard_nsfw_and_composition_terms(source: str, translated: str) -> str:
         """Fix high-impact NSFW and composition mistranslations without inventing intent."""
+        # Canonicalize recurring Marian mistranslations before the fallback
+        # phrases below are considered.  Replacing the bad token keeps the
+        # sentence cleaner than appending a duplicate concept at the end.
+        if any(token in source for token in ("微型比基尼", "极小比基尼", "线比基尼")):
+            translated = re.sub(r"\bminiature\s+bikini\b|\bmini\s+bikini\b", "micro bikini", translated, flags=re.I)
+        if any(token in source for token in ("乳胶", "乳胶衣", "胶衣")):
+            translated = re.sub(r"\bemulsions?\b|\bemulsion\s+suit\b", "latex", translated, flags=re.I)
+        if any(token in source for token in ("反骑乘", "反向女上位", "背向女上位")):
+            translated = re.sub(
+                r"\bbackriding\b|\bback[- ]riding\b|\bbackward\s+riding\b",
+                "reverse cowgirl",
+                translated,
+                flags=re.I,
+            )
         # 画外 is off-screen / away from viewer, never a painting object.
         if any(token in source for token in ("看向画外", "不看镜头", "看向远方", "眺望远方")):
             translated = re.sub(
@@ -336,7 +358,7 @@ class TranslationService:
             (("坐脸", "颜面骑乘", "骑脸"), r"\bfacesitting\b|\bface sitting\b", "Facesitting."),
             (("肛交", "后庭"), r"\banal\b", "Anal."),
             (("微型比基尼", "极小比基尼", "线比基尼"), r"\bmicro bikini\b", "Wearing a micro bikini."),
-            (("乳胶衣", "胶衣"), r"\blatex\b", "Wearing latex."),
+            (("乳胶", "乳胶衣", "胶衣"), r"\blatex\b", "Wearing latex."),
             (("处男杀手毛衣", "露背毛衣"), r"\bvirgin killer sweater\b", "Wearing a virgin killer sweater."),
             (("开档", "开裆内裤", "开档连裤袜"), r"\bcrotchless\b", "Crotchless clothing."),
             (("巫女服", "巫女装", "巫女"), r"\bmiko\b", "Wearing a miko outfit."),
@@ -383,8 +405,10 @@ class TranslationService:
     @staticmethod
     def _sanitize(text: str) -> str:
         text = text.replace("♪", "").replace("♫", "").replace("�", "")
-        # Keep translated_en English-only; leftover CJK is recovered via concepts/tags.
-        text = re.sub(r"[\u4e00-\u9fff]+", " ", text)
+        # Do not erase residual CJK: with the builtin engine it represents an
+        # untranslated user concept, and preserving it is safer than silently
+        # changing the prompt's meaning.
+        text = text.translate(str.maketrans({"，": ", ", "。": ". ", "；": "; ", "：": ": ", "！": "! ", "？": "? "}))
         text = re.sub(r"\s+", " ", text)
         text = re.sub(r"\s+([,.;!?])", r"\1", text)
         return text.strip(" ,.;")

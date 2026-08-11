@@ -31,7 +31,10 @@ class TagMatcher:
         phrase_words = re.findall(r"[a-z0-9]+", phrase.lower())
         if not phrase_words:
             return False
-        text_words = re.findall(r"[a-z0-9]+", text.lower())
+        text_words = [
+            "hair" if word == "haired" else word
+            for word in re.findall(r"[a-z0-9]+", text.lower())
+        ]
         if len(phrase_words) == 1:
             return phrase_words[0] in text_words
         # Exact adjacent multi-word span.
@@ -39,15 +42,27 @@ class TagMatcher:
         for index in range(len(text_words) - n + 1):
             if text_words[index:index + n] == phrase_words:
                 return True
-        # Allow up to one intervening adjective for two-word tags (short black hair).
+        # Allow up to three intervening modifiers for two-word tags
+        # ("short, slightly messy black hair").  Noun barriers prevent the
+        # former false positive where "short crop top" plus "pink hair"
+        # accidentally became "short hair".
         if n == 2:
             first, second = phrase_words
+            noun_barriers = {
+                "top", "skirt", "dress", "shorts", "shirt", "blouse", "sweater",
+                "jacket", "coat", "pants", "trousers", "stockings", "boots", "shoes",
+                "girl", "woman", "boy", "man", "person", "character",
+            }
             for index, token in enumerate(text_words):
                 if token != first:
                     continue
-                window = text_words[index + 1:index + 4]
-                if second in window:
-                    return True
+                end = min(len(text_words), index + 5)
+                for target_index in range(index + 1, end):
+                    if text_words[target_index] != second:
+                        continue
+                    between = text_words[index + 1:target_index]
+                    if not noun_barriers.intersection(between):
+                        return True
         return False
 
     @staticmethod
