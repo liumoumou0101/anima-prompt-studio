@@ -6,12 +6,25 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from PySide6.QtGui import QImage
+
 from anima_prompt_studio.repositories import SQLiteRepository
 from anima_prompt_studio.services.gallery_server import GalleryServer
 
 
 def _read_json(url: str) -> dict:
     with urlopen(url, timeout=5) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _post_json(url: str, payload: dict) -> dict:
+    request = Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(request, timeout=5) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -70,6 +83,65 @@ def test_gallery_server_batch_trash_removes_assets_from_index(tmp_path):
         assert not first.exists() and not second.exists()
         assert _read_json(server.url + "api/gallery")["assets"] == []
         assert list((root / ".trash").rglob("*.png"))
+    finally:
+        server.stop()
+        repository.close()
+
+
+def test_gallery_server_uses_real_dimensions_thumbnails_and_persistent_state(tmp_path):
+    root = tmp_path / "images"
+    image_path = root / "外部图片" / "wide.png"
+    image_path.parent.mkdir(parents=True)
+    image = QImage(320, 180, QImage.Format_RGB32)
+    image.fill(0x446688)
+    assert image.save(str(image_path))
+    repository = SQLiteRepository(tmp_path / "gallery-state.db")
+    server = GalleryServer(repository, root, tmp_path / "static")
+
+    try:
+        server.start()
+        payload = _read_json(server.url + "api/gallery")
+        asset = payload["assets"][0]
+        assert (asset["width"], asset["height"]) == (320, 180)
+        assert asset["source"] == "external"
+        result = _post_json(
+            server.url + "api/gallery/state",
+            {"paths": [asset["path"]], "state": "kept"},
+        )
+        assert result["state"] == "kept"
+        assert _read_json(server.url + "api/gallery")["assets"][0]["state"] == "kept"
+        with urlopen(server.url + asset["thumbnail"].lstrip("/"), timeout=5) as response:
+            thumbnail = QImage.fromData(response.read())
+        assert not thumbnail.isNull()
+        assert thumbnail.width() <= 720 and thumbnail.height() <= 720
+    finally:
+        server.stop()
+        repository.close()
+
+
+def test_gallery_server_can_restore_and_permanently_delete_trash(tmp_path):
+    root = tmp_path / "images"
+    image_path = root / "项目" / "one.png"
+    image_path.parent.mkdir(parents=True)
+    image = QImage(32, 24, QImage.Format_RGB32)
+    image.fill(0x224466)
+    assert image.save(str(image_path))
+    repository = SQLiteRepository(tmp_path / "gallery-restore.db")
+    server = GalleryServer(repository, root, tmp_path / "static")
+
+    try:
+        server.start()
+        _post_json(server.url + "api/gallery/trash", {"paths": ["项目/one.png"]})
+        trash_asset = _read_json(server.url + "api/gallery/trash")["assets"][0]
+        restored = _post_json(server.url + "api/gallery/restore", {"paths": [trash_asset["path"]]})
+        assert restored["restored"] == ["项目/one.png"]
+        assert image_path.is_file()
+
+        _post_json(server.url + "api/gallery/trash", {"paths": ["项目/one.png"]})
+        trash_asset = _read_json(server.url + "api/gallery/trash")["assets"][0]
+        deleted = _post_json(server.url + "api/gallery/delete", {"paths": [trash_asset["path"]]})
+        assert deleted["deleted"] == [trash_asset["path"]]
+        assert _read_json(server.url + "api/gallery/trash")["assets"] == []
     finally:
         server.stop()
         repository.close()

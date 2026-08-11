@@ -101,7 +101,7 @@ def test_v2_repository_round_trip_and_active_run_query(tmp_path):
     assert repo.get_remote_profile(remote.id).model_aliases["anima_turbo_v1"] == "anima-turbo.safetensors"
     assert repo.get_workflow_profile(workflow.id).bindings["positive_prompt"].input_name == "text"
     assert repo.list_active_generation_runs()[0].id == run.id
-    assert sqlite3.connect(repo.db_path).execute("PRAGMA user_version").fetchone()[0] == 2
+    assert sqlite3.connect(repo.db_path).execute("PRAGMA user_version").fetchone()[0] == 3
     repo.close()
 
 
@@ -118,7 +118,7 @@ def test_v1_database_migrates_to_v2_with_backup(tmp_path):
 
     repo = SQLiteRepository(path)
     assert (tmp_path / "legacy.v1.bak").is_file()
-    assert repo.connection.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert repo.connection.execute("PRAGMA user_version").fetchone()[0] == 3
     assert repo.connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='generation_runs'"
     ).fetchone()

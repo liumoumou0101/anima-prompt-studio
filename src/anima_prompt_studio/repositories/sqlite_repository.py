@@ -17,7 +17,7 @@ from anima_prompt_studio.domain.execution_models import (
 from anima_prompt_studio.domain.models import ArtistProfile, CharacterCard, LoRAProfile, PromptJob
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def default_data_dir() -> Path:
@@ -70,6 +70,13 @@ class SQLiteRepository:
                     payload_json TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_generation_artifacts_run ON generation_artifacts(generation_run_id);
+                CREATE TABLE IF NOT EXISTS gallery_asset_states (
+                    output_root TEXT NOT NULL, relative_path TEXT NOT NULL,
+                    state TEXT NOT NULL, updated_at TEXT NOT NULL,
+                    PRIMARY KEY(output_root, relative_path)
+                );
+                CREATE INDEX IF NOT EXISTS idx_gallery_asset_states_root
+                    ON gallery_asset_states(output_root);
             """)
             self.connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -215,6 +222,39 @@ class SQLiteRepository:
             "SELECT payload_json FROM generation_artifacts WHERE generation_run_id=? ORDER BY id", (run_id,)
         ).fetchall()
         return [GenerationArtifact.model_validate_json(row[0]) for row in rows]
+
+    def list_gallery_asset_states(self, output_root: Path | str) -> dict[str, str]:
+        root_key = os.path.normcase(str(Path(output_root).expanduser().resolve()))
+        rows = self.connection.execute(
+            "SELECT relative_path,state FROM gallery_asset_states WHERE output_root=?",
+            (root_key,),
+        ).fetchall()
+        return {str(row["relative_path"]): str(row["state"]) for row in rows}
+
+    def set_gallery_asset_states(
+        self,
+        output_root: Path | str,
+        relative_paths: list[str],
+        state: str,
+    ) -> None:
+        if state not in {"", "kept", "rejected"}:
+            raise ValueError(f"不支持的画廊状态：{state}")
+        root_key = os.path.normcase(str(Path(output_root).expanduser().resolve()))
+        normalized = sorted({Path(path).as_posix() for path in relative_paths if path})
+        now = datetime.now().astimezone().isoformat()
+        with self.connection:
+            if not state:
+                self.connection.executemany(
+                    "DELETE FROM gallery_asset_states WHERE output_root=? AND relative_path=?",
+                    [(root_key, path) for path in normalized],
+                )
+            else:
+                self.connection.executemany(
+                    """INSERT INTO gallery_asset_states(output_root,relative_path,state,updated_at)
+                    VALUES(?,?,?,?) ON CONFLICT(output_root,relative_path) DO UPDATE SET
+                    state=excluded.state,updated_at=excluded.updated_at""",
+                    [(root_key, path, state, now) for path in normalized],
+                )
 
     def close(self) -> None:
         self.connection.close()
