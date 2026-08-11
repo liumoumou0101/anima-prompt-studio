@@ -154,6 +154,7 @@ def test_main_window_opens_web_gallery_in_system_browser(app, tmp_path, monkeypa
 
     assert window._gallery_server is not None and window._gallery_server.running
     assert opened and opened[0].toString().startswith("http://127.0.0.1:")
+    assert window._gallery_server.gallery_payload()["assets"] == []
     window.close()
 
 

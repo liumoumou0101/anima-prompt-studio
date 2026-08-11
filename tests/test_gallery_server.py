@@ -25,7 +25,7 @@ def test_gallery_server_serves_static_data_and_blocks_path_traversal(tmp_path):
     static.mkdir()
     (static / "index.html").write_text("<h1>gallery</h1>", encoding="utf-8")
     repository = SQLiteRepository(tmp_path / "gallery.db")
-    server = GalleryServer(repository, lambda: root, static)
+    server = GalleryServer(repository, root, static)
 
     try:
         base_url = server.start()
@@ -54,7 +54,7 @@ def test_gallery_server_batch_trash_removes_assets_from_index(tmp_path):
     first.write_bytes(b"one")
     second.write_bytes(b"two")
     repository = SQLiteRepository(tmp_path / "gallery-trash.db")
-    server = GalleryServer(repository, lambda: root, tmp_path / "static")
+    server = GalleryServer(repository, root, tmp_path / "static")
 
     try:
         server.start()

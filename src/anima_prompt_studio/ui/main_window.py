@@ -1501,6 +1501,8 @@ class MainWindow(QMainWindow):
         if path:
             self.repository.set_setting("generation_output_root", path)
             self.image_gallery.refresh()
+            if self._gallery_server is not None:
+                self._gallery_server.set_output_root(Path(path))
             self.remote_open_button.setEnabled(self.image_gallery.has_images)
             self.statusBar().showMessage(f"生成图片将保存到：{path}", 6000)
 
@@ -1521,7 +1523,7 @@ class MainWindow(QMainWindow):
         if self._gallery_server is None:
             self._gallery_server = GalleryServer(
                 self.repository,
-                self._generation_output_root,
+                self._generation_output_root(),
             )
         url = self._gallery_server.start()
         QDesktopServices.openUrl(QUrl(url))

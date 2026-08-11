@@ -6,7 +6,7 @@ import mimetypes
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from anima_prompt_studio.repositories import SQLiteRepository
@@ -26,12 +26,12 @@ class GalleryServer:
     def __init__(
         self,
         repository: SQLiteRepository,
-        output_root: Callable[[], Path],
+        output_root: Path,
         static_root: Path | None = None,
         port: int = 0,
     ) -> None:
         self.repository = repository
-        self.output_root = output_root
+        self._output_root = output_root.expanduser()
         self.static_root = static_root or Path(__file__).resolve().parents[1] / "web_gallery" / "dist"
         self.port = port
         self._server: _GalleryHTTPServer | None = None
@@ -46,6 +46,9 @@ class GalleryServer:
         if self._server is None:
             raise RuntimeError("画廊服务尚未启动")
         return f"http://127.0.0.1:{self._server.server_port}/"
+
+    def set_output_root(self, output_root: Path) -> None:
+        self._output_root = output_root.expanduser()
 
     def start(self) -> str:
         if self._server is not None:
@@ -68,7 +71,7 @@ class GalleryServer:
             thread.join(timeout=2)
 
     def gallery_payload(self) -> dict[str, Any]:
-        root = self.output_root().expanduser().resolve()
+        root = self._output_root.resolve()
         request_repository = SQLiteRepository(self.repository.db_path)
         try:
             batches = load_gallery_batches(request_repository, root, limit=500)
@@ -112,10 +115,10 @@ class GalleryServer:
         }
 
     def image_path(self, relative_path: str) -> Path | None:
-        return resolve_gallery_image(unquote(relative_path), self.output_root())
+        return resolve_gallery_image(unquote(relative_path), self._output_root)
 
     def trash(self, relative_paths: list[str]) -> dict[str, Any]:
-        root = self.output_root().expanduser().resolve()
+        root = self._output_root.resolve()
         paths = [path for raw in relative_paths if (path := resolve_gallery_image(raw, root)) is not None]
         requested = {str(Path(raw).as_posix()) for raw in relative_paths}
         moved, failed = move_images_to_trash(paths, root)
