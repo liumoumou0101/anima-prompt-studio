@@ -146,6 +146,7 @@ def test_generation_completion_opens_latest_image_in_main_window(app, tmp_path):
 
 def test_main_window_opens_web_gallery_in_system_browser(app, tmp_path, monkeypatch):
     repository = SQLiteRepository(tmp_path / "web-gallery-main.db")
+    repository.set_setting("generation_output_root", str(tmp_path / "empty-output"))
     window = MainWindow(repository)
     opened = []
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url) or True)

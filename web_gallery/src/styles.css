@@ -84,7 +84,7 @@ kbd { min-width: 20px; padding: 2px 6px; color: #aab4c4; background: #0d1118; bo
 .date-heading button { display: flex; align-items: center; gap: 6px; padding: 6px 9px; color: #8591a2; background: transparent; border: 1px solid transparent; border-radius: 6px; font-size: 12px; }
 .date-heading button:hover { color: #c7d0dd; background: #151c26; border-color: #2a3543; }
 .react-photo-album { overflow: visible; }
-.photo-card { position: relative; width: 100%; height: 100%; overflow: hidden; background: #151b24; border: 1px solid #27313e; border-radius: 8px; transition: border-color .16s ease, transform .16s ease; }
+.photo-card { position: relative; flex: none; overflow: hidden; background: #151b24; border: 1px solid #27313e; border-radius: 8px; transition: border-color .16s ease, transform .16s ease; }
 .photo-card:hover { z-index: 2; border-color: #526174; transform: translateY(-1px); }
 .photo-card.is-selected { border-color: #6b8cff; box-shadow: 0 0 0 2px rgba(99, 130, 255, .65); }
 .photo-card.is-active { border-color: #7e98ff; }
@@ -108,27 +108,30 @@ kbd { min-width: 20px; padding: 2px 6px; color: #aab4c4; background: #0d1118; bo
 .date-rail a:hover { color: #aebcf2; }
 .date-rail a:hover i { background: var(--blue); }
 
-.detail-drawer { position: fixed; top: 78px; right: 74px; bottom: 0; z-index: 45; width: 330px; overflow-y: auto; padding: 16px; background: rgba(18, 23, 31, .98); border-left: 1px solid #334052; box-shadow: -18px 0 50px rgba(0, 0, 0, .34); }
+.detail-drawer { position: fixed; top: 78px; right: 74px; bottom: 0; z-index: 45; display: flex; width: 330px; flex-direction: column; overflow: hidden; padding: 16px; background: rgba(18, 23, 31, .98); border-left: 1px solid #334052; box-shadow: -18px 0 50px rgba(0, 0, 0, .34); }
 .detail-drawer > header { display: flex; align-items: center; justify-content: space-between; min-height: 34px; color: #c7ced9; font-size: 13px; font-weight: 600; }
 .detail-drawer > header button { display: grid; place-items: center; width: 32px; height: 32px; background: transparent; border: 0; border-radius: 6px; }
 .detail-drawer > header button:hover { background: #232c38; }
-.drawer-preview { position: relative; display: block; width: 100%; height: 270px; margin-top: 9px; padding: 0; overflow: hidden; background: #090c11; border: 1px solid #303b4a; border-radius: 8px; }
+.drawer-body { min-height: 0; overflow-y: auto; padding-right: 3px; }
+.drawer-preview { position: relative; display: block; width: 100%; height: clamp(190px, 24vh, 270px); margin-top: 9px; padding: 0; overflow: hidden; background: #090c11; border: 1px solid #303b4a; border-radius: 8px; }
 .drawer-preview img { width: 100%; height: 100%; object-fit: contain; }
 .drawer-preview svg { position: absolute; right: 10px; bottom: 10px; padding: 5px; box-sizing: content-box; background: rgba(5, 8, 12, .7); border-radius: 6px; }
 .detail-drawer h2 { overflow: hidden; margin: 15px 0; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
-.detail-drawer dl { display: grid; gap: 9px; margin: 0; }
+.detail-drawer dl { display: grid; gap: clamp(7px, .8vh, 9px); margin: 0; }
 .detail-drawer dl div { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
 .detail-drawer dt { color: #6f7b8e; }
 .detail-drawer dd { overflow: hidden; margin: 0; color: #c8d0dc; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .prompt-section { margin-top: 18px; padding-top: 15px; border-top: 1px solid #2a3441; }
 .prompt-section h3 { margin: 0 0 8px; color: #aeb8c8; font-size: 12px; }
-.prompt-section p { max-height: 126px; overflow: auto; margin: 0; color: #909caf; font-size: 12px; line-height: 1.65; }
+.prompt-section p { max-height: clamp(88px, 10vh, 126px); overflow: auto; margin: 0; color: #909caf; font-size: 12px; line-height: 1.65; }
 .prompt-section button, .drawer-state-actions button, .reveal-button { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; color: #c4cddb; background: #1a222d; border: 1px solid #303c4c; border-radius: 7px; }
 .prompt-section button { width: 100%; margin-top: 12px; }
 .drawer-state-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
 .drawer-state-actions button:first-child { color: #83e798; border-color: #316640; }
 .drawer-state-actions button:last-child { color: #ff9da4; border-color: #6d353d; }
 .reveal-button { width: 100%; margin-top: 10px; }
+.drawer-footer { flex: none; margin-top: 10px; padding-top: 10px; background: rgba(18, 23, 31, .99); border-top: 1px solid #2a3441; }
+.drawer-footer .drawer-state-actions { margin-top: 0; }
 
 .selection-bar { position: fixed; right: 92px; bottom: 16px; left: 228px; z-index: 60; display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 86px; padding: 11px 18px; background: rgba(21, 27, 37, .97); border: 1px solid #354255; border-radius: 11px; box-shadow: 0 22px 60px rgba(0, 0, 0, .48); backdrop-filter: blur(18px); }
 .selection-summary { display: flex; align-items: center; gap: 13px; min-width: 0; }
@@ -158,6 +161,31 @@ kbd { min-width: 20px; padding: 2px 6px; color: #aab4c4; background: #0d1118; bo
 .empty-state strong { margin-top: 13px; color: #97a2b2; font-size: 15px; }
 .empty-state span { max-width: 420px; margin-top: 7px; color: #616d7e; font-size: 12px; }
 .empty-state button { margin-top: 15px; padding: 8px 12px; color: #9eb2ff; background: var(--blue-soft); border: 1px solid #3c508d; border-radius: 7px; }
+
+@media (min-width: 2000px) {
+  .sidebar { width: 224px; padding: 28px 18px 22px; }
+  .brand strong { font-size: 16px; }
+  .brand span { font-size: 9px; }
+  .sidebar nav button { min-height: 54px; font-size: 16px; }
+  .sidebar-tip { font-size: 12px; }
+  .main-shell { margin-left: 224px; padding-right: 82px; }
+  .topbar { min-height: 88px; padding: 16px 32px; }
+  .title-block h1 { font-size: 26px; }
+  .title-block span, .date-heading span { font-size: 13px; }
+  .search-box input { font-size: 15px; }
+  .gallery-scroll { padding: 26px 32px 142px; }
+  .date-group { scroll-margin-top: 102px; margin-bottom: 30px; }
+  .date-heading h2 { font-size: 16px; }
+  .date-heading button { font-size: 13px; }
+  .selection-toggle { width: 30px; height: 30px; }
+  .state-badge, .source-badge, .photo-name { font-size: 11px; }
+  .date-rail { top: 100px; width: 82px; }
+  .date-rail strong, .date-rail a { font-size: 12px; }
+  .detail-drawer { top: 86px; right: 82px; width: 380px; padding: 20px; }
+  .detail-drawer > header { font-size: 14px; }
+  .detail-drawer dl div, .prompt-section h3, .prompt-section p { font-size: 13px; }
+  .selection-bar { right: 102px; left: 244px; min-height: 92px; }
+}
 
 @media (max-width: 1180px) {
   .sidebar { width: 76px; padding-inline: 10px; }

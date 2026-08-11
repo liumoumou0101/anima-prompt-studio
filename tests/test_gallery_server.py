@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote
@@ -10,6 +11,15 @@ from PySide6.QtGui import QImage
 
 from anima_prompt_studio.repositories import SQLiteRepository
 from anima_prompt_studio.services.gallery_server import GalleryServer
+
+
+def test_bundled_gallery_index_references_existing_assets():
+    static_root = Path(__file__).resolve().parents[1] / "src" / "anima_prompt_studio" / "web_gallery" / "dist"
+    index = (static_root / "index.html").read_text(encoding="utf-8")
+    asset_paths = re.findall(r'(?:src|href)="\./([^"]+)"', index)
+
+    assert asset_paths
+    assert all((static_root / path).is_file() for path in asset_paths)
 
 
 def _read_json(url: str) -> dict:

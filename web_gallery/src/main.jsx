@@ -26,6 +26,8 @@ import "yet-another-react-lightbox/styles.css";
 import "./styles.css";
 
 const EMPTY_DATA = { assets: [], projects: [], models: [], batches: [], trashCount: 0 };
+const THUMB_SIZE_KEY = "anima-gallery-thumb-size";
+const DEFAULT_THUMB_SIZE = 205;
 const VIEWS = [
   { id: "all", label: "图片", icon: ImageSquare },
   { id: "recent", label: "最近生成", icon: ClockCounterClockwise },
@@ -33,6 +35,19 @@ const VIEWS = [
   { id: "external", label: "外部图片", icon: FolderOpen },
   { id: "trash", label: "画廊回收站", icon: Trash },
 ];
+
+function initialThumbSize() {
+  const saved = Number.parseInt(window.localStorage.getItem(THUMB_SIZE_KEY) || "", 10);
+  return Number.isFinite(saved) ? Math.min(285, Math.max(150, saved)) : DEFAULT_THUMB_SIZE;
+}
+
+function galleryRowConstraints(containerWidth, thumbSize) {
+  const target = Math.max(150, thumbSize);
+  return {
+    maxPhotos: Math.min(12, Math.max(6, Math.round(containerWidth / target))),
+    singleRowMaxHeight: Math.round(target * 1.25),
+  };
+}
 
 function formatBytes(bytes) {
   if (!bytes) return "大小未知";
@@ -86,7 +101,7 @@ function App() {
   const [batch, setBatch] = useState("");
   const [sort, setSort] = useState("newest");
   const [filterOpen, setFilterOpen] = useState(false);
-  const [thumbSize, setThumbSize] = useState(205);
+  const [thumbSize, setThumbSize] = useState(initialThumbSize);
   const [selected, setSelected] = useState(() => new Set());
   const [active, setActive] = useState(null);
   const [lightboxIndex, setLightboxIndex] = useState(-1);
@@ -116,6 +131,10 @@ function App() {
     setVisibleLimit(160);
     load(view);
   }, [view]);
+
+  useEffect(() => {
+    window.localStorage.setItem(THUMB_SIZE_KEY, String(thumbSize));
+  }, [thumbSize]);
 
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -374,7 +393,16 @@ function App() {
             </label>
             <div className="size-control" aria-label="缩略图大小">
               <SquaresFour size={18} />
-              <input type="range" min="150" max="285" value={thumbSize} onChange={(event) => setThumbSize(Number(event.target.value))} />
+              <input
+                type="range"
+                min="150"
+                max="285"
+                value={thumbSize}
+                aria-label="缩略图高度"
+                aria-valuetext={`${thumbSize} 像素`}
+                title={`缩略图高度：${thumbSize} 像素`}
+                onChange={(event) => setThumbSize(Number(event.target.value))}
+              />
               <SquaresFour size={24} weight="fill" />
             </div>
             <button className="icon-button" onClick={() => load(view)} aria-label="刷新画廊" title="刷新画廊">
@@ -493,11 +521,12 @@ function GalleryGroup({ group, selected, thumbSize, active, onOpen, onPreview, o
         photos={photos}
         targetRowHeight={thumbSize}
         spacing={8}
-        rowConstraints={{ maxPhotos: 6 }}
+        rowConstraints={(containerWidth) => galleryRowConstraints(containerWidth, thumbSize)}
         render={{
-          photo: (_props, { photo }) => (
+          photo: (_props, { photo, width, height }) => (
             <PhotoCard
               asset={photo}
+              style={{ width, height }}
               selected={selected.has(photo.id)}
               active={active?.id === photo.id}
               onOpen={() => onOpen(photo)}
@@ -512,9 +541,9 @@ function GalleryGroup({ group, selected, thumbSize, active, onOpen, onPreview, o
   );
 }
 
-function PhotoCard({ asset, selected, active, onOpen, onPreview, onToggle, isTrash }) {
+function PhotoCard({ asset, style, selected, active, onOpen, onPreview, onToggle, isTrash }) {
   return (
-    <article className={`photo-card${selected ? " is-selected" : ""}${active ? " is-active" : ""}`}>
+    <article className={`photo-card${selected ? " is-selected" : ""}${active ? " is-active" : ""}`} style={style}>
       <button className="photo-open" onClick={onOpen} onDoubleClick={onPreview} aria-label={`查看 ${asset.name}`}>
         <img src={asset.thumbnail || asset.src} alt={asset.alt} loading="lazy" />
       </button>
@@ -534,20 +563,21 @@ function DetailDrawer({ asset, isTrash, onClose, onPreview, onCopy, onReveal, on
   return (
     <aside className="detail-drawer" aria-label="图片详情">
       <header><span>图片详情</span><button onClick={onClose} aria-label="关闭图片详情"><X size={22} /></button></header>
-      <button className="drawer-preview" onClick={onPreview} aria-label="查看原图"><img src={asset.thumbnail || asset.src} alt={asset.name} /><ArrowsOutSimple size={22} /></button>
-      <h2>{asset.name}</h2>
-      <dl>
-        <div><dt>项目</dt><dd>{asset.project || "未分类"}</dd></div>
-        <div><dt>模型</dt><dd>{asset.model || "未知"}</dd></div>
-        <div><dt>尺寸</dt><dd>{asset.width} × {asset.height}</dd></div>
-        <div><dt>来源</dt><dd>{isTrash ? "画廊回收站" : asset.source === "external" ? "外部图片" : "ANIMA 生成"}</dd></div>
-        <div><dt>时间</dt><dd>{formatDate(asset.createdAt)}</dd></div>
-        <div><dt>文件大小</dt><dd>{formatBytes(asset.bytes)}</dd></div>
-        {parameters.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}
-      </dl>
-      {asset.prompt && <section className="prompt-section"><h3>提示词</h3><p>{asset.prompt}</p><button onClick={() => onCopy(asset.prompt, "提示词")}><Copy size={17} />复制提示词</button></section>}
-      {!isTrash && <div className="drawer-state-actions"><button onClick={() => onState("kept")}><Heart size={17} />保留</button><button onClick={() => onState("rejected")}><X size={17} />淘汰</button></div>}
-      {!isTrash && <button className="reveal-button" onClick={onReveal}><FolderOpen size={19} />在文件夹中显示</button>}
+      <div className="drawer-body">
+        <button className="drawer-preview" onClick={onPreview} aria-label="查看原图"><img src={asset.thumbnail || asset.src} alt={asset.name} /><ArrowsOutSimple size={22} /></button>
+        <h2>{asset.name}</h2>
+        <dl>
+          <div><dt>项目</dt><dd>{asset.project || "未分类"}</dd></div>
+          <div><dt>模型</dt><dd>{asset.model || "未知"}</dd></div>
+          <div><dt>尺寸</dt><dd>{asset.width} × {asset.height}</dd></div>
+          <div><dt>来源</dt><dd>{isTrash ? "画廊回收站" : asset.source === "external" ? "外部图片" : "ANIMA 生成"}</dd></div>
+          <div><dt>时间</dt><dd>{formatDate(asset.createdAt)}</dd></div>
+          <div><dt>文件大小</dt><dd>{formatBytes(asset.bytes)}</dd></div>
+          {parameters.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}
+        </dl>
+        {asset.prompt && <section className="prompt-section"><h3>提示词</h3><p>{asset.prompt}</p><button onClick={() => onCopy(asset.prompt, "提示词")}><Copy size={17} />复制提示词</button></section>}
+      </div>
+      {!isTrash && <footer className="drawer-footer"><div className="drawer-state-actions"><button onClick={() => onState("kept")}><Heart size={17} />保留</button><button onClick={() => onState("rejected")}><X size={17} />淘汰</button></div><button className="reveal-button" onClick={onReveal}><FolderOpen size={19} />在文件夹中显示</button></footer>}
     </aside>
   );
 }
