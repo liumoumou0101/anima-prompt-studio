@@ -6,7 +6,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtGui import QDesktopServices, QColor, QImage
 from PySide6.QtWidgets import QApplication
 
 from anima_prompt_studio.domain.execution_models import (
@@ -141,6 +141,19 @@ def test_generation_completion_opens_latest_image_in_main_window(app, tmp_path):
     assert window.image_gallery.batch_combo.currentData() == "latest-run"
     assert window.image_gallery.current_image_path == image_path
     assert window.remote_open_button.isEnabled()
+    window.close()
+
+
+def test_main_window_opens_web_gallery_in_system_browser(app, tmp_path, monkeypatch):
+    repository = SQLiteRepository(tmp_path / "web-gallery-main.db")
+    window = MainWindow(repository)
+    opened = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url) or True)
+
+    window.open_history_gallery()
+
+    assert window._gallery_server is not None and window._gallery_server.running
+    assert opened and opened[0].toString().startswith("http://127.0.0.1:")
     window.close()
 
 

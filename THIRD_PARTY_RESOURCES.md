@@ -34,3 +34,9 @@
 - https://huggingface.co/circlestone-labs/Anima
 
 ANIMA 模型本身未被本工具下载或再分发。
+
+## Web 画廊前端
+
+- React、React DOM、Vite、React Photo Album 和 Yet Another React Lightbox 均通过 npm 管理并构建为本地静态资源。
+- 这些组件按各自 npm 包当前发布版本的 MIT 许可使用；具体版本和完整依赖树记录在 `web_gallery/package-lock.json`。
+- 画廊运行时不从公网加载脚本、图片或字体。

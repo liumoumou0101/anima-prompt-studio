@@ -85,6 +85,19 @@ def test_model_switch_preserves_ui_composition(window):
     assert window.job.composition.subject_position == "右"
 
 
+def test_main_window_switches_to_scrollable_compact_layout(window):
+    window.resize(820, 520)
+    window._apply_responsive_layout()
+    assert window.minimumWidth() <= 820
+    assert window.minimumHeight() <= 520
+    assert window.main_splitter.orientation() == Qt.Vertical
+    assert window.body_scroll.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
+
+    window.resize(1300, 800)
+    window._apply_responsive_layout()
+    assert window.main_splitter.orientation() == Qt.Horizontal
+
+
 def test_composition_value_change_becomes_user_selected(window):
     window.shot.setCurrentText("全身")
     assert window.job.composition.shot == "全身"

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
     QInputDialog, QListWidgetItem, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-    QSpinBox, QDoubleSpinBox, QSplitter, QStatusBar, QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit,
+    QScrollArea, QSpinBox, QDoubleSpinBox, QSplitter, QStatusBar, QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit,
     QToolBar, QVBoxLayout, QWidget,
 )
 
@@ -22,6 +22,7 @@ from anima_prompt_studio.domain.models import (
 from anima_prompt_studio.repositories import SQLiteRepository
 from anima_prompt_studio.services.config_service import ConfigService
 from anima_prompt_studio.services.export_service import ExportService
+from anima_prompt_studio.services.gallery_server import GalleryServer
 from anima_prompt_studio.services.pipeline import PromptPipeline
 from anima_prompt_studio.services.translation_service import LazyLocalMarianEngine, TranslationService, marian_runtime_available
 from anima_prompt_studio.services.resource_manager import ResourceManager
@@ -33,7 +34,7 @@ from anima_prompt_studio.services.remote.provider_presets import (
 from anima_prompt_studio.services.remote.credential_store import CredentialStore, CredentialStoreError
 from anima_prompt_studio.services.remote.workflow_discovery import parse_ssh_command
 from anima_prompt_studio.services.remote.workflow_compatibility import infer_workflow_model_profiles
-from anima_prompt_studio.ui.image_gallery import HistoryGalleryDialog, ImageGalleryWidget
+from anima_prompt_studio.ui.image_gallery import ImageGalleryWidget
 from anima_prompt_studio.ui.library_dialog import EntityLibraryDialog
 from anima_prompt_studio.ui.remote_dialogs import (
     RemoteProfileDialog,
@@ -105,10 +106,14 @@ class MainWindow(QMainWindow):
         self._direct_remote_id = ""
         self._remote_form_loading = False
         self._last_output_dir = ""
-        self._history_gallery_dialog: HistoryGalleryDialog | None = None
+        self._gallery_server: GalleryServer | None = None
+        self._responsive_mode = "wide"
+        self._responsive_timer = QTimer(self)
+        self._responsive_timer.setSingleShot(True)
+        self._responsive_timer.timeout.connect(self._apply_responsive_layout)
         self.setWindowTitle("ANIMA 中文提示词辅助工具 V2")
         self.resize(1540, 940)
-        self.setMinimumSize(1100, 720)
+        self.setMinimumSize(820, 520)
         self._build_ui()
         self._apply_button_styles()
         self._create_menu()
@@ -183,64 +188,115 @@ class MainWindow(QMainWindow):
         root_layout = QVBoxLayout(root)
         root_layout.setContentsMargins(10, 8, 10, 8)
 
-        header = QHBoxLayout()
-        header.addWidget(QLabel("项目名"))
+        header = QVBoxLayout()
+        primary_header = QHBoxLayout()
+        primary_header.addWidget(QLabel("项目名"))
         self.project_name = QLineEdit("未命名项目")
         self.project_name.setMaximumWidth(260)
-        header.addWidget(self.project_name)
-        header.addWidget(QLabel("模型"))
+        primary_header.addWidget(self.project_name)
+        primary_header.addWidget(QLabel("模型"))
         self.model_combo = QComboBox()
         for profile in self.configs.model_profiles.values():
             self.model_combo.addItem(profile.display_name, profile.id)
         self.model_combo.currentIndexChanged.connect(self.on_model_changed)
-        header.addWidget(self.model_combo)
-        header.addWidget(QLabel("生成预设"))
+        primary_header.addWidget(self.model_combo, 1)
+        primary_header.addWidget(QLabel("生成预设"))
         self.generation_combo = QComboBox()
         for preset in self.configs.generation_presets["anima_turbo_v1"].values():
             self.generation_combo.addItem(preset.display_name, preset.id)
         self.generation_combo.currentIndexChanged.connect(self.on_generation_preset_changed)
-        header.addWidget(self.generation_combo)
-        header.addWidget(QLabel("质量预设"))
+        primary_header.addWidget(self.generation_combo, 1)
+        primary_header.addWidget(QLabel("质量预设"))
         self.quality_combo = QComboBox()
         for profile in self.configs.quality_profiles.values():
             self.quality_combo.addItem(profile.display_name, profile.id)
         self.quality_combo.currentIndexChanged.connect(self.recompile_from_ui)
-        header.addWidget(self.quality_combo)
-        header.addStretch()
+        primary_header.addWidget(self.quality_combo, 1)
+        header.addLayout(primary_header)
+
+        action_header = QHBoxLayout()
+        action_header.addStretch()
         self.lock_english = QCheckBox("锁定英文")
-        header.addWidget(self.lock_english)
+        action_header.addWidget(self.lock_english)
         self.translate_button = QPushButton("翻译并编译")
         self.translate_button.setProperty("buttonRole", "primary")
         self.translate_button.setDefault(True)
         self.translate_button.clicked.connect(self.translate_and_compile)
-        header.addWidget(self.translate_button)
+        action_header.addWidget(self.translate_button)
         save_button = QPushButton("保存")
         save_button.clicked.connect(self.save_job)
-        header.addWidget(save_button)
+        action_header.addWidget(save_button)
+        header.addLayout(action_header)
         root_layout.addLayout(header)
 
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self._build_left_panel())
-        splitter.addWidget(self._build_center_panel())
-        splitter.addWidget(self._build_right_panel())
-        splitter.setSizes([400, 570, 500])
-        root_layout.addWidget(splitter, 1)
-        root_layout.addWidget(self._build_remote_panel())
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.addWidget(self._build_left_panel())
+        self.main_splitter.addWidget(self._build_center_panel())
+        self.main_splitter.addWidget(self._build_right_panel())
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.setSizes([400, 570, 500])
 
-        footer = QHBoxLayout()
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(8)
+        body_layout.addWidget(self.main_splitter, 1)
+        self.remote_panel = self._build_remote_panel()
+        body_layout.addWidget(self.remote_panel)
+        self.body_scroll = QScrollArea()
+        self.body_scroll.setWidgetResizable(True)
+        self.body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.body_scroll.setWidget(body)
+        root_layout.addWidget(self.body_scroll, 1)
+
+        self.footer_toolbar = QToolBar("快捷操作")
+        self.footer_toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
         for text, slot in (
             ("复制正向", lambda: self.copy_compiled_prompt("positive")),
             ("复制负向", lambda: self.copy_compiled_prompt("negative")),
             ("复制全部参数", self.copy_all), ("导出任务 JSON", self.export_json),
             ("收藏并保存", lambda: self.save_job(True)), ("历史记录", self.open_history),
         ):
-            button = QPushButton(text)
-            button.clicked.connect(slot)
-            footer.addWidget(button)
-        footer.addStretch()
-        root_layout.addLayout(footer)
+            action = self.footer_toolbar.addAction(text)
+            action.triggered.connect(slot)
+        root_layout.addWidget(self.footer_toolbar)
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
+        self._apply_responsive_layout()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "_responsive_timer"):
+            self._responsive_timer.start(80)
+
+    def _apply_responsive_layout(self) -> None:
+        if not hasattr(self, "main_splitter"):
+            return
+        compact = self.size().width() < 1000
+        mode = "compact" if compact else "wide"
+        if mode == self._responsive_mode and self.main_splitter.orientation() == (
+            Qt.Vertical if compact else Qt.Horizontal
+        ):
+            return
+        self._responsive_mode = mode
+        self.main_splitter.setOrientation(Qt.Vertical if compact else Qt.Horizontal)
+        if compact:
+            self.main_splitter.setSizes([360, 520, 430])
+            # Let the remote connection row shrink with the window; the body
+            # scroll area provides vertical access to the complete form.
+            for widget in (
+                self.remote_provider_combo,
+                self.remote_profile_combo,
+                self.workflow_profile_combo,
+                self.remote_status,
+            ):
+                widget.setMinimumWidth(0)
+        else:
+            self.main_splitter.setSizes([400, 570, 500])
+            self.remote_provider_combo.setMinimumWidth(220)
+            self.remote_profile_combo.setMinimumWidth(170)
+            self.workflow_profile_combo.setMinimumWidth(190)
+            self.remote_status.setMinimumWidth(180)
 
     def _apply_button_styles(self) -> None:
         self.setStyleSheet(self.styleSheet() + """
@@ -1445,8 +1501,6 @@ class MainWindow(QMainWindow):
         if path:
             self.repository.set_setting("generation_output_root", path)
             self.image_gallery.refresh()
-            if self._history_gallery_dialog is not None:
-                self._history_gallery_dialog.refresh()
             self.remote_open_button.setEnabled(self.image_gallery.has_images)
             self.statusBar().showMessage(f"生成图片将保存到：{path}", 6000)
 
@@ -1464,16 +1518,14 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("还没有可查看的生成图片。", 4000)
 
     def open_history_gallery(self) -> None:
-        if self._history_gallery_dialog is None:
-            self._history_gallery_dialog = HistoryGalleryDialog(
+        if self._gallery_server is None:
+            self._gallery_server = GalleryServer(
                 self.repository,
                 self._generation_output_root,
-                self,
             )
-        self._history_gallery_dialog.refresh()
-        self._history_gallery_dialog.show()
-        self._history_gallery_dialog.raise_()
-        self._history_gallery_dialog.activateWindow()
+        url = self._gallery_server.start()
+        QDesktopServices.openUrl(QUrl(url))
+        self.statusBar().showMessage("已在系统浏览器中打开本地图片画廊。", 5000)
 
     def open_gallery_root(self) -> None:
         root = self._generation_output_root()
@@ -1750,8 +1802,6 @@ class MainWindow(QMainWindow):
             self.repository.save_generation_artifact(artifact)
         self._last_output_dir = run.output_dir
         self.show_image_gallery(run.id)
-        if self._history_gallery_dialog is not None and self._history_gallery_dialog.isVisible():
-            self._history_gallery_dialog.refresh()
         self.remote_status.setText(f"完成 · 已下载 {len(artifacts)} 张图片")
         self.statusBar().showMessage(f"远程生图完成：{run.output_dir}", 10000)
 
@@ -1812,4 +1862,6 @@ class MainWindow(QMainWindow):
             event.ignore()
             self.statusBar().showMessage("正在安全结束远程任务，请稍后再次关闭窗口。", 5000)
             return
+        if self._gallery_server is not None:
+            self._gallery_server.stop()
         self.repository.close(); super().closeEvent(event)

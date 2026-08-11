@@ -26,7 +26,7 @@ anima-prompt-studio = "anima_prompt_studio.app.main:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-anima_prompt_studio = ["configs/**/*.json"]
+anima_prompt_studio = ["configs/**/*.json", "web_gallery/dist/**/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
