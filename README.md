@@ -1,6 +1,15 @@
-# ANIMA 中文提示词辅助工具 V2 Beta
+# ANIMA 中文提示词辅助工具 V2
 
 本地优先的 ANIMA 中文提示词翻译、检查、标签化、编译和远程生图桌面工具。提示词处理仍完全在本地运行；只有用户主动启用远程生成时，软件才会通过 SSH 隧道连接用户自己的 ComfyUI 云主机。
+
+## Windows 下载
+
+第一阶段版本已经完成。Windows 用户可以直接从 [Releases](https://github.com/liumoumou0101/anima-prompt-studio/releases) 下载：
+
+- `ANIMA-Prompt-Studio-Setup-v2.0.0.exe`：安装版，适合日常使用，会创建开始菜单快捷方式。
+- `ANIMA-Prompt-Studio-Portable-v2.0.0.zip`：便携版，解压后双击 `AnimaPromptStudio.exe` 即可运行，不写入项目目录。
+
+基础版不包含本地 Marian 翻译模型或 PyTorch。需要更完整的本地翻译时，按下文的可选翻译模型说明安装；远程 ComfyUI 连接依赖已经包含在 Windows 发布包中。
 
 ## 已实现
 

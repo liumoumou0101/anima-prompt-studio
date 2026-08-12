@@ -10,6 +10,7 @@ dist/
 *.db
 *.log
 /reports/
+/release/
 web_gallery/node_modules/
 /*.zip
 /*.md
