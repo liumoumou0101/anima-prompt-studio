@@ -119,3 +119,36 @@ def test_pipeline_compiles_recommended_gaze_without_default_viewer():
     tags = job.positive_prompt.partition("\n\n")[0].split(", ")
     assert "looking at object" in tags
     assert "looking at viewer" not in tags
+
+
+def test_alternative_recommendation_changes_ranked_fields_but_keeps_explicit_intent(recommender):
+    text = "看镜头的天使从天而降"
+    job = recommend(recommender, text)
+    best = (job.composition.shot, job.composition.camera_height, job.composition.angle, job.composition.aspect)
+    assert job.composition.gaze == "看镜头"
+
+    result = recommender.recommend(job, alternative_index=1)
+    alternative = (job.composition.shot, job.composition.camera_height, job.composition.angle, job.composition.aspect)
+
+    assert alternative != best
+    assert job.composition.gaze == "看镜头"
+    assert result.alternative_fields
+
+
+def test_mushroom_alternative_changes_only_one_nonsemantic_field(recommender):
+    job = recommend(recommender, "一个暗精灵蹲在地上采蘑菇")
+    best = {field: getattr(job.composition, field) for field in recommender.VALID_VALUES}
+
+    result = recommender.recommend(job, alternative_index=1)
+    changed = {
+        field for field, old_value in best.items()
+        if getattr(job.composition, field) != old_value
+    }
+
+    assert len(changed) == 1
+    assert changed == set(result.alternative_fields)
+    assert job.composition.gaze == "看物体"
+    assert job.composition.shot == "膝上"
+    assert job.composition.camera_height == "高机位"
+    assert job.composition.angle == "三分之四"
+    assert job.composition.subject_position == "左"

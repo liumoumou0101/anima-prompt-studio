@@ -13,7 +13,8 @@
     "content": "She crouches low to the ground.",
     "canonical_phrases": [
       "crouches",
-      "crouching"
+      "crouching",
+      "crouched"
     ],
     "emit_tags_when_canonical": true,
     "tags": [
@@ -24,6 +25,14 @@
     ],
     "suppress_patterns": [],
     "natural_replacements": [
+      [
+        "\\bcrouched to the ground to pick mushrooms\\b",
+        "crouches on the ground while picking mushrooms"
+      ],
+      [
+        "\\bcrouched to the ground\\b",
+        "crouches on the ground"
+      ],
       [
         "\\bsits\\b",
         "crouches"

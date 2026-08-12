@@ -6,6 +6,7 @@ from anima_prompt_studio.domain.models import (
     CharacterSlot, GenerationFieldState, MatchedTag, PromptJob, SubjectMode,
 )
 from .config_service import ConfigService
+from .quality_guard import QualityTagGuard
 
 
 COMPOSITION_MAP = {
@@ -29,6 +30,12 @@ MODEL_DEPENDENT_FIELDS = PRESET_MANAGED_FIELDS
 class PromptCompiler:
     def __init__(self, configs: ConfigService) -> None:
         self.configs = configs
+        self.quality_guard = QualityTagGuard()
+
+    def effective_quality_tags(self, job: PromptJob) -> list[str]:
+        profile = self.configs.get_model(job.model_profile_id)
+        quality = self.configs.get_quality(job.quality_profile_id)
+        return self.quality_guard.filter(job, profile.positive_prefix + quality.all_tags())
 
     @staticmethod
     def _unique(values: list[str], excluded: set[str] | None = None) -> list[str]:
@@ -76,20 +83,38 @@ class PromptCompiler:
 
     def _people_tag(self, job: PromptJob) -> str:
         n = job.composition.people_count
-        genders = [slot.gender_tag for slot in job.character_slots]
+        genders = [slot.gender_tag for slot in job.character_slots[:n] if slot.gender_tag]
+        source = job.authoritative_text() or job.translated_en
+        female_source = bool(
+            re.search(r"女孩|女人|女性|少女|女仆|公主", source)
+            or (job.uses_english_authority() and re.search(
+                r"\b(?:\d+girls?|girls?|woman|women|female|maids?|princess(?:es)?)\b", source, re.I,
+            ))
+        )
+        male_source = bool(
+            re.search(r"男孩|男人|男性|少年|王子", source)
+            or (job.uses_english_authority() and re.search(
+                r"\b(?:\d+boys?|boys?|man|men|male|princes?)\b", source, re.I,
+            ))
+        )
         if n == 1:
-            return genders[0] if genders else "1girl"
-        if genders and all(x == "1girl" for x in genders[:n]):
+            if genders:
+                return genders[0]
+            if male_source and not female_source:
+                return "1boy"
+            if female_source and not male_source:
+                return "1girl"
+            return "1other"
+        if len(genders) >= n and all(x == "1girl" for x in genders[:n]):
             return f"{n}girls"
-        if genders and all(x == "1boy" for x in genders[:n]):
+        if len(genders) >= n and all(x == "1boy" for x in genders[:n]):
             return f"{n}boys"
+        if genders and len(genders) >= n and all(x == "1other" for x in genders[:n]):
+            return f"{n}others"
         if not genders:
-            source = job.authoritative_text()
-            if (("女孩" in source and "男孩" not in source) or
-                    (job.uses_english_authority() and re.search(r"\bgirls?\b", source, re.I) and not re.search(r"\bboys?\b", source, re.I))):
+            if female_source and not male_source:
                 return f"{n}girls"
-            if (("男孩" in source and "女孩" not in source) or
-                    (job.uses_english_authority() and re.search(r"\bboys?\b", source, re.I) and not re.search(r"\bgirls?\b", source, re.I))):
+            if male_source and not female_source:
                 return f"{n}boys"
         return f"{n}people"
 
@@ -130,7 +155,10 @@ class PromptCompiler:
         return next((group for group, values in groups.items() if value in values), None)
 
     @classmethod
-    def _enforce_composition_exclusivity(cls, tags: list[str], job: PromptJob) -> list[str]:
+    def _enforce_composition_exclusivity(
+        cls, tags: list[str], job: PromptJob, suppressed_groups: set[str] | None = None,
+    ) -> list[str]:
+        suppressed_groups = suppressed_groups or set()
         selected = {
             "shot": COMPOSITION_MAP["shot"].get(job.composition.shot, ""),
             "camera": COMPOSITION_MAP["camera_height"].get(job.composition.camera_height, ""),
@@ -142,6 +170,8 @@ class PromptCompiler:
         result: list[str] = []
         for tag in tags:
             group = cls._exclusive_group(tag)
+            if group in suppressed_groups:
+                continue
             if not group:
                 result.append(tag)
                 continue
@@ -172,9 +202,26 @@ class PromptCompiler:
         text = re.sub(r"\b(?:with|and)\s*([.!?])", r"\1", text, flags=re.I)
         return text.strip(" ,")
 
+    @staticmethod
+    def _character_position_prefix(slot: CharacterSlot, index: int, count: int) -> str:
+        position = slot.position.strip().casefold()
+        known = {
+            "left": "On the left", "左": "On the left",
+            "center": "In the center", "centre": "In the center", "中": "In the center",
+            "right": "On the right", "右": "On the right",
+            "front": "In front", "foreground": "In the foreground", "前": "In front",
+            "back": "In back", "background": "In the background", "后": "In back",
+        }
+        if position in known:
+            return known[position]
+        if slot.position.strip():
+            custom = slot.position.strip().rstrip(",")
+            return custom[:1].upper() + custom[1:]
+        defaults = ["On the left", "On the right"] if count == 2 else ["On the left", "In the center", "On the right"]
+        return defaults[index] if count in (2, 3) and index < len(defaults) else f"Character {index + 1}"
+
     def _character_paragraph(self, slot: CharacterSlot, index: int, count: int) -> str:
-        positions = ["On the left", "On the right"] if count == 2 else ["On the left", "In the center", "On the right"]
-        prefix = positions[index] if count in (2, 3) and index < 3 else (slot.position.title() if slot.position else f"Character {index + 1}")
+        prefix = self._character_position_prefix(slot, index, count)
         features = self._unique(
             ([slot.display_name] if slot.display_name else []) + slot.identity_tags + slot.appearance_tags + slot.clothing_tags
         )
@@ -182,6 +229,22 @@ class PromptCompiler:
         action = slot.action_text.strip().rstrip(".")
         body = ", ".join(x for x in (detail, action) if x)
         return f"{prefix}, {body}." if body else ""
+
+    @staticmethod
+    def _has_mixed_character_gaze(job: PromptJob) -> bool:
+        intents: set[str] = set()
+        patterns = {
+            "viewer": r"\b(?:looking at (?:the )?(?:viewer|camera)|looks? at (?:the )?camera)\b",
+            "away": r"\b(?:looking away|looking forward|looks? outside|not looking at (?:the )?camera)\b",
+            "person": r"\b(?:looking at (?:the )?(?:other|another)(?: person)?|looking at each other)\b",
+            "object": r"\b(?:looking at|watching) (?:a |an |the )?(?!viewer|camera|other|another)[a-z]+",
+        }
+        for slot in job.character_slots[:job.composition.people_count]:
+            text = slot.action_text.casefold()
+            slot_intent = next((name for name, pattern in patterns.items() if re.search(pattern, text, re.I)), None)
+            if slot_intent:
+                intents.add(slot_intent)
+        return len(intents) > 1
 
     @staticmethod
     def _natural_enhancement_content(content: str, people_count: int) -> str:
@@ -206,6 +269,9 @@ class PromptCompiler:
             (x for x in job.matched_tags if x.state.value != "excluded" and x.tag not in excluded),
             key=lambda x: CATEGORY_ORDER.get(x.category, 100),
         )
+        mixed_character_gaze = job.composition.people_count > 1 and self._has_mixed_character_gaze(job)
+        if mixed_character_gaze:
+            matched = [item for item in matched if self._exclusive_group(item.tag) != "gaze"]
         locked_slot_categories = {
             category
             for slot in job.character_slots[:max(1, job.composition.people_count)] if slot.locked
@@ -225,7 +291,7 @@ class PromptCompiler:
                            "blue pupils", "red pupils", "golden pupils", "book", "flower", "apple", "umbrella",
                            "sitting", "standing", "lying", "waving",
                        })]
-        quality_tags = profile.positive_prefix + quality.all_tags()
+        quality_tags = self.effective_quality_tags(job)
         scene_mode = job.effective_subject_mode() == SubjectMode.SCENE
         people = self._people_tag(job)
         tags = [] if scene_mode else [people]
@@ -244,10 +310,13 @@ class PromptCompiler:
         composition_category = {"shot":"shot", "camera_height":"camera", "angle":"angle", "gaze":"gaze", "subject_position":"position"}
         tags += [COMPOSITION_MAP[key].get(getattr(job.composition, key), "") for key in COMPOSITION_MAP
                  if composition_category[key] not in explicit_natural
+                 and not (mixed_character_gaze and key == "gaze")
                  and (not scene_mode or key == "shot")]
         tags += [a if a.startswith("@") else f"@{a}" for a in job.artist_selection]
         tags += [trigger for lora in job.lora_selection for trigger in lora.trigger_words]
-        tags = self._enforce_composition_exclusivity(tags, job)
+        tags = self._enforce_composition_exclusivity(
+            tags, job, suppressed_groups={"gaze"} if mixed_character_gaze else None,
+        )
         common = self._unique(quality_tags + tags + job.locked_tags, excluded)
 
         paragraphs: list[str] = []

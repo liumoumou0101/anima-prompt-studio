@@ -105,8 +105,13 @@ class PromptPipeline:
             ]
         else:
             generated = self.enhancer.enhance(source_zh, job.translated_en)
+            scoped_slots = self.multi_scope.extract_slots(source_zh, job.composition.people_count)
+            if scoped_slots:
+                self._merge_auto_character_slots(job, scoped_slots)
             multi_scope = self.multi_scope.build(source_zh, job.composition.people_count)
             if multi_scope:
+                if scoped_slots:
+                    multi_scope.content = ""
                 generated.append(multi_scope)
         for item in generated:
             if item.id in previous:
@@ -155,6 +160,22 @@ class PromptPipeline:
         self.lora_resolver.set_profiles(profiles)
 
     @staticmethod
+    def _merge_auto_character_slots(job: PromptJob, scoped_slots) -> None:
+        for index, candidate in enumerate(scoped_slots):
+            if index >= len(job.character_slots):
+                job.character_slots.append(candidate)
+                continue
+            current = job.character_slots[index]
+            has_user_content = bool(
+                current.display_name or current.identity_tags or current.appearance_tags
+                or current.clothing_tags or current.action_text
+            )
+            if current.locked and has_user_content:
+                continue
+            candidate.id = current.id
+            job.character_slots[index] = candidate
+
+    @staticmethod
     def _replace_text_derived_artists(job: PromptJob, mentions: list[str]) -> None:
         preserved = [
             artist for artist in job.artist_selection
@@ -171,8 +192,8 @@ class PromptPipeline:
         job.artist_selection = preserved
         job.artist_selection_sources = sources
 
-    def recommend_composition(self, job: PromptJob) -> PromptJob:
-        self.composition_recommender.recommend(job)
+    def recommend_composition(self, job: PromptJob, alternative_index: int = 0) -> PromptJob:
+        self.composition_recommender.recommend(job, alternative_index=alternative_index)
         return self.compiler.compile(job)
 
     @staticmethod

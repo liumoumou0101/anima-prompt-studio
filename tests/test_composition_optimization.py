@@ -46,6 +46,27 @@ def test_crouching_mushroom_sentence_is_canonicalized():
     assert "crouching" in tags and "sitting" not in tags
 
 
+def test_short_gender_unspecified_mushroom_prompt_is_neutral_and_not_duplicated():
+    class ActualMarianShapeEngine:
+        name = "actual-marian-shape"
+
+        def zh_to_en(self, text):
+            return "A dark elf crouched to the ground to pick mushrooms"
+
+        def en_to_zh(self, text):
+            return text
+
+    pipeline = PromptPipeline(translation=TranslationService(ActualMarianShapeEngine()))
+    job = PromptJob(original_zh="一个暗精灵蹲在地上采蘑菇")
+    pipeline.compiler.apply_model_defaults(job); pipeline.translate(job)
+    prose = job.positive_prompt.partition("\n\n")[2].lower()
+    tags = set(job.positive_prompt.partition("\n\n")[0].split(", "))
+
+    assert "1other" in tags and not {"1girl", "1boy"} & tags
+    assert "crouching" in tags and "squatting" not in tags
+    assert prose == "a dark elf crouches on the ground while picking mushrooms."
+
+
 def test_descending_angel_sentence_and_tags_are_canonicalized():
     job = build(ANGEL)
     prose = job.positive_prompt.partition("\n\n")[2].lower()

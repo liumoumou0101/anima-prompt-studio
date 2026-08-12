@@ -64,6 +64,44 @@ def test_multi_person_features_are_scoped():
     assert "On the right, B, black hair, holding a flower." in job.positive_prompt
 
 
+def test_custom_multi_person_positions_are_not_overwritten_by_slot_order():
+    pipeline = PromptPipeline()
+    job = PromptJob(translated_en="Two people.", character_slots=[
+        CharacterSlot(position="foreground", display_name="A"),
+        CharacterSlot(position="background", display_name="B"),
+    ])
+    job.composition.people_count = 2
+    pipeline.compiler.apply_model_defaults(job)
+    pipeline.compiler.compile(job)
+    assert "In the foreground, A." in job.positive_prompt
+    assert "In the background, B." in job.positive_prompt
+
+
+def test_one_and_another_are_split_into_scoped_slots_with_mixed_gaze():
+    pipeline = PromptPipeline()
+    job = PromptJob(original_zh="一个白发女孩看镜头，另一个黑发女孩看向前方")
+    pipeline.compiler.apply_model_defaults(job)
+    pipeline.translate(job)
+
+    assert job.composition.people_count == 2
+    assert job.character_slots[0].appearance_tags == ["white hair"]
+    assert job.character_slots[0].action_text == "looking at viewer"
+    assert job.character_slots[1].appearance_tags == ["black hair"]
+    assert job.character_slots[1].action_text == "looking forward"
+    tag_section = set(job.positive_prompt.partition("\n\n")[0].split(", "))
+    assert not {"looking at viewer", "looking forward", "looking away"} & tag_section
+    assert "On the left, white hair, looking at viewer." in job.positive_prompt
+    assert "On the right, black hair, looking forward." in job.positive_prompt
+
+
+def test_task_package_only_exports_active_character_slots():
+    job = PromptJob(character_slots=[
+        CharacterSlot(display_name="A"), CharacterSlot(display_name="B"), CharacterSlot(display_name="C"),
+    ])
+    job.composition.people_count = 1
+    assert [item["display_name"] for item in job.task_package()["characters"]] == ["A"]
+
+
 def test_task_package_has_schema_and_source():
     _, job = make_job()
     package = job.task_package()

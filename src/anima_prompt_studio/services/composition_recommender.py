@@ -34,6 +34,7 @@ class CandidateEvidence:
 @dataclass
 class CompositionRecommendationResult:
     applied_fields: list[str] = field(default_factory=list)
+    alternative_fields: list[str] = field(default_factory=list)
     matched_rule_ids: list[str] = field(default_factory=list)
 
 
@@ -155,24 +156,62 @@ class CompositionRecommendationService:
             matched_rules.append("semantic_angle")
         return candidates, matched_rules
 
-    def recommend(self, job: PromptJob) -> CompositionRecommendationResult:
+    @staticmethod
+    def _is_semantically_fixed(evidence: CandidateEvidence) -> bool:
+        return any(
+            source.startswith("explicit_") or source in {"semantic_gaze", "semantic_angle", "semantic_scene"}
+            for source in evidence.source_rule_ids
+        )
+
+    def recommend(self, job: PromptJob, alternative_index: int = 0) -> CompositionRecommendationResult:
         result = CompositionRecommendationResult()
         if job.composition.mode == "manual":
             return result
         job.composition_context = self.context_extractor.extract(job)
         candidates, result.matched_rule_ids = self._collect_candidates(job)
+        rankings = {
+            field_name: sorted(
+                candidates[field_name].items(), key=lambda item: (item[1].score, item[0]), reverse=True,
+            )
+            for field_name in COMPOSITION_FIELDS
+        }
+        alternative_field: str | None = None
+        if alternative_index > 0:
+            eligible = [
+                field_name for field_name in COMPOSITION_FIELDS
+                if field_name != "gaze"
+                and job.composition.decision(field_name).state == CompositionFieldState.AUTO
+                and len(rankings[field_name]) > 1
+                and not self._is_semantically_fixed(rankings[field_name][0][1])
+            ]
+
+            def alternative_priority(field_name: str) -> tuple[int, int]:
+                second_is_meaningful = any(
+                    source != "default" for source in rankings[field_name][1][1].source_rule_ids
+                )
+                fallback_order = {
+                    "angle": 0, "camera_height": 1, "subject_position": 2,
+                    "aspect": 3, "shot": 4,
+                }
+                return (0 if second_is_meaningful else 1, fallback_order.get(field_name, 9))
+
+            eligible.sort(key=alternative_priority)
+            if eligible:
+                alternative_field = eligible[(alternative_index - 1) % len(eligible)]
         for field_name in COMPOSITION_FIELDS:
             decision = job.composition.decision(field_name)
             if decision.state != CompositionFieldState.AUTO:
                 continue
-            ranked = sorted(
-                candidates[field_name].items(), key=lambda item: (item[1].score, item[0]), reverse=True,
-            )
+            ranked = rankings[field_name]
             if not ranked:
                 continue
-            value, evidence = ranked[0]
+            selected_index = 1 if field_name == alternative_field else 0
+            value, evidence = ranked[selected_index]
             setattr(job.composition, field_name, value)
             decision.reason = evidence.best_reason
+            if selected_index:
+                decision.reason = f"备选构图 {selected_index + 1}：{decision.reason or '采用次优候选'}"
+                result.alternative_fields.append(field_name)
             decision.source_rule_ids = evidence.source_rule_ids
             decision.score = round(evidence.score, 3)
             result.applied_fields.append(field_name)

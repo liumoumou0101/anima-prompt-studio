@@ -64,6 +64,12 @@ class SemanticFrameResolver:
             "两个女孩亲吻", "两个女孩做爱",
         )):
             people_count = 2
+        elif re.search(
+            r"(?:一个|一名)(?:女孩|男孩|男人|女人|人物|角色|人)?.{1,80}"
+            r"(?:另一个|另一名)(?:女孩|男孩|男人|女人|人物|角色|人)?",
+            text,
+        ):
+            people_count = 2
         elif character_entity_count > 1:
             people_count = character_entity_count
         elif has_person:
@@ -147,7 +153,11 @@ class SemanticFrameResolver:
             people_count = number_words.get(token, int(token) if token.isdigit() else 1)
         elif has_3girls:
             people_count = 3
-        elif has_2girls or has_2boys or re.search(r"\b(?:couple|a man and a (?:woman|girl)|a woman and a man|a girl and a boy|a boy and a girl)\b", lower):
+        elif has_2girls or has_2boys or re.search(
+            r"\b(?:couple|a man and a (?:woman|girl)|a woman and a man|a girl and a boy|a boy and a girl|"
+            r"one (?:girl|boy|woman|man|person|character).{1,100}another (?:girl|boy|woman|man|person|character))\b",
+            lower,
+        ):
             people_count = 2
         elif has_1girl and has_1boy:
             people_count = 2

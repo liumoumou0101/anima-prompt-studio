@@ -47,6 +47,20 @@ from anima_prompt_studio.ui.tag_browser_dialog import TagBrowserDialog
 log = logging.getLogger(__name__)
 
 
+class NoWheelSpinBox(QSpinBox):
+    """Prevents page scrolling from silently editing a numeric parameter."""
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 - Qt virtual method
+        event.ignore()
+
+
+class NoWheelDoubleSpinBox(QDoubleSpinBox):
+    """Prevents page scrolling from silently editing a numeric parameter."""
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 - Qt virtual method
+        event.ignore()
+
+
 class HistoryDialog(QDialog):
     def __init__(self, repository: SQLiteRepository, parent=None) -> None:
         super().__init__(parent)
@@ -100,6 +114,7 @@ class MainWindow(QMainWindow):
         self.job = PromptJob()
         self._updating = False
         self._cached_character_people_count = 1
+        self._composition_alternative_index = 0
         self._remote_threads: list[QThread] = []
         self._remote_workers: list[object] = []
         self._active_generation_worker: GenerationWorker | None = None
@@ -210,6 +225,12 @@ class MainWindow(QMainWindow):
         self.quality_combo = QComboBox()
         for profile in self.configs.quality_profiles.values():
             self.quality_combo.addItem(profile.display_name, profile.id)
+            if profile.notes:
+                self.quality_combo.setItemData(
+                    self.quality_combo.count() - 1,
+                    profile.notes,
+                    Qt.ItemDataRole.ToolTipRole,
+                )
         self.quality_combo.currentIndexChanged.connect(self.recompile_from_ui)
         primary_header.addWidget(self.quality_combo, 1)
         header.addLayout(primary_header)
@@ -525,8 +546,16 @@ class MainWindow(QMainWindow):
             grid.addWidget(QLabel(labels[field_name]), row, 0); grid.addWidget(widget, row, 1); grid.addWidget(state, row, 2); grid.addWidget(reason, row, 3)
             widget.currentIndexChanged.connect(lambda _=0, name=field_name: self.on_composition_value_changed(name))
             state.currentIndexChanged.connect(lambda _=0, name=field_name: self.on_composition_state_changed(name))
-        recommend = QPushButton("重新推荐构图"); recommend.clicked.connect(self.recommend_composition)
-        grid.addWidget(recommend, 10, 1, 1, 2)
+        recommendation_buttons = QHBoxLayout()
+        self.recalculate_composition_button = QPushButton("重新计算")
+        self.recalculate_composition_button.setToolTip("根据当前提示词重新计算最高分构图；相同输入会得到相同结果。")
+        self.recalculate_composition_button.clicked.connect(self.recommend_composition)
+        recommendation_buttons.addWidget(self.recalculate_composition_button)
+        self.alternative_composition_button = QPushButton("换一种构图")
+        self.alternative_composition_button.setToolTip("在不改变明确景别、角度或视线要求的前提下，轮换次优候选。")
+        self.alternative_composition_button.clicked.connect(self.recommend_alternative_composition)
+        recommendation_buttons.addWidget(self.alternative_composition_button)
+        grid.addLayout(recommendation_buttons, 10, 1, 1, 2)
         grid.setColumnStretch(3, 1)
         layout.addWidget(composition)
 
@@ -617,12 +646,12 @@ class MainWindow(QMainWindow):
 
         params = QGroupBox("模型参数（自动 / 手动 / 锁定）")
         grid = QGridLayout(params)
-        self.width = QSpinBox(); self.width.setRange(256, 4096); self.width.setSingleStep(64)
-        self.height = QSpinBox(); self.height.setRange(256, 4096); self.height.setSingleStep(64)
-        self.steps = QSpinBox(); self.steps.setRange(1, 200)
-        self.cfg = QDoubleSpinBox(); self.cfg.setRange(0, 30); self.cfg.setDecimals(2); self.cfg.setSingleStep(.5)
+        self.width = NoWheelSpinBox(); self.width.setRange(256, 4096); self.width.setSingleStep(64)
+        self.height = NoWheelSpinBox(); self.height.setRange(256, 4096); self.height.setSingleStep(64)
+        self.steps = NoWheelSpinBox(); self.steps.setRange(1, 200)
+        self.cfg = NoWheelDoubleSpinBox(); self.cfg.setRange(0, 30); self.cfg.setDecimals(2); self.cfg.setSingleStep(.5)
         self.sampler = QLineEdit(); self.scheduler = QLineEdit(); self.seed = QLineEdit("-1")
-        self.batch = QSpinBox(); self.batch.setRange(1, 32)
+        self.batch = NoWheelSpinBox(); self.batch.setRange(1, 32)
         self.batch.setToolTip("一次提交生成并下载的图片数量")
         self.batch.valueChanged.connect(self.on_batch_size_changed)
         self.parameter_controls = {
@@ -659,16 +688,32 @@ class MainWindow(QMainWindow):
     def _combo(values: list[str]) -> QComboBox:
         box = QComboBox(); box.addItems(values); return box
 
+    @staticmethod
+    def _slot_values(slot: CharacterSlot) -> list[str]:
+        return [
+            slot.position, slot.display_name, slot.gender_tag,
+            ", ".join(slot.identity_tags), ", ".join(slot.appearance_tags),
+            ", ".join(slot.clothing_tags), slot.action_text,
+        ]
+
+    def _write_slot_row(self, row: int, slot: CharacterSlot) -> None:
+        for col, value in enumerate(self._slot_values(slot)):
+            self.slot_table.setItem(row, col, QTableWidgetItem(value))
+
     def _resize_slots(self, count: int) -> None:
         rows = min(count, 3) if count >= 4 else count
+        previous_rows = self.slot_table.rowCount()
         self.slot_table.setRowCount(rows)
         positions = ["left", "center", "right"] if count == 3 else (["left", "right"] if count == 2 else ["center"])
         for row in range(rows):
+            if row >= previous_rows and row < len(self.job.character_slots):
+                self._write_slot_row(row, self.job.character_slots[row])
+                continue
             if not self.slot_table.item(row, 0):
                 self.slot_table.setItem(row, 0, QTableWidgetItem(positions[row] if row < len(positions) else f"subject {row + 1}"))
             for col in range(1, 7):
                 if not self.slot_table.item(row, col):
-                    self.slot_table.setItem(row, col, QTableWidgetItem("1girl" if col == 2 else ""))
+                    self.slot_table.setItem(row, col, QTableWidgetItem(""))
         if count >= 4:
             self.statusBar().showMessage("群像模式：仅精确描述前三个核心角色，不保证所有人物特征稳定。", 8000)
 
@@ -685,13 +730,14 @@ class MainWindow(QMainWindow):
         for field_name, state_box in self.composition_state_boxes.items():
             comp.decision(field_name).state = CompositionFieldState(state_box.currentData())
         if not preserve_hidden_slots:
+            existing_slots = [slot.model_copy(deep=True) for slot in self.job.character_slots]
             slots: list[CharacterSlot] = []
             for row in range(self.slot_table.rowCount()):
                 values = [(self.slot_table.item(row, col).text().strip() if self.slot_table.item(row, col) else "") for col in range(7)]
-                slots.append(CharacterSlot(position=values[0], display_name=values[1], gender_tag=values[2] or "1girl",
+                slots.append(CharacterSlot(position=values[0], display_name=values[1], gender_tag=values[2],
                     identity_tags=self._split(values[3]), appearance_tags=self._split(values[4]), clothing_tags=self._split(values[5]),
                     action_text=values[6], locked=True))
-            self.job.character_slots = slots
+            self.job.character_slots = slots + existing_slots[len(slots):]
         ui_artists = self._split(self.artists.text())
         self.job.artist_selection_sources = {
             artist: self.job.artist_selection_sources.get(artist, "manual")
@@ -760,8 +806,7 @@ class MainWindow(QMainWindow):
             self.composition_reason_labels[field_name].setText(decision.reason or "")
         self._resize_slots(c.people_count)
         for row, slot in enumerate(j.character_slots[:self.slot_table.rowCount()]):
-            vals = [slot.position, slot.display_name, slot.gender_tag, ", ".join(slot.identity_tags), ", ".join(slot.appearance_tags), ", ".join(slot.clothing_tags), slot.action_text]
-            for col, value in enumerate(vals): self.slot_table.setItem(row, col, QTableWidgetItem(value))
+            self._write_slot_row(row, slot)
         self.artists.setText(", ".join(j.artist_selection))
         self.loras.setText(", ".join(f"{x.logical_id}:{x.weight}" + ((":" + "+".join(x.trigger_words)) if x.trigger_words else "") for x in j.lora_selection))
         p=j.generation_params; self.width.setValue(p.width); self.height.setValue(p.height); self.steps.setValue(p.steps); self.cfg.setValue(p.cfg)
@@ -793,12 +838,7 @@ class MainWindow(QMainWindow):
         self._set_combo_data(self.subject_mode, j.subject_mode.value)
         self._resize_slots(c.people_count)
         for row, slot in enumerate(j.character_slots[:self.slot_table.rowCount()]):
-            values = [
-                slot.position, slot.display_name, slot.gender_tag, ", ".join(slot.identity_tags),
-                ", ".join(slot.appearance_tags), ", ".join(slot.clothing_tags), slot.action_text,
-            ]
-            for col, value in enumerate(values):
-                self.slot_table.setItem(row, col, QTableWidgetItem(value))
+            self._write_slot_row(row, slot)
         self.artists.setText(", ".join(j.artist_selection))
         self.loras.setText(", ".join(
             f"{x.logical_id}:{x.weight}" + ((":" + "+".join(x.trigger_words)) if x.trigger_words else "")
@@ -836,8 +876,7 @@ class MainWindow(QMainWindow):
             lock = QTableWidgetItem(); lock.setFlags(lock.flags() | Qt.ItemIsUserCheckable); lock.setCheckState(Qt.Checked if enh.state == ItemState.LOCKED else Qt.Unchecked)
             self.enhancement_table.setItem(row, 0, check); self.enhancement_table.setItem(row, 1, QTableWidgetItem(enh.type)); self.enhancement_table.setItem(row, 2, QTableWidgetItem(enh.source_rule)); self.enhancement_table.setItem(row, 3, QTableWidgetItem(enh.content)); self.enhancement_table.setItem(row, 4, lock)
         quality = self.configs.get_quality(j.quality_profile_id)
-        model = self.configs.get_model(j.model_profile_id)
-        quality_tags = model.positive_prefix + quality.all_tags()
+        quality_tags = self.pipeline.compiler.effective_quality_tags(j)
         self.quality_enhancement_summary.setText(
             f"当前质量预设：{quality.display_name}\n"
             + (", ".join(quality_tags) if quality_tags else "此预设不添加额外质量词。")
@@ -917,12 +956,7 @@ class MainWindow(QMainWindow):
             self.people_count.setValue(max(1, self._cached_character_people_count))
             self._resize_slots(self.people_count.value())
             for row, slot in enumerate(self.job.character_slots[:self.slot_table.rowCount()]):
-                values = [
-                    slot.position, slot.display_name, slot.gender_tag, ", ".join(slot.identity_tags),
-                    ", ".join(slot.appearance_tags), ", ".join(slot.clothing_tags), slot.action_text,
-                ]
-                for col, value in enumerate(values):
-                    self.slot_table.setItem(row, col, QTableWidgetItem(value))
+                self._write_slot_row(row, slot)
             self._updating = previous
         self.recompile_from_ui()
 
@@ -979,9 +1013,28 @@ class MainWindow(QMainWindow):
         if self._updating:
             return
         try:
+            self._composition_alternative_index = 0
             self._sync_ui_to_job(); self.pipeline.recommend_composition(self.job); self._refresh_results()
-            self.statusBar().showMessage("构图推荐已更新；手动和锁定项保持不变。", 5000)
+            self.statusBar().showMessage("已重新计算最高分构图；手动和锁定项保持不变。", 5000)
         except Exception as exc: self._show_error("构图推荐失败", exc)
+
+    def recommend_alternative_composition(self) -> None:
+        if self._updating:
+            return
+        try:
+            self._composition_alternative_index += 1
+            self._sync_ui_to_job()
+            self.pipeline.recommend_composition(
+                self.job,
+                alternative_index=self._composition_alternative_index,
+            )
+            self._refresh_results()
+            self.statusBar().showMessage(
+                f"已切换到备选构图 {self._composition_alternative_index + 1}；明确要求和锁定项保持不变。",
+                5000,
+            )
+        except Exception as exc:
+            self._show_error("切换备选构图失败", exc)
 
     def apply_composition_preset(self) -> None:
         if self._updating:

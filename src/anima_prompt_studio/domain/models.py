@@ -107,7 +107,7 @@ class CharacterSlot(BaseModel):
     position: str = "center"
     character_id: str | None = None
     display_name: str = ""
-    gender_tag: str = "1girl"
+    gender_tag: str = ""
     identity_tags: list[str] = Field(default_factory=list)
     appearance_tags: list[str] = Field(default_factory=list)
     clothing_tags: list[str] = Field(default_factory=list)
@@ -215,6 +215,7 @@ class ModelProfile(BaseModel):
 class QualityProfile(BaseModel):
     id: str
     display_name: str
+    notes: str = ""
     base_quality_tags: list[str] = Field(default_factory=list)
     rendering_style_tags: list[str] = Field(default_factory=list)
     detail_tags: list[str] = Field(default_factory=list)
@@ -372,7 +373,7 @@ class PromptJob(BaseModel):
             "loras": [x.model_dump() for x in self.lora_selection],
             "characters": (
                 [] if self.effective_subject_mode() == SubjectMode.SCENE
-                else [x.model_dump() for x in self.character_slots]
+                else [x.model_dump() for x in self.character_slots[:self.composition.people_count]]
             ),
             "artists": self.artist_selection,
             "artist_sources": {

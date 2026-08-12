@@ -362,5 +362,175 @@
       "detailed skin",
       "anatomical detail"
     ]
+  },
+  {
+    "id": "ultimate_general",
+    "display_name": "极致质量·通用",
+    "notes": "不指定画风、构图、时间或内容，只叠加通用完成度；适合作为默认极致档。",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "highres",
+      "absurdres"
+    ],
+    "detail_tags": [
+      "highly detailed",
+      "delicate details",
+      "refined details",
+      "clean rendering"
+    ]
+  },
+  {
+    "id": "ultimate_character",
+    "display_name": "极致质量·人物",
+    "notes": "加强人物的面部、头发、皮肤、手部和整体解剖，不预设性别或成人身体特征。",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "highres",
+      "absurdres"
+    ],
+    "detail_tags": [
+      "highly detailed",
+      "detailed face",
+      "detailed eyes",
+      "detailed hair",
+      "detailed skin",
+      "detailed hands",
+      "detailed fingers",
+      "anatomical detail"
+    ]
+  },
+  {
+    "id": "ultimate_portrait",
+    "display_name": "极致质量·肖像",
+    "notes": "用于头像、胸像和人物近景，集中增强五官与皮肤细节，不强制景别或光线。",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "highres",
+      "absurdres"
+    ],
+    "detail_tags": [
+      "highly detailed",
+      "detailed face",
+      "facial details",
+      "detailed eyes",
+      "catchlight",
+      "detailed hair",
+      "detailed skin"
+    ]
+  },
+  {
+    "id": "ultimate_scene",
+    "display_name": "极致质量·场景",
+    "notes": "提升背景、环境层次与空间深度，不预设昼夜、天气或题材。",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "highres",
+      "absurdres"
+    ],
+    "detail_tags": [
+      "highly detailed",
+      "detailed background",
+      "environmental details",
+      "intricate scenery"
+    ],
+    "composition_tags": [
+      "layered composition",
+      "spatial depth"
+    ],
+    "atmosphere_tags": [
+      "atmospheric perspective"
+    ]
+  },
+  {
+    "id": "ultimate_landscape_architecture",
+    "display_name": "极致质量·风景建筑",
+    "notes": "用于自然风景、城市和建筑主体，强化环境结构、建筑细节与透视准确性。",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "highres",
+      "absurdres"
+    ],
+    "detail_tags": [
+      "highly detailed",
+      "detailed background",
+      "intricate scenery",
+      "detailed architecture",
+      "architectural details",
+      "environmental details"
+    ],
+    "composition_tags": [
+      "spatial depth",
+      "accurate perspective"
+    ]
+  },
+  {
+    "id": "ultimate_action",
+    "display_name": "极致质量·动态",
+    "notes": "用于战斗、运动和高速动作；会主动加入动态机位、动作姿势和速度表现。",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "highres",
+      "absurdres"
+    ],
+    "detail_tags": [
+      "highly detailed",
+      "sharp focus",
+      "crisp lines",
+      "detailed effects",
+      "motion lines",
+      "speed lines"
+    ],
+    "composition_tags": [
+      "dynamic pose",
+      "dynamic angle",
+      "action shot"
+    ]
+  },
+  {
+    "id": "ultimate_material",
+    "display_name": "极致质量·服饰材质",
+    "notes": "提升衣物、布料、饰品和表面材质；不默认加入蕾丝、透明或特定服装。",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "highres",
+      "absurdres"
+    ],
+    "detail_tags": [
+      "highly detailed",
+      "detailed clothes",
+      "fabric folds",
+      "clothing texture",
+      "material rendering",
+      "intricate accessories",
+      "detailed embroidery"
+    ]
+  },
+  {
+    "id": "ultimate_adult",
+    "display_name": "极致质量·成人细节",
+    "notes": "为明确的成人内容提供无修正与通用身体细节，不预设性别、姿势或具体身体部位。",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "highres",
+      "absurdres",
+      "explicit"
+    ],
+    "detail_tags": [
+      "highly detailed",
+      "uncensored",
+      "anatomical detail",
+      "detailed body",
+      "detailed skin",
+      "detailed hands",
+      "detailed fingers"
+    ]
   }
 ]

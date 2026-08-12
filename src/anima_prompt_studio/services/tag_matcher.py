@@ -238,6 +238,14 @@ class TagMatcher:
                     state=ItemState.LOCKED if tag in locked else ItemState.AUTO,
                 ))
                 seen.add(tag)
+        # Some downloaded aliases are genuinely equivalent poses. Keep the
+        # canonical tag used by the built-in rules instead of emitting both.
+        equivalent_groups = (("crouching", "squatting"),)
+        for preferred, *aliases in equivalent_groups:
+            if preferred not in seen:
+                continue
+            result = [item for item in result if item.tag not in aliases]
+            seen.difference_update(aliases)
         # Hair colour/length, eye colour and count are single-valued in V1. The
         # last explicit phrase wins, which mirrors normal Chinese corrections.
         single_value = {"count", "hair", "hair_length", "eyes"}
@@ -273,4 +281,7 @@ class TagMatcher:
             result.append(MatchedTag(tag=tag, category=category_names.get(entry["category"], "general"),
                 source_type="direct", source_text=entry["name"].replace("_", " "), confidence=.97))
             seen.add(tag)
+        for preferred, *aliases in equivalent_groups:
+            if any(item.tag == preferred for item in result):
+                result = [item for item in result if item.tag not in aliases]
         return result

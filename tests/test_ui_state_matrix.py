@@ -6,7 +6,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QTableWidgetItem
 
 from anima_prompt_studio.domain.execution_models import RemoteCredentials, RemoteProfile, WorkflowProfile
@@ -111,6 +112,31 @@ def test_auto_recommendation_updates_ui_and_reason(window):
     assert window.shot.currentText() == "全身"
     assert window.gaze.currentText() == "看物体"
     assert window.composition_reason_labels["shot"].text()
+
+
+def test_composition_ui_distinguishes_recalculation_from_alternatives(window):
+    assert window.recalculate_composition_button.text() == "重新计算"
+    assert window.alternative_composition_button.text() == "换一种构图"
+    window.job = PromptJob(original_zh="看镜头的天使从天而降", normalized_zh="看镜头的天使从天而降")
+    window._load_job_into_ui(); window.recommend_composition()
+    best = (window.job.composition.shot, window.job.composition.camera_height, window.job.composition.angle)
+    window.recommend_alternative_composition()
+    alternative = (window.job.composition.shot, window.job.composition.camera_height, window.job.composition.angle)
+    assert alternative != best
+    assert window.job.composition.gaze == "看镜头"
+
+
+def test_mouse_wheel_does_not_change_cfg_or_mark_it_manual(window):
+    window.job = PromptJob(model_profile_id="anima_turbo_v1")
+    window.pipeline.compiler.apply_model_defaults(window.job); window._load_job_into_ui()
+    event = QWheelEvent(
+        QPointF(5, 5), QPointF(5, 5), QPoint(), QPoint(0, -120),
+        Qt.NoButton, Qt.NoModifier, Qt.ScrollUpdate, False,
+    )
+    QApplication.sendEvent(window.cfg, event)
+    assert window.cfg.value() == 1.0
+    assert window.job.generation_params.cfg == 1.0
+    assert window.parameter_state_boxes["cfg"].currentData() == GenerationFieldState.AUTO.value
 
 
 def test_locked_composition_survives_recommend_and_model_switch(window):
@@ -365,6 +391,27 @@ def test_scene_sync_and_export_preserve_cached_character_slots(window, tmp_path,
     assert window.slot_table.rowCount() == 2
     assert [window.slot_table.item(row, 1).text() for row in range(2)] == ["A", "B"]
     assert [x.display_name for x in window.job.character_slots] == ["A", "B"]
+
+
+def test_reducing_and_restoring_people_count_preserves_hidden_slots(window):
+    window.job = PromptJob(
+        original_zh="三个人", normalized_zh="三个人", translated_en="Three people.",
+        subject_mode=SubjectMode.CHARACTER,
+        character_slots=[
+            CharacterSlot(display_name="A"),
+            CharacterSlot(display_name="B"),
+            CharacterSlot(display_name="C"),
+        ],
+    )
+    window.job.composition.people_count = 3
+    window.pipeline.compiler.compile(window.job); window._load_job_into_ui()
+
+    window.people_count.setValue(1)
+    assert [slot.display_name for slot in window.job.character_slots] == ["A", "B", "C"]
+    assert [item["display_name"] for item in window.job.task_package()["characters"]] == ["A"]
+
+    window.people_count.setValue(3)
+    assert [window.slot_table.item(row, 1).text() for row in range(3)] == ["A", "B", "C"]
 
 
 def test_remote_connection_can_be_entered_and_saved_directly_in_main_window(window):
