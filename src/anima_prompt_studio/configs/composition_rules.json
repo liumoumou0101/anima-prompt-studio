@@ -14,7 +14,7 @@
       {"value":"半身","zh":["上半身特写"],"en":["upper body close-up"],"reason":"用户明确要求上半身特写"},
       {"value":"胸像","zh":["胸像"],"en":["bust shot"],"reason":"用户明确要求胸像"},
       {"value":"半身","zh":["半身","上半身"],"en":["upper body"],"reason":"用户明确要求半身构图"},
-      {"value":"膝上","zh":["膝上","中近景"],"en":["cowboy shot"],"reason":"用户明确要求膝上构图"},
+      {"value":"膝上","zh":["膝上景别","膝上构图","膝上镜头","中近景"],"en":["cowboy shot"],"reason":"用户明确要求膝上构图"},
       {"value":"全身","zh":["全身","全景人像"],"en":["full body"],"reason":"用户明确要求全身构图"},
       {"value":"远景","zh":["远景","广角远景"],"en":["wide shot"],"reason":"用户明确要求远景"}
     ],
@@ -26,6 +26,7 @@
     "angle": [
       {"value":"正面","zh":["正面","正面视角"],"en":["front view"],"reason":"用户明确要求正面视角"},
       {"value":"侧面","zh":["侧面","侧面视角"],"en":["side view","from the side"],"reason":"用户明确要求侧面视角"},
+      {"value":"三分之四","zh":["侧前方","侧前方视角","斜前方","斜前方视角"],"en":["front three-quarter view"],"reason":"用户明确要求侧前方的三分之四视角"},
       {"value":"背面","zh":["背面视角","从背后"],"en":["from behind","back view"],"reason":"用户明确要求背面视角"},
       {"value":"三分之四","zh":["三分之四","四分之三"],"en":["three-quarter view"],"reason":"用户明确要求三分之四视角"}
     ],

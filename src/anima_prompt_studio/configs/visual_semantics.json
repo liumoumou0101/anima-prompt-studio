@@ -1,0 +1,87 @@
+{
+  "emotions": [
+    {
+      "id": "melancholic",
+      "aliases": ["忧郁", "忧伤", "惆怅", "落寞", "愁苦"],
+      "canonical_en": "a melancholic expression",
+      "tag": "sad"
+    },
+    {
+      "id": "sad",
+      "aliases": ["悲伤", "难过", "哀伤", "沮丧", "失落"],
+      "canonical_en": "a sad expression",
+      "tag": "sad"
+    },
+    {
+      "id": "happy",
+      "aliases": ["开心", "高兴", "愉快", "喜悦", "兴奋"],
+      "canonical_en": "a happy expression",
+      "tag": "happy"
+    },
+    {
+      "id": "angry",
+      "aliases": ["生气", "愤怒", "恼怒", "气愤"],
+      "canonical_en": "an angry expression",
+      "tag": "angry"
+    },
+    {
+      "id": "surprised",
+      "aliases": ["惊讶", "吃惊", "震惊"],
+      "canonical_en": "a surprised expression",
+      "tag": "surprised"
+    },
+    {
+      "id": "confused",
+      "aliases": ["困惑", "疑惑", "茫然", "不解"],
+      "canonical_en": "a confused expression",
+      "tag": "confused"
+    },
+    {
+      "id": "sleepy",
+      "aliases": ["困倦", "睡眼惺忪", "昏昏欲睡"],
+      "canonical_en": "a sleepy expression",
+      "tag": "sleepy"
+    },
+    {
+      "id": "nervous",
+      "aliases": ["紧张", "忐忑", "不安"],
+      "canonical_en": "a nervous expression",
+      "tag": "nervous"
+    },
+    {
+      "id": "serious",
+      "aliases": ["严肃", "认真", "郑重"],
+      "canonical_en": "a serious expression",
+      "tag": "serious"
+    }
+  ],
+  "gaze": {
+    "verbs": ["看向", "看着", "望向", "望着", "凝视", "注视", "眺望"],
+    "targets": [
+      {
+        "aliases": ["窗户外面", "窗户外", "窗外"],
+        "canonical_en": "looking out the window",
+        "tag": "looking away",
+        "intent": "away"
+      },
+      {
+        "aliases": ["镜头", "观众", "画面"],
+        "canonical_en": "looking at the viewer",
+        "tag": "looking at viewer",
+        "intent": "viewer"
+      },
+      {
+        "aliases": ["远方", "远处", "天边"],
+        "canonical_en": "looking into the distance",
+        "tag": "looking away",
+        "intent": "away"
+      },
+      {
+        "aliases": ["画外", "别处", "一旁"],
+        "canonical_en": "looking away",
+        "tag": "looking away",
+        "intent": "away"
+      }
+    ]
+  }
+}

@@ -103,8 +103,7 @@
       "shiny skin",
       "detailed breasts",
       "detailed navel",
-      "detailed legs",
-      "detailed fingers"
+      "detailed legs"
     ]
   },
   {
@@ -383,7 +382,7 @@
   {
     "id": "ultimate_character",
     "display_name": "极致质量·人物",
-    "notes": "加强人物的面部、头发、皮肤、手部和整体解剖，不预设性别或成人身体特征。",
+    "notes": "加强人物的面部、头发、皮肤和整体解剖，不预设性别或成人身体特征。",
     "base_quality_tags": [
       "masterpiece",
       "best quality",
@@ -396,8 +395,6 @@
       "detailed eyes",
       "detailed hair",
       "detailed skin",
-      "detailed hands",
-      "detailed fingers",
       "anatomical detail"
     ]
   },
@@ -528,9 +525,7 @@
       "uncensored",
       "anatomical detail",
       "detailed body",
-      "detailed skin",
-      "detailed hands",
-      "detailed fingers"
+      "detailed skin"
     ]
   }
 ]

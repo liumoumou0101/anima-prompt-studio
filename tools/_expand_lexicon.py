@@ -332,7 +332,7 @@ def expand_tags() -> int:
         ("cat ears", "clothing", ["猫耳"], ["cat ears"]),
         ("bunny ears", "clothing", ["兔耳"], ["bunny ears"]),
         ("tail", "clothing", ["尾巴"], ["tail"]),
-        ("horns", "clothing", ["角", "恶魔角"], ["horns"]),
+        ("horns", "clothing", ["头上长角", "恶魔角"], ["horns"]),
         ("swimsuit", "clothing", ["泳装", "泳衣"], ["swimsuit"]),
         ("school swimsuit", "clothing", ["死库水", "学校泳装"], ["school swimsuit"]),
         ("playboy bunny", "clothing", ["兔女郎"], ["playboy bunny", "bunny girl"]),

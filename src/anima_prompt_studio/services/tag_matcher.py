@@ -113,6 +113,45 @@ class TagMatcher:
             "画外" in chinese or re.search(r"\blooking (?:away|outside)\b", lower)
         ) and not any(x in chinese for x in ("油画", "绘画", "作画", "画作", "在画画", "画笔")):
             return False
+        if tag == "horns" and not any(x in chinese for x in ("头上长角", "长着角", "有角", "恶魔角", "兽角", "一对角")) and not re.search(
+            r"\b(?:horns?|antlers?)\b", lower
+        ):
+            return False
+        if tag == "looking back" and not any(x in chinese for x in ("回头", "回望", "向后看", "往后看")) and not re.search(
+            r"\b(?:looks?|looking) back (?:over (?:her|his|their) shoulder|at|toward|towards)\b", lower
+        ):
+            return False
+        if tag == "on back" and not re.search(
+            r"\b(?:lies?|lying|lay|sleeping|rests?|resting) on (?:her|his|their|the) back\b", lower
+        ) and not any(x in chinese for x in ("仰躺", "仰卧", "平躺在背上")):
+            return False
+        if tag == "stairs" and not re.search(r"\b(?:stairs?|staircase|steps leading|flight of steps)\b", lower) and not any(
+            x in chinese for x in ("楼梯", "台阶", "阶梯")
+        ):
+            return False
+        if tag == "lower body" and re.search(
+            r"\blower body\b[^.!?;]{0,55}\b(?:hidden|invisible|not visible|out of (?:the )?frame|remain(?:s)? behind)\b",
+            lower,
+        ):
+            return False
+        if tag == "tight clothes" and not any(x in chinese for x in ("紧身衣", "紧身服", "紧身裤", "贴身衣", "紧身裙")) and not re.search(
+            r"\btight(?:-fitting)?\s+(?:clothes|clothing|shirt|dress|pants|shorts|outfit)\b", lower
+        ):
+            return False
+        if tag == "undersized clothes" and not any(x in chinese for x in ("衣服太小", "尺寸过小的衣服", "不合身的衣服")) and not re.search(
+            r"\b(?:undersized|too small|ill-fitting)\s+(?:clothes|clothing|shirt|dress|pants|shorts|outfit)\b",
+            lower,
+        ):
+            return False
+        if tag == "neck" and chinese and not any(x in chinese for x in ("颈部", "脖子", "脖颈", "颈项", "颈饰")):
+            return False
+        # Composition prose and relation verbs are not standalone scene
+        # objects.  These two false positives produced a square wall opening
+        # and forceful arm bracing in the wall-traversal benchmark.
+        if tag == "square" and any(x in chinese for x in ("方形构图", "方形画面", "正方形构图", "方形半身构图")):
+            return False
+        if tag == "brace" and not any(x in chinese for x in ("支具", "护具", "牙套", "矫正器")):
+            return False
         if not source_is_external:
             return True
         # Remaining checks are external-DB specific.
@@ -168,6 +207,14 @@ class TagMatcher:
             "front", "side", "top", "bottom", "left", "right", "middle", "center",
             "high", "low", "big", "small", "large", "tiny", "huge",
             "open", "close", "closed", "empty", "full",
+            # Bare relation fragments are not useful visual tags.  Keeping
+            # them alongside a canonical pose (for example crossed legs)
+            # over-focuses individual limbs and can destroy whole-body
+            # coherence in fast models.
+            "leg", "legs", "knee", "knees", "ankle", "ankles", "toe", "toes",
+            "hand", "hands", "neck", "torso", "floor", "planted", "figure", "cross", "holding",
+            "torso only", "cramped", "opening", "leaving", "space", "resting",
+            "brace",
             "one", "two", "three", "four", "five", "first", "second", "third",
             "girl", "boy", "man", "woman", "person", "people", "character",
             "she", "he", "her", "his", "him", "they", "them", "their", "it", "its",

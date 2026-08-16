@@ -70,6 +70,12 @@ class SemanticFrame(BaseModel):
     gaze_intent: Literal["viewer", "away", "object", "person", "none"] = "none"
     angle_intent: Literal["front", "side", "back", "three_quarter", "none"] = "none"
     scene_facts: list[str] = Field(default_factory=list)
+    # Canonical visual concepts extracted before machine translation.  These
+    # slots are shared by translation, tag matching, enhancement and framing so
+    # the four stages cannot silently disagree about the same source phrase.
+    visual_slots: dict[str, str] = Field(default_factory=dict)
+    visual_tags: list[str] = Field(default_factory=list)
+    visual_spans: dict[str, str] = Field(default_factory=dict)
     excluded_concepts: list[ExcludedConcept] = Field(default_factory=list)
     artist_mentions: list[str] = Field(default_factory=list)
     lora_mentions: list[str] = Field(default_factory=list)

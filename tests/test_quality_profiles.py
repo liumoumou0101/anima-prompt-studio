@@ -87,6 +87,12 @@ def test_ultimate_character_and_adult_profiles_remain_gender_neutral():
     assert "explicit" in _tags("ultimate_adult")
 
 
+def test_quality_profiles_do_not_emit_unrecognized_hand_detail_phrases():
+    configs = ConfigService()
+    for profile in configs.quality_profiles.values():
+        assert {"detailed hands", "detailed fingers"}.isdisjoint(profile.all_tags())
+
+
 def test_ultimate_material_profile_does_not_invent_clothing_type_or_transparency():
     assert _tags("ultimate_material").isdisjoint(
         {"lingerie", "lace details", "sheer fabric", "latex", "bikini"}

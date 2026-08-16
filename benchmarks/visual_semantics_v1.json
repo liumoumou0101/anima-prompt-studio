@@ -1,0 +1,252 @@
+{
+  "version": "1.0",
+  "title": "ANIMA Prompt Studio 通用视觉语义基准",
+  "notes": [
+    "主测试必须使用工具从 source_zh 生成的最终提示词。",
+    "control_en 只在复测失败项时使用，并与主测试保持相同模型、尺寸、参数和种子。",
+    "每个 required_facts 项都应在图片中可直接观察，不用审美好坏代替关系正确性。",
+    "人物外观有意保持简短，避免发色、服装和画师标签掩盖关系执行能力；不要自行追加画师 LoRA。"
+  ],
+  "cases": [
+    {
+      "id": "SPATIAL-1",
+      "family": "空间与遮挡",
+      "level": 1,
+      "source_zh": "一个成年女性站在一面灰色砖墙前，墙上有一个边缘参差不齐的不规则破洞，正面全身。",
+      "control_en": "An adult woman stands in front of a gray brick wall. An irregular jagged break is visible in the wall. Front view, full body.",
+      "required_facts": ["人物在墙前", "墙上是边缘参差的不规则破洞", "完整全身"],
+      "critical_facts": ["人物没有穿过洞", "洞不是规则圆形"],
+      "forbidden_failures": ["人物被墙截断", "洞变成窗户或规则圆洞"]
+    },
+    {
+      "id": "SPATIAL-2",
+      "family": "空间与遮挡",
+      "level": 2,
+      "source_zh": "一个成年女性从灰色砖墙上的不规则破洞探出上半身，双手扶着洞口两侧，腰部以下留在墙后，完整头脸可见。",
+      "control_en": "An adult woman leans her upper body through an irregular jagged break in a gray brick wall. Both hands hold the left and right edges. Her complete head and face are visible; her waist and lower body remain behind the wall.",
+      "required_facts": ["上半身穿过墙洞", "双手分别扶住两侧", "腰部以下被墙遮住", "完整头脸"],
+      "critical_facts": ["前后遮挡关系正确", "只有上半身越过墙面"],
+      "forbidden_failures": ["截掉头顶或脸", "整个人站在洞前", "额外手臂"]
+    },
+    {
+      "id": "SPATIAL-3",
+      "family": "空间与遮挡",
+      "level": 3,
+      "source_zh": "一个成年女性正勉强从灰色砖墙上的狭窄不规则裂洞中挤出上半身，洞口小到边缘紧贴她的肩膀、上臂和身体两侧，几乎没有空隙。双手撑住参差不齐的洞口，腰部以下仍在墙后，完整头脸可见，方形半身构图。",
+      "control_en": "An adult woman squeezes her upper body through a cramped irregular jagged break in a gray brick wall. The opening is too small for easy passage; its uneven edges press close around her shoulders, upper arms and torso with almost no clearance. Both hands brace against the edges. Her waist and lower body remain hidden behind the wall. Her complete head and face are visible. Square upper-body composition.",
+      "required_facts": ["洞口不规则且贴身", "肩膀上臂身体两侧几乎无空隙", "双手撑洞口", "完整头脸", "下半身在墙后"],
+      "critical_facts": ["狭窄程度明确", "墙面遮挡层次正确"],
+      "forbidden_failures": ["宽敞圆洞", "断头", "身体穿模", "额外肢体"]
+    },
+    {
+      "id": "REST-1",
+      "family": "床上与躺姿",
+      "level": 1,
+      "source_zh": "一个成年女性侧躺在床上睡觉，闭着眼睛，横向全身构图。",
+      "control_en": "An adult woman sleeps while lying on her side on a bed, eyes closed. Horizontal full-body composition.",
+      "required_facts": ["侧躺", "在床上", "闭眼睡觉", "完整全身"],
+      "critical_facts": ["不是仰躺或俯卧"],
+      "forbidden_failures": ["身体悬空", "床与身体穿插"]
+    },
+    {
+      "id": "REST-2",
+      "family": "床上与躺姿",
+      "level": 2,
+      "source_zh": "一个成年女性向右侧躺在床上睡觉，双膝略微弯曲，右手垫在脸颊下面，左手放在腰前，侧面全身。",
+      "control_en": "An adult woman sleeps on her right side on a bed. Both knees are slightly bent. Her right hand is under her cheek and her left hand rests in front of her waist. Side view, full body.",
+      "required_facts": ["向右侧躺", "双膝微弯", "右手在脸颊下", "左手在腰前", "完整全身"],
+      "critical_facts": ["左右手位置正确"],
+      "forbidden_failures": ["多手少手", "手穿过脸", "腿粘连"]
+    },
+    {
+      "id": "REST-3",
+      "family": "床上与躺姿",
+      "level": 3,
+      "source_zh": "一个成年女性向右侧蜷卧在床上睡觉，右手垫在脸颊下，左手轻抓胸前的白色薄毯，薄毯只盖住腰部到小腿，头脸和双脚都可见。月光从身后的窗户照进来，横向侧面全身。",
+      "control_en": "An adult woman sleeps curled on her right side on a bed. Her right hand supports her cheek and her left hand lightly grips a thin white blanket at her chest. The blanket covers only her waist through her lower legs; her complete face and both feet remain visible. Moonlight enters from a window behind her. Horizontal side-view full body.",
+      "required_facts": ["右侧蜷卧", "两只手分工正确", "薄毯只覆盖腰至小腿", "脸和双脚可见", "窗户在身后"],
+      "critical_facts": ["毯子的遮挡范围正确", "前后位置正确"],
+      "forbidden_failures": ["毯子盖住头脸", "脚被裁掉", "窗户出现在人物前面", "额外肢体"]
+    },
+    {
+      "id": "LEGS-1",
+      "family": "腿部与支撑关系",
+      "level": 1,
+      "source_zh": "一个成年女性坐在高脚凳上，两只脚都踩在地面，正面全身。",
+      "control_en": "An adult woman sits on a high stool with both feet planted on the floor. Front view, full body.",
+      "required_facts": ["坐在高脚凳", "双脚落地", "完整全身"],
+      "critical_facts": ["双脚确实接触地面"],
+      "forbidden_failures": ["脚悬空", "凳子穿过身体", "脚被裁掉"]
+    },
+    {
+      "id": "LEGS-2",
+      "family": "腿部与支撑关系",
+      "level": 2,
+      "source_zh": "一个成年女性坐在高脚凳上，右脚踝搭在左膝上，左脚踩地，正面全身。",
+      "control_en": "An adult woman sits on a high stool in a figure-four pose: her right ankle rests across her left knee while her left foot stays planted on the floor. Front view, full body.",
+      "required_facts": ["右脚踝搭左膝", "左脚落地", "完整全身"],
+      "critical_facts": ["左右腿没有互换", "是脚踝搭膝而非普通交叉腿"],
+      "forbidden_failures": ["双腿普通交叉", "额外小腿或脚", "脚被裁掉"]
+    },
+    {
+      "id": "LEGS-3",
+      "family": "腿部与支撑关系",
+      "level": 3,
+      "source_zh": "一个成年女性坐在高脚凳边缘，右脚踝搭在左膝上，左脚牢牢踩地，右脚脚尖朝下。右手放在抬起的右膝上，左手撑住凳面，身体稍微后仰。侧前方完整全身，头顶和双脚外都留有空白。",
+      "control_en": "An adult woman sits on the edge of a high stool. Her right ankle rests across her left knee; her left foot is firmly planted on the floor and her right toes point downward. Her right hand rests on the raised right knee, her left hand braces on the stool, and her torso leans slightly back. Front three-quarter view, complete full body, with clear space above her head and below both feet.",
+      "required_facts": ["右脚踝搭左膝", "左脚落地", "右脚尖朝下", "右手在右膝", "左手撑凳面", "身体后仰", "完整全身"],
+      "critical_facts": ["左右和接触关系全部正确", "姿势不是普通翘腿"],
+      "forbidden_failures": ["额外肢体", "腿部粘连", "头或脚被裁掉"]
+    },
+    {
+      "id": "HANDS-1",
+      "family": "手部与道具",
+      "level": 1,
+      "source_zh": "一个成年女性站着，右手握住一个白色马克杯的杯柄，左手自然垂下，半身正面。",
+      "control_en": "An adult woman stands while holding the handle of a white mug with her right hand. Her left arm hangs naturally. Front upper-body view.",
+      "required_facts": ["右手握杯柄", "左手垂下", "白色马克杯"],
+      "critical_facts": ["只有右手接触杯子"],
+      "forbidden_failures": ["杯柄消失", "手指穿过杯子", "额外手指或手臂"]
+    },
+    {
+      "id": "HANDS-2",
+      "family": "手部与道具",
+      "level": 2,
+      "source_zh": "一个成年女性坐在桌边，双手从左右两侧包住一个冒着热气的白色马克杯，杯子放在桌面上，半身正面。",
+      "control_en": "An adult woman sits at a table. Both hands wrap around the left and right sides of a steaming white mug that rests on the tabletop. Front upper-body view.",
+      "required_facts": ["双手从两侧包住同一个杯子", "杯子接触桌面", "热气从杯口上升"],
+      "critical_facts": ["两只手与同一杯子的接触关系"],
+      "forbidden_failures": ["多个杯子", "杯子悬空", "热气遮脸", "额外手指"]
+    },
+    {
+      "id": "HANDS-3",
+      "family": "手部与道具",
+      "level": 3,
+      "source_zh": "一个成年女性用右手提起白色茶壶，把茶水倒进左手拿着的蓝色茶杯。茶壶在右上方，茶杯在左下方，一条连续水流连接壶嘴和杯口，热气向人物身后飘，画面中只有她的两只手。",
+      "control_en": "An adult woman lifts a white teapot with her right hand and pours tea into a blue cup held in her left hand. The teapot is upper right, the cup is lower left, and one continuous stream connects the spout to the cup opening. Steam drifts behind the woman. Exactly two hands are visible.",
+      "required_facts": ["右手拿壶", "左手拿杯", "壶右上杯左下", "连续水流连接壶嘴杯口", "热气在人物身后"],
+      "critical_facts": ["倒水的因果和空间关系正确", "只有两只手"],
+      "forbidden_failures": ["水流方向错误", "多个壶杯", "热气挡脸", "额外手臂"]
+    },
+    {
+      "id": "MOVE-1",
+      "family": "移动与环境",
+      "level": 1,
+      "source_zh": "一个成年女性沿着人行道向左走，左脚在前，右脚在后，侧面全身。",
+      "control_en": "An adult woman walks toward the left along a sidewalk, left foot forward and right foot behind. Side view, full body.",
+      "required_facts": ["向左行走", "左脚在前右脚在后", "侧面全身"],
+      "critical_facts": ["移动方向和腿序一致"],
+      "forbidden_failures": ["向右走", "双脚粘连", "脚被裁掉"]
+    },
+    {
+      "id": "MOVE-2",
+      "family": "移动与环境",
+      "level": 2,
+      "source_zh": "一个成年女性在雨中的街道上向左奔跑，身体向左前倾，但头转向右后方。左臂在前、右臂在后，头发和围巾向右飘，横向全身。",
+      "control_en": "An adult woman runs toward the left on a rainy street. Her torso leans forward to the left while her head turns back toward the right. Her left arm is forward and right arm behind. Her hair and scarf trail to the right. Horizontal full-body composition.",
+      "required_facts": ["身体向左跑", "头看右后方", "左臂前右臂后", "头发围巾向右飘", "完整全身"],
+      "critical_facts": ["身体与视线方向相反", "风向与移动方向一致"],
+      "forbidden_failures": ["身体也向右", "围巾向左飘", "肢体重复"]
+    },
+    {
+      "id": "MOVE-3",
+      "family": "移动与环境",
+      "level": 3,
+      "source_zh": "一个成年女性正在走下室外石阶，左脚踩在较低一级台阶，右脚仍在较高一级，右手扶栏杆，左手提着闭合的雨伞。她回头看向身后的台阶，低角度侧前方完整全身，雨水从台阶向下流。",
+      "control_en": "An adult woman descends outdoor stone stairs. Her left foot is on a lower step while her right foot remains on the higher step. Her right hand holds the railing and her left hand carries a closed umbrella. She looks back toward the stairs behind her. Low-angle front three-quarter full-body view. Rainwater flows downward over the steps.",
+      "required_facts": ["正在下楼", "左脚低右脚高", "右手扶栏杆", "左手提闭伞", "回头看身后", "水沿台阶向下"],
+      "critical_facts": ["人物、台阶和支撑关系正确", "左右手道具分工正确"],
+      "forbidden_failures": ["上楼姿势", "伞打开", "栏杆穿身", "额外肢体"]
+    },
+    {
+      "id": "EFFECT-1",
+      "family": "特效与作用范围",
+      "level": 1,
+      "source_zh": "一个成年女性站在夜晚的小巷中，细雨落在她和地面上，脸部清晰可见，正面全身。",
+      "control_en": "An adult woman stands in an alley at night. Fine rain falls on her and the ground. Her face remains clearly visible. Front view, full body.",
+      "required_facts": ["夜晚小巷", "细雨落在人和地面", "脸清晰", "完整全身"],
+      "critical_facts": ["雨不是室内水帘"],
+      "forbidden_failures": ["雨线遮脸", "地面干燥", "人物融入背景"]
+    },
+    {
+      "id": "EFFECT-2",
+      "family": "特效与作用范围",
+      "level": 2,
+      "source_zh": "一个成年女性站在强风中，头发、围巾和衣服下摆都向画面右侧飘动，身体仍然稳定直立，落叶也向右飞，正面全身。",
+      "control_en": "An adult woman stands upright and stable in strong wind. Her hair, scarf and clothing hem all blow toward the right side of the image, and fallen leaves also fly right. Front view, full body.",
+      "required_facts": ["头发围巾衣摆都向右", "落叶向右", "身体稳定直立", "完整全身"],
+      "critical_facts": ["所有受风物体方向一致", "风不扭曲身体"],
+      "forbidden_failures": ["不同物体逆向飘动", "身体倾倒或变形", "衣物变成额外肢体"]
+    },
+    {
+      "id": "EFFECT-3",
+      "family": "特效与作用范围",
+      "level": 3,
+      "source_zh": "一个成年女性正面站立，一面半透明蓝色魔法盾悬浮在她和镜头之间。一个火花弹击中盾牌左侧，冲击点向外散出蓝色碎光，但盾牌后方的人物头脸和双手仍清晰可见，背景没有火花。",
+      "control_en": "An adult woman stands facing forward. A translucent blue magical shield floats between her and the camera. A spark projectile strikes the left side of the shield, scattering blue fragments outward from the impact point. The woman's complete face and both hands remain clearly visible behind the shield. There are no sparks in the background.",
+      "required_facts": ["盾牌在人和镜头之间", "盾牌半透明", "冲击点在盾牌左侧", "碎光从冲击点向外", "人物头脸双手清楚", "背景无火花"],
+      "critical_facts": ["特效作用对象和范围正确", "透明层次正确"],
+      "forbidden_failures": ["盾牌在人身后", "全画面随机火花", "特效遮脸", "多余手臂"]
+    },
+    {
+      "id": "DUO-1",
+      "family": "双人关系",
+      "level": 1,
+      "source_zh": "两个成年女性并肩站立，黑发女性在左，金发女性在右，两人都完整全身可见。",
+      "control_en": "Exactly two adult women stand side by side. The black-haired woman is on the left and the blonde woman is on the right. Both complete figures are visible.",
+      "required_facts": ["恰好两人", "黑发在左金发在右", "两人完整全身"],
+      "critical_facts": ["人物身份和左右位置不混淆"],
+      "forbidden_failures": ["第三个人", "发色互换", "人物重叠融合"]
+    },
+    {
+      "id": "DUO-2",
+      "family": "双人关系",
+      "level": 2,
+      "source_zh": "两个成年女性，站着的黑发女性在左侧，用右手握住坐在地上的金发女性的左手腕，正在把她拉起来。两人的另一只手彼此分开，完整全身。",
+      "control_en": "Exactly two adult women. The standing black-haired woman on the left grips the seated blonde woman's left wrist with her right hand and pulls her up from the ground. Their other hands remain separate. Both complete figures are visible.",
+      "required_facts": ["恰好两人", "黑发站立在左", "金发坐地", "黑发右手握金发左腕", "其他手分开", "完整全身"],
+      "critical_facts": ["施力者、承受者和接触手腕正确"],
+      "forbidden_failures": ["两人都站或都坐", "握错手", "手臂融合", "第三个人"]
+    },
+    {
+      "id": "DUO-3",
+      "family": "双人关系",
+      "level": 3,
+      "source_zh": "恰好两个成年女性。黑发女性背着金发女性向前走，黑发女性双臂分别托住金发女性的左右大腿，金发女性双臂环住黑发女性的肩膀，两人的头都完整可见，侧前方完整全身。",
+      "control_en": "Exactly two adult women. A black-haired woman walks forward carrying a blonde woman piggyback. The carrier's two arms separately support the rider's left and right thighs. The rider's two arms wrap around the carrier's shoulders. Both complete heads are visible. Front three-quarter full-body view.",
+      "required_facts": ["恰好两人", "黑发背金发", "托住两侧大腿", "金发环住肩膀", "两张完整头脸", "完整全身"],
+      "critical_facts": ["背负者和乘坐者关系正确", "四条手臂归属明确"],
+      "forbidden_failures": ["人物融合", "额外肢体", "头脸被挡", "公主抱"]
+    },
+    {
+      "id": "CAMERA-1",
+      "family": "镜头与构图",
+      "level": 1,
+      "source_zh": "一个成年女性正面站立，完整全身，从头顶到鞋底都在画面内，头顶上方和脚下都留出空白，镜头与眼睛同高。",
+      "control_en": "An adult woman stands facing forward. Her complete figure from the top of her head through the soles of her shoes is inside the frame, with clear space above her head and below her feet. Eye-level camera.",
+      "required_facts": ["正面站立", "头顶鞋底均在画面内", "上下都有留白", "平视"],
+      "critical_facts": ["完整全身无裁切"],
+      "forbidden_failures": ["裁头", "裁脚", "仰视或俯视"]
+    },
+    {
+      "id": "CAMERA-2",
+      "family": "镜头与构图",
+      "level": 2,
+      "source_zh": "一个成年女性坐在室外石阶上，镜头从她左上方俯拍。她抬头看镜头，双手放在身旁的台阶上，双脚在较低一级台阶，完整全身。",
+      "control_en": "An adult woman sits on outdoor stone stairs. The camera looks down from above and to her left. She looks up at the camera. Both hands rest on the step beside her, and both feet are on a lower step. Complete full body.",
+      "required_facts": ["坐在石阶", "镜头在人物左上方", "人物抬头", "双手撑身旁", "双脚在低一级", "完整全身"],
+      "critical_facts": ["机位方向与人物视线一致", "台阶高度关系正确"],
+      "forbidden_failures": ["平视", "手脚落在同一级", "裁掉脚"]
+    },
+    {
+      "id": "CAMERA-3",
+      "family": "镜头与构图",
+      "level": 3,
+      "source_zh": "一个成年女性背对镜头站在镜子前，镜头只能看到她的后脑和背部，但镜子里清楚显示她的正脸。她的右手抬起触碰镜面中的右脸颊位置。画面中只有一个真人和一个镜中倒影，不出现相机。",
+      "control_en": "One adult woman stands with her back to the camera in front of a mirror. The camera sees only the back of her head and body, while her frontal face is clearly visible in the mirror. Her right hand is raised to touch the mirror at the position of her reflected right cheek. Exactly one real person and one mirror reflection are present. No camera is visible.",
+      "required_facts": ["真人背对镜头", "镜中显示正脸", "右手触碰倒影右脸位置", "一个真人一个倒影", "无相机"],
+      "critical_facts": ["真人和倒影视角互补", "倒影不是第二个人"],
+      "forbidden_failures": ["真人也正脸朝镜头", "两个独立人物", "出现相机", "镜像肢体错乱"]
+    }
+  ]
+}

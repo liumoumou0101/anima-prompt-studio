@@ -22,6 +22,7 @@ from .semantic_diff import SemanticDiffService
 from .semantic_frame import SemanticFrameResolver
 from .tag_matcher import TagMatcher
 from .translation_service import TranslationService
+from .visual_semantics import VisualSemanticNormalizer
 
 
 class PromptPipeline:
@@ -31,6 +32,7 @@ class PromptPipeline:
         self.translation = translation or TranslationService()
         self.preprocessor = InputPreprocessor()
         self.semantic_frames = SemanticFrameResolver()
+        self.visual_semantics = VisualSemanticNormalizer()
         self.protector = EntityProtector()
         self.concepts = ConceptResolver()
         self.composition_context = CompositionContextExtractor()
@@ -54,14 +56,18 @@ class PromptPipeline:
         job.resolved_concepts = self.concepts.resolve(job.normalized_zh)
         protected, job.protected_entities = self.protector.protect(job.normalized_zh, known_entities or [])
         job.semantic_frame = self.semantic_frames.resolve(job.normalized_zh, job.protected_entities)
+        job.semantic_frame = self.visual_semantics.enrich(job.semantic_frame, job.normalized_zh)
         job.composition.people_count = job.semantic_frame.people_count if job.semantic_frame.people_count is not None else 1
         extracted_artists = job.semantic_frame.artist_mentions
         self._replace_text_derived_artists(job, extracted_artists)
         job.lora_selection, unresolved = self.lora_resolver.resolve(job.semantic_frame.lora_mentions, job.lora_selection)
         job.semantic_frame.unresolved_lora_mentions = unresolved
         translation_input = self._strip_control_directives(protected, job.protected_entities)
+        translation_input, visual_replacements = self.visual_semantics.protect(translation_input, job.semantic_frame)
         translated = self.translation.zh_to_en(translation_input)
+        translated = self.visual_semantics.restore(translated, visual_replacements)
         job.translated_en = self.protector.restore(translated, job.protected_entities)
+        job.translated_en = self.visual_semantics.ensure_translation(job.translated_en, job.semantic_frame)
         job.translated_en = self.translation.guard_artist_intent(job.normalized_zh, job.translated_en)
         job.translated_en = self.concepts.apply_translation(job.normalized_zh, job.translated_en, job.resolved_concepts)
         job.translated_en = self.enhancer.normalize_translation(job.normalized_zh, job.translated_en)
@@ -84,6 +90,8 @@ class PromptPipeline:
             if english_authority
             else self.semantic_frames.resolve(source_zh, job.protected_entities)
         )
+        if not english_authority:
+            job.semantic_frame = self.visual_semantics.enrich(job.semantic_frame, source_zh)
         if english_authority:
             job.semantic_frame.lora_mentions = list(dict.fromkeys(
                 job.semantic_frame.lora_mentions + self.lora_resolver.mentions_in_text(job.translated_en)
@@ -104,7 +112,7 @@ class PromptPipeline:
                 if item.state in (ItemState.USER_EDITED, ItemState.LOCKED)
             ]
         else:
-            generated = self.enhancer.enhance(source_zh, job.translated_en)
+            generated = self.enhancer.enhance(source_zh, job.translated_en, job.semantic_frame)
             scoped_slots = self.multi_scope.extract_slots(source_zh, job.composition.people_count)
             if scoped_slots:
                 self._merge_auto_character_slots(job, scoped_slots)
@@ -138,6 +146,9 @@ class PromptPipeline:
             job.matched_tags = [x for x in job.matched_tags if x.tag not in suppress and x.tag not in {y.tag for y in concept_tags}]
             excluded_now = set(job.excluded_tags) | semantic_exclusions
             job.matched_tags.extend(x for x in concept_tags if x.tag not in excluded_now)
+            job.matched_tags = self.visual_semantics.merge_tags(
+                job.matched_tags, job.semantic_frame, excluded_now, set(job.locked_tags),
+            )
         self.composition_recommender.recommend(job)
         self.compiler.compile(job)
         diff_source = job.back_translated_zh if english_authority else source_zh
@@ -154,6 +165,9 @@ class PromptPipeline:
         complexity_warning = self.prompt_complexity.analyze(source_zh)
         if complexity_warning:
             job.semantic_warnings.append(complexity_warning)
+        job.semantic_warnings.extend(
+            self.prompt_complexity.analyze_model_fit(job.model_profile_id, job.semantic_frame)
+        )
         return job
 
     def set_lora_profiles(self, profiles: list[LoRAProfile]) -> None:
