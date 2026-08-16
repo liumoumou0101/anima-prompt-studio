@@ -11,6 +11,7 @@ import pytest
 from anima_prompt_studio.domain.execution_models import (
     GenerationRun,
     GenerationRunState,
+    HIRES_FIX_WORKFLOW_KIND,
     RemoteArtifact,
     RemoteProfile,
     WorkflowBinding,
@@ -46,6 +47,44 @@ def api_workflow():
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "old positive"}},
         "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "old negative"}},
         "8": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ComfyUI"}},
+    }
+
+
+def hires_fix_workflow():
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {
+            "unet_name": "anima-base-v1.0.safetensors", "weight_dtype": "default",
+        }},
+        "2": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": 3}},
+        "3": {"class_type": "CLIPLoader", "inputs": {
+            "clip_name": "qwen_3_06b_base.safetensors", "type": "stable_diffusion", "device": "default",
+        }},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_vae.safetensors"}},
+        "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": "old positive"}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": "old negative"}},
+        "7": {"class_type": "EmptyLatentImage", "inputs": {
+            "width": ["13", 0], "height": ["13", 1], "batch_size": 1,
+        }},
+        "8": {"class_type": "KSampler", "inputs": {
+            "model": ["2", 0], "positive": ["5", 0], "negative": ["6", 0],
+            "latent_image": ["7", 0], "seed": 44, "steps": 34, "cfg": 4.5,
+            "sampler_name": "er_sde", "scheduler": "simple", "denoise": 1.0,
+        }},
+        "10": {"class_type": "KSampler", "inputs": {
+            "model": ["2", 0], "positive": ["5", 0], "negative": ["6", 0],
+            "latent_image": ["14", 0], "seed": 45, "steps": 18, "cfg": 4.5,
+            "sampler_name": "er_sde", "scheduler": "simple", "denoise": 0.35,
+        }},
+        "11": {"class_type": "VAEDecode", "inputs": {"samples": ["10", 0], "vae": ["4", 0]}},
+        "12": {"class_type": "SaveImage", "inputs": {
+            "images": ["11", 0], "filename_prefix": "anima_hiresfix_1p5x",
+        }},
+        "13": {"class_type": "ResolutionSelector", "inputs": {
+            "aspect_ratio": "4:3 (Standard)", "megapixels": 1, "multiple": 8,
+        }},
+        "14": {"class_type": "LatentUpscaleBy", "inputs": {
+            "samples": ["8", 0], "upscale_method": "nearest-exact", "scale_by": 1.5,
+        }},
     }
 
 
@@ -101,7 +140,7 @@ def test_v2_repository_round_trip_and_active_run_query(tmp_path):
     assert repo.get_remote_profile(remote.id).model_aliases["anima_turbo_v1"] == "anima-turbo.safetensors"
     assert repo.get_workflow_profile(workflow.id).bindings["positive_prompt"].input_name == "text"
     assert repo.list_active_generation_runs()[0].id == run.id
-    assert sqlite3.connect(repo.db_path).execute("PRAGMA user_version").fetchone()[0] == 3
+    assert sqlite3.connect(repo.db_path).execute("PRAGMA user_version").fetchone()[0] == 4
     repo.close()
 
 
@@ -118,7 +157,7 @@ def test_v1_database_migrates_to_v2_with_backup(tmp_path):
 
     repo = SQLiteRepository(path)
     assert (tmp_path / "legacy.v1.bak").is_file()
-    assert repo.connection.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert repo.connection.execute("PRAGMA user_version").fetchone()[0] == 4
     assert repo.connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='generation_runs'"
     ).fetchone()
@@ -289,6 +328,57 @@ def test_auto_workflow_detection_follows_sampler_connections(tmp_path):
     assert profile.bindings["negative_prompt"].node_id == "6"
     assert profile.bindings["width"].node_id == "5"
     assert profile.compatible_model_profiles == ["anima_turbo_v1"]
+
+
+def test_auto_workflow_detection_recognizes_two_stage_hires_fix(tmp_path):
+    profile, missing = build_auto_workflow_profile(
+        hires_fix_workflow(),
+        tmp_path / "04_高清修复1点5倍_HiresFix_1_5x.json",
+    )
+
+    assert missing == []
+    assert profile.workflow_kind == HIRES_FIX_WORKFLOW_KIND
+    assert profile.compatible_model_profiles == ["anima_base_v1"]
+    assert profile.bindings["seed"].node_id == "8"
+    assert profile.bindings["refiner_seed"].node_id == "10"
+    assert profile.bindings["refiner_denoise"].node_id == "10"
+    assert profile.bindings["upscale_factor"].node_id == "14"
+
+
+def test_hires_fix_renderer_preserves_template_stages_and_derives_refiner_seed(tmp_path):
+    profile, missing = build_auto_workflow_profile(
+        hires_fix_workflow(),
+        tmp_path / "04_高清修复1点5倍_HiresFix_1_5x.json",
+    )
+    assert missing == []
+    job = PromptJob(model_profile_id="anima_base_v1", positive_prompt="1girl", negative_prompt="bad")
+    job.generation_params.seed = 123
+    job.generation_params.width = 896
+    job.generation_params.height = 1152
+    job.generation_params.steps = 99
+    job.generation_params.cfg = 9.0
+    job.generation_params.sampler = "euler"
+    job.generation_params.scheduler = "normal"
+
+    result = WorkflowRenderer().render(job, profile, remote_profile(), "anima_base_v1", "hires-run")
+
+    base = result.workflow["8"]["inputs"]
+    refiner = result.workflow["10"]["inputs"]
+    assert (base["seed"], base["steps"], base["cfg"], base["sampler_name"], base["scheduler"]) == (
+        123, 34, 4.5, "er_sde", "simple",
+    )
+    assert (refiner["seed"], refiner["steps"], refiner["cfg"], refiner["denoise"]) == (
+        124, 18, 4.5, 0.35,
+    )
+    assert result.workflow["7"]["inputs"]["width"] == 896
+    assert result.workflow["7"]["inputs"]["height"] == 1152
+    assert result.workflow["5"]["inputs"]["text"] == "1girl"
+    assert result.workflow["1"]["inputs"]["unet_name"] == "anima-base-v1.0.safetensors"
+    assert result.metadata["output_width"] == 1344
+    assert result.metadata["output_height"] == 1728
+    assert result.metadata["base_sampler"]["steps"] == 34
+    assert result.metadata["refiner_sampler"]["steps"] == 18
+    assert profile.api_workflow["8"]["inputs"]["seed"] == 44
 
 
 @pytest.mark.parametrize(("filename", "checkpoint", "expected"), [

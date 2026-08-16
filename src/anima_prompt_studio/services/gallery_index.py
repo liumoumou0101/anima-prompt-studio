@@ -43,6 +43,7 @@ def load_gallery_batches(
             continue
         snapshot = run.request_json.get("prompt_job", {})
         params = snapshot.get("generation_params", {}) if isinstance(snapshot, dict) else {}
+        params = _with_rendered_dimensions(params, run.request_json.get("render_metadata"))
         batches[run.id] = GalleryBatch(
             run_id=run.id,
             output_dir=Path(run.output_dir) if run.output_dir else paths[0].parent,
@@ -126,6 +127,11 @@ def _batch_from_manifest(manifest_path: Path, output_root: Path) -> GalleryBatch
         if not paths:
             return None
         created_at = _parse_datetime(run.get("completed_at") or run.get("created_at"), manifest_path)
+        request_json = run.get("request_json", {}) if isinstance(run, dict) else {}
+        parameters = _with_rendered_dimensions(
+            job if isinstance(job, dict) else {},
+            request_json.get("render_metadata") if isinstance(request_json, dict) else None,
+        )
         try:
             relative = manifest_path.parent.relative_to(output_root)
             project_name = relative.parts[0] if relative.parts else "未命名项目"
@@ -138,7 +144,7 @@ def _batch_from_manifest(manifest_path: Path, output_root: Path) -> GalleryBatch
             project_name=str(job.get("project_name") or project_name),
             model_profile_id=str(job.get("model_profile") or job.get("model_profile_id") or ""),
             positive_prompt=str(job.get("positive_prompt") or ""),
-            parameters=job if isinstance(job, dict) else {},
+            parameters=parameters,
             image_paths=paths,
         )
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -166,3 +172,21 @@ def _parse_datetime(value: Any, fallback_path: Path) -> datetime:
         except ValueError:
             pass
     return datetime.fromtimestamp(fallback_path.stat().st_mtime).astimezone()
+
+
+def _with_rendered_dimensions(parameters: Any, render_metadata: Any) -> dict[str, Any]:
+    result = dict(parameters) if isinstance(parameters, dict) else {}
+    if not isinstance(render_metadata, dict):
+        return result
+    output_width = render_metadata.get("output_width")
+    output_height = render_metadata.get("output_height")
+    if output_width and output_height:
+        result["base_width"] = render_metadata.get("base_width")
+        result["base_height"] = render_metadata.get("base_height")
+        result["width"] = output_width
+        result["height"] = output_height
+        result["scale"] = render_metadata.get("scale")
+        result["workflow_kind"] = render_metadata.get("workflow_kind")
+        result["operation"] = render_metadata.get("operation")
+        result["source_image"] = render_metadata.get("source_image")
+    return result

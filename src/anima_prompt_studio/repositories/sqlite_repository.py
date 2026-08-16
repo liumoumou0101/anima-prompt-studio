@@ -17,7 +17,7 @@ from anima_prompt_studio.domain.execution_models import (
 from anima_prompt_studio.domain.models import ArtistProfile, CharacterCard, LoRAProfile, PromptJob
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def default_data_dir() -> Path:
@@ -77,6 +77,13 @@ class SQLiteRepository:
                 );
                 CREATE INDEX IF NOT EXISTS idx_gallery_asset_states_root
                     ON gallery_asset_states(output_root);
+                CREATE TABLE IF NOT EXISTS gallery_process_jobs (
+                    id TEXT PRIMARY KEY, output_root TEXT NOT NULL,
+                    state TEXT NOT NULL, queue_position INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL, payload_json TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_gallery_process_jobs_root_state
+                    ON gallery_process_jobs(output_root,state,queue_position);
             """)
             self.connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -255,6 +262,60 @@ class SQLiteRepository:
                     state=excluded.state,updated_at=excluded.updated_at""",
                     [(root_key, path, state, now) for path in normalized],
                 )
+
+    def save_gallery_process_job(
+        self,
+        output_root: Path | str,
+        job_id: str,
+        state: str,
+        queue_position: int,
+        updated_at: datetime,
+        payload: dict,
+    ) -> None:
+        root_key = os.path.normcase(str(Path(output_root).expanduser().resolve()))
+        with self.connection:
+            self.connection.execute(
+                """INSERT INTO gallery_process_jobs(
+                    id,output_root,state,queue_position,updated_at,payload_json
+                ) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+                    output_root=excluded.output_root,state=excluded.state,
+                    queue_position=excluded.queue_position,updated_at=excluded.updated_at,
+                    payload_json=excluded.payload_json""",
+                (
+                    job_id,
+                    root_key,
+                    state,
+                    queue_position,
+                    updated_at.isoformat(),
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+
+    def list_gallery_process_jobs(
+        self,
+        output_root: Path | str,
+        limit: int = 100,
+    ) -> list[dict]:
+        root_key = os.path.normcase(str(Path(output_root).expanduser().resolve()))
+        rows = self.connection.execute(
+            """SELECT payload_json FROM gallery_process_jobs
+            WHERE output_root=?
+            ORDER BY
+                CASE WHEN state IN ('queued','starting','connecting','preparing','running','downloading')
+                    THEN 0 ELSE 1 END,
+                queue_position ASC, updated_at DESC
+            LIMIT ?""",
+            (root_key, limit),
+        ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def delete_gallery_process_job(self, output_root: Path | str, job_id: str) -> None:
+        root_key = os.path.normcase(str(Path(output_root).expanduser().resolve()))
+        with self.connection:
+            self.connection.execute(
+                "DELETE FROM gallery_process_jobs WHERE output_root=? AND id=?",
+                (root_key, job_id),
+            )
 
     def close(self) -> None:
         self.connection.close()

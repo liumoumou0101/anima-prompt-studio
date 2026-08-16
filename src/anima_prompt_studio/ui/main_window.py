@@ -14,7 +14,13 @@ from PySide6.QtWidgets import (
     QToolBar, QVBoxLayout, QWidget,
 )
 
-from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteCredentials, RemoteProfile
+from anima_prompt_studio.domain.execution_models import (
+    HIRES_FIX_WORKFLOW_KIND,
+    SUPPORTED_GENERATION_WORKFLOW_KINDS,
+    RemoteAuthType,
+    RemoteCredentials,
+    RemoteProfile,
+)
 from anima_prompt_studio.domain.models import (
     ArtistProfile, CharacterCard, CharacterSlot, CompositionFieldState, GenerationFieldState, ItemState,
     LoRAProfile, LoRASelection, PromptJob, SubjectMode,
@@ -23,6 +29,7 @@ from anima_prompt_studio.repositories import SQLiteRepository
 from anima_prompt_studio.services.config_service import ConfigService
 from anima_prompt_studio.services.export_service import ExportService
 from anima_prompt_studio.services.gallery_server import GalleryServer
+from anima_prompt_studio.services.gallery_upscale import GalleryUpscaleRenderer
 from anima_prompt_studio.services.pipeline import PromptPipeline
 from anima_prompt_studio.services.translation_service import LazyLocalMarianEngine, TranslationService, marian_runtime_available
 from anima_prompt_studio.services.resource_manager import ResourceManager
@@ -40,6 +47,8 @@ from anima_prompt_studio.ui.remote_dialogs import (
     RemoteProfileDialog,
     WorkflowProfileDialog,
     build_auto_workflow_profile,
+    classify_workflow,
+    detect_workflow_bindings,
 )
 from anima_prompt_studio.ui.remote_workers import ConnectionTestWorker, GenerationWorker
 from anima_prompt_studio.ui.tag_browser_dialog import TagBrowserDialog
@@ -1445,7 +1454,8 @@ class MainWindow(QMainWindow):
         if workflow_id:
             try:
                 workflow_supported = (
-                    self.repository.get_workflow_profile(workflow_id).workflow_kind == "txt2img_basic"
+                    self.repository.get_workflow_profile(workflow_id).workflow_kind
+                    in SUPPORTED_GENERATION_WORKFLOW_KINDS
                 )
             except Exception:
                 workflow_supported = False
@@ -1467,8 +1477,14 @@ class MainWindow(QMainWindow):
         for profile in self.repository.list_remote_profiles(enabled_only=True):
             self.remote_profile_combo.addItem(profile.display_name, profile.id)
         self.workflow_profile_combo.clear()
-        for profile in self.repository.list_workflow_profiles():
-            suffix = " · V2 可直接生成" if profile.workflow_kind == "txt2img_basic" else " · 下一版本适配"
+        for stored_profile in self.repository.list_workflow_profiles():
+            profile = self._ensure_workflow_model_compatibility(stored_profile)
+            if profile.workflow_kind == "txt2img_basic":
+                suffix = " · V2 可直接生成"
+            elif profile.workflow_kind == HIRES_FIX_WORKFLOW_KIND:
+                suffix = " · 高清修复 1.5×"
+            else:
+                suffix = " · 下一版本适配"
             self.workflow_profile_combo.addItem(profile.display_name + suffix, profile.id)
         self._set_combo_data(self.remote_profile_combo, current_remote)
         self._set_combo_data(self.workflow_profile_combo, current_workflow)
@@ -1538,6 +1554,14 @@ class MainWindow(QMainWindow):
                 )
                 QMessageBox.information(self, "工作流识别完成", message)
                 self.statusBar().showMessage("基础文生图工作流已自动识别并导入。", 5000)
+            elif profile.workflow_kind == HIRES_FIX_WORKFLOW_KIND:
+                QMessageBox.information(
+                    self,
+                    "高清修复工作流识别完成",
+                    "已识别两阶段文生图高清修复工作流：先按基础尺寸生成，"
+                    "再进行 Latent 1.5× 放大和低强度修复。",
+                )
+                self.statusBar().showMessage("高清修复 1.5× 工作流已自动识别并导入。", 5000)
             else:
                 QMessageBox.warning(
                     self,
@@ -1578,6 +1602,40 @@ class MainWindow(QMainWindow):
                 self.repository,
                 self._generation_output_root(),
             )
+        remote_profile = None
+        workflow_profile = None
+        credentials = RemoteCredentials()
+        try:
+            profile_id = self.remote_profile_combo.currentData()
+            if profile_id:
+                remote_profile = self.repository.get_remote_profile(profile_id)
+                workflow_profile = next(
+                    (
+                        profile
+                        for profile in self.repository.list_workflow_profiles()
+                        if GalleryUpscaleRenderer.supports(profile)
+                        and (
+                            profile.id.startswith("20_")
+                            or profile.display_name.startswith("20_")
+                            or "Tile_Upscale" in profile.display_name
+                        )
+                    ),
+                    None,
+                )
+                if remote_profile.auth_type == RemoteAuthType.PASSWORD:
+                    password = self.remote_password_edit.text()
+                    if not password:
+                        password = self.credential_store.read_password(remote_profile.id)
+                    credentials = RemoteCredentials(password=password)
+        except (KeyError, CredentialStoreError):
+            remote_profile = None
+            workflow_profile = None
+            credentials = RemoteCredentials()
+        self._gallery_server.configure_gallery_upscale(
+            remote_profile,
+            workflow_profile,
+            credentials,
+        )
         url = self._gallery_server.start()
         QDesktopServices.openUrl(QUrl(url))
         self.statusBar().showMessage("已在系统浏览器中打开本地图片画廊。", 5000)
@@ -1599,12 +1657,21 @@ class MainWindow(QMainWindow):
 
     def _ensure_workflow_model_compatibility(self, profile):
         """Upgrade previously discovered profiles that predate model mapping."""
-        if profile.compatible_model_profiles:
-            return profile
+        changed = False
+        if profile.workflow_kind == "unknown":
+            detected_bindings = detect_workflow_bindings(profile.api_workflow)
+            detected_kind = classify_workflow(profile.api_workflow, detected_bindings)
+            if detected_kind in SUPPORTED_GENERATION_WORKFLOW_KINDS:
+                profile.bindings = detected_bindings
+                profile.workflow_kind = detected_kind
+                changed = True
         source_name = profile.source_path or profile.display_name or profile.id
-        inferred = infer_workflow_model_profiles(profile.api_workflow, source_name)
-        if inferred:
-            profile.compatible_model_profiles = inferred
+        if not profile.compatible_model_profiles:
+            inferred = infer_workflow_model_profiles(profile.api_workflow, source_name)
+            if inferred:
+                profile.compatible_model_profiles = inferred
+                changed = True
+        if changed:
             self.repository.save_workflow_profile(profile)
         return profile
 
@@ -1622,6 +1689,8 @@ class MainWindow(QMainWindow):
             self._set_combo_data(self.model_combo, profile.compatible_model_profiles[0])
         if profile.workflow_kind == "txt2img_basic":
             self.remote_status.setText("该工作流已完成真实测试，V2 可直接生成")
+        elif profile.workflow_kind == HIRES_FIX_WORKFLOW_KIND:
+            self.remote_status.setText("高清修复 1.5×：两阶段参数使用云端已验证模板")
         else:
             self.remote_status.setText("该工作流已识别并保留，执行适配留到下一版本")
         self._update_remote_ready_state()
@@ -1710,7 +1779,7 @@ class MainWindow(QMainWindow):
 
     def _remote_connection_succeeded(self, report, discovered_workflows) -> None:
         imported_ids: list[str] = []
-        basic_ids: list[str] = []
+        supported_ids: list[str] = []
         for display_name, remote_path, workflow in discovered_workflows:
             try:
                 profile, missing = build_auto_workflow_profile(
@@ -1727,17 +1796,17 @@ class MainWindow(QMainWindow):
                     profile.notes = "通过 SSH 从优云智算镜像自动发现并转换。"
                 self.repository.save_workflow_profile(profile)
                 imported_ids.append(profile.id)
-                if not missing and profile.workflow_kind == "txt2img_basic":
-                    basic_ids.append(profile.id)
+                if not missing and profile.workflow_kind in SUPPORTED_GENERATION_WORKFLOW_KINDS:
+                    supported_ids.append(profile.id)
             except Exception:
                 log.exception("无法导入远端工作流 %s", remote_path)
         if imported_ids:
-            self._refresh_remote_controls(selected_workflow_id=(basic_ids or imported_ids)[0])
+            self._refresh_remote_controls(selected_workflow_id=(supported_ids or imported_ids)[0])
         device = report.devices[0] if report.devices else "设备信息未知"
         self.remote_status.setText(
             f"已连接 · {device} · 队列 {report.queue_running + report.queue_pending}"
             + (
-                f" · 自动发现 {len(imported_ids)} 个工作流，其中 {len(basic_ids)} 个结构识别为基础文生图"
+                f" · 自动发现 {len(imported_ids)} 个工作流，其中 {len(supported_ids)} 个可直接执行"
                 if imported_ids else ""
             )
         )
@@ -1745,7 +1814,7 @@ class MainWindow(QMainWindow):
             "SSH 隧道和 ComfyUI API 连接正常。"
             + (
                 f" 已导入镜像的 {len(imported_ids)} 个工作流，"
-                f"其中 {len(basic_ids)} 个识别为基础文生图。"
+                f"其中 {len(supported_ids)} 个已完成执行适配。"
                 if imported_ids else ""
             ),
             8000,
@@ -1759,7 +1828,7 @@ class MainWindow(QMainWindow):
             workflow = self._selected_workflow_profile()
             if not profile.known_host_fingerprint:
                 raise ValueError("请先执行“连接测试”并确认 SSH 主机指纹。")
-            if workflow.workflow_kind != "txt2img_basic":
+            if workflow.workflow_kind not in SUPPORTED_GENERATION_WORKFLOW_KINDS:
                 raise ValueError(
                     "这个复杂工作流已经识别并保留在列表中，但执行适配安排在下一版本。"
                     "V2 请使用标有“V2 可直接生成”的工作流。"
@@ -1772,13 +1841,24 @@ class MainWindow(QMainWindow):
             if not self.job.positive_prompt.strip():
                 raise ValueError("当前正向提示词为空，请先翻译并编译。")
             params = self.job.generation_params
+            if workflow.workflow_kind == HIRES_FIX_WORKFLOW_KIND:
+                scale = self._workflow_upscale_factor(workflow)
+                output_width = round(params.width * scale)
+                output_height = round(params.height * scale)
+                size_summary = (
+                    f"基础尺寸：{params.width} × {params.height}\n"
+                    f"最终尺寸：{output_width} × {output_height}（{scale:g}×）\n"
+                    "采样：主阶段与修复阶段使用云端已验证模板参数\n"
+                )
+            else:
+                size_summary = f"尺寸：{params.width} × {params.height}\n"
             answer = QMessageBox.question(
                 self,
                 "确认远程生成",
                 f"云主机：{profile.display_name}\n"
                 f"工作流：{workflow.display_name}\n"
                 f"模型：{model_profile.display_name}\n"
-                f"尺寸：{params.width} × {params.height}\n"
+                f"{size_summary}"
                 f"批量：{params.batch_size}\n"
                 f"保存根目录：{output_root}\n\n"
                 "提交后，本次任务将使用当前参数快照。是否继续？",
@@ -1802,6 +1882,17 @@ class MainWindow(QMainWindow):
             self._launch_generation_worker(worker)
         except Exception as exc:
             self._show_error("无法开始远程生成", exc)
+
+    @staticmethod
+    def _workflow_upscale_factor(workflow) -> float:
+        binding = workflow.bindings.get("upscale_factor")
+        if binding is None:
+            return 1.5
+        value = workflow.api_workflow.get(binding.node_id, {}).get("inputs", {}).get(binding.input_name, 1.5)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 1.5
 
     def resume_remote_generation(self) -> None:
         active = [run for run in self.repository.list_active_generation_runs() if run.remote_prompt_id]

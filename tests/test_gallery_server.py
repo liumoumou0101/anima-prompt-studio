@@ -155,3 +155,129 @@ def test_gallery_server_can_restore_and_permanently_delete_trash(tmp_path):
     finally:
         server.stop()
         repository.close()
+
+
+class _FakeUpscaleManager:
+    def __init__(self):
+        self.submitted = []
+        self.canceled = []
+        self.locked = set()
+
+    def set_output_root(self, output_root):
+        return None
+
+    def configure(self, remote_profile, workflow_profile, credentials):
+        return None
+
+    def configuration_payload(self):
+        return {"available": True, "reason": "", "scale": 1.5, "workflowName": "20_分块放大", "activeJob": None}
+
+    def submit(self, source, relative_path, asset):
+        self.submitted.append((source, relative_path, asset))
+        return {"id": "process-1", "state": "queued", "sourcePath": relative_path}
+
+    def get(self, job_id):
+        return {"id": job_id, "state": "running", "progress": 0.5}
+
+    def list_jobs(self):
+        return [{"id": "process-1", "state": "running", "progress": 0.5}]
+
+    def cancel(self, job_id):
+        self.canceled.append(job_id)
+        return {"id": job_id, "state": "canceled"}
+
+    def retry(self, job_id):
+        return {"id": job_id, "state": "queued"}
+
+    def clear_completed(self):
+        return 1
+
+    def locked_paths(self):
+        return self.locked
+
+
+def test_gallery_process_endpoint_requires_session_token_and_queues_selected_image(tmp_path):
+    root = tmp_path / "images"
+    image_path = root / "项目" / "one.png"
+    image_path.parent.mkdir(parents=True)
+    image = QImage(64, 48, QImage.Format_RGB32)
+    image.fill(0x334455)
+    assert image.save(str(image_path))
+    repository = SQLiteRepository(tmp_path / "gallery-process.db")
+    manager = _FakeUpscaleManager()
+    server = GalleryServer(repository, root, tmp_path / "static", upscale_manager=manager)
+
+    try:
+        server.start()
+        payload = _read_json(server.url + "api/gallery")
+        token = payload["processingToken"]
+        unauthorized = Request(
+            server.url + "api/gallery/process",
+            data=json.dumps({"path": payload["assets"][0]["path"]}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urlopen(unauthorized, timeout=5)
+        except HTTPError as exc:
+            assert exc.code == 403
+        else:
+            raise AssertionError("processing endpoint should require its session token")
+
+        authorized = Request(
+            server.url + "api/gallery/process",
+            data=json.dumps({"path": payload["assets"][0]["path"]}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-Gallery-Token": token},
+            method="POST",
+        )
+        with urlopen(authorized, timeout=5) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        assert result["id"] == "process-1"
+        assert manager.submitted[0][1] == "项目/one.png"
+
+        status = Request(
+            server.url + "api/gallery/process?job=process-1",
+            headers={"X-Gallery-Token": token},
+        )
+        with urlopen(status, timeout=5) as response:
+            assert json.loads(response.read().decode("utf-8"))["progress"] == 0.5
+
+        jobs = Request(
+            server.url + "api/gallery/process/jobs",
+            headers={"X-Gallery-Token": token},
+        )
+        with urlopen(jobs, timeout=5) as response:
+            assert json.loads(response.read().decode("utf-8"))["jobs"][0]["id"] == "process-1"
+
+        action = Request(
+            server.url + "api/gallery/process/action",
+            data=json.dumps({"job": "process-1", "action": "cancel"}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-Gallery-Token": token},
+            method="POST",
+        )
+        with urlopen(action, timeout=5) as response:
+            assert json.loads(response.read().decode("utf-8"))["job"]["state"] == "canceled"
+        assert manager.canceled == ["process-1"]
+    finally:
+        server.stop()
+        repository.close()
+
+
+def test_gallery_server_protects_queued_source_from_trash(tmp_path):
+    root = tmp_path / "images"
+    image_path = root / "项目" / "queued.png"
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(b"queued")
+    repository = SQLiteRepository(tmp_path / "gallery-locked.db")
+    manager = _FakeUpscaleManager()
+    manager.locked.add("项目/queued.png")
+    server = GalleryServer(repository, root, tmp_path / "static", upscale_manager=manager)
+
+    try:
+        result = server.trash(["项目/queued.png"])
+        assert result["moved"] == []
+        assert result["failed"][0]["path"] == "项目/queued.png"
+        assert "等待处理" in result["failed"][0]["error"]
+        assert image_path.is_file()
+    finally:
+        repository.close()

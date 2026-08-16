@@ -10,7 +10,12 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QTableWidgetItem
 
-from anima_prompt_studio.domain.execution_models import RemoteCredentials, RemoteProfile, WorkflowProfile
+from anima_prompt_studio.domain.execution_models import (
+    HIRES_FIX_WORKFLOW_KIND,
+    RemoteCredentials,
+    RemoteProfile,
+    WorkflowProfile,
+)
 from anima_prompt_studio.domain.models import (
     CharacterSlot, CompositionFieldState, EnhancementItem, GenerationFieldState, ItemState, LoRASelection,
     MatchedTag, PromptJob, SubjectMode,
@@ -557,6 +562,21 @@ def test_v2_keeps_complex_workflows_selectable_but_only_enables_verified_basic_g
     assert not window.remote_generate_button.isEnabled()
     assert "下一版本适配" in window.workflow_profile_combo.currentText()
     assert "下一版本" in window.remote_status.text()
+
+    hires = WorkflowProfile(
+        id="hires-1p5x",
+        display_name="04 高清修复 1.5 倍",
+        api_workflow={},
+        bindings={},
+        workflow_kind=HIRES_FIX_WORKFLOW_KIND,
+        compatible_model_profiles=["anima_base_v1"],
+    )
+    window.repository.save_workflow_profile(hires)
+    window._refresh_remote_controls(selected_workflow_id=hires.id)
+    assert window.remote_generate_button.isEnabled()
+    assert "高清修复 1.5×" in window.workflow_profile_combo.currentText()
+    assert window.model_combo.currentData() == "anima_base_v1"
+    assert "云端已验证模板" in window.remote_status.text()
 
     aesthetic = WorkflowProfile(
         id="aesthetic-v11",

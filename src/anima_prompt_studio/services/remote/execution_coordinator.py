@@ -12,6 +12,7 @@ from anima_prompt_studio.domain.execution_models import (
     GenerationRunState,
     RemoteCredentials,
     RemoteProfile,
+    SUPPORTED_GENERATION_WORKFLOW_KINDS,
     WorkflowProfile,
 )
 from anima_prompt_studio.domain.models import PromptJob
@@ -128,6 +129,7 @@ class RemoteExecutionCoordinator:
                     run.actual_workflow = rendered.workflow
                     run.request_json["resolved_seed"] = rendered.resolved_seed
                     run.request_json["checkpoint_name"] = rendered.checkpoint_name
+                    run.request_json["render_metadata"] = rendered.metadata
                     requested_prompt_id = str(uuid4())
                     run.remote_prompt_id = client.submit(rendered.workflow, run.client_id, requested_prompt_id)
                     self._active_prompt_id = run.remote_prompt_id
@@ -146,7 +148,10 @@ class RemoteExecutionCoordinator:
                 if not remote_artifacts:
                     raise ComfyAPIError("ComfyUI 任务完成，但没有发现图片输出。", code="no_outputs")
                 expected_images = job.generation_params.batch_size
-                if workflow_profile.workflow_kind == "txt2img_basic" and len(remote_artifacts) < expected_images:
+                if (
+                    workflow_profile.workflow_kind in SUPPORTED_GENERATION_WORKFLOW_KINDS
+                    and len(remote_artifacts) < expected_images
+                ):
                     raise ComfyAPIError(
                         f"批量任务请求 {expected_images} 张，但 ComfyUI 只返回了 "
                         f"{len(remote_artifacts)} 张；任务不会被误标为完整成功。",

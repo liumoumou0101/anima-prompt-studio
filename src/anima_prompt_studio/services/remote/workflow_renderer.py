@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import copy
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from anima_prompt_studio.domain.execution_models import RemoteProfile, WorkflowBinding, WorkflowProfile
+from anima_prompt_studio.domain.execution_models import (
+    HIRES_FIX_WORKFLOW_KIND,
+    RemoteProfile,
+    WorkflowBinding,
+    WorkflowProfile,
+)
 from anima_prompt_studio.domain.models import PromptJob
 from anima_prompt_studio.services.remote.workflow_compatibility import infer_workflow_model_profiles
 
@@ -19,6 +24,7 @@ class WorkflowRenderResult:
     workflow: dict[str, Any]
     resolved_seed: int
     checkpoint_name: str
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class WorkflowRenderer:
@@ -97,24 +103,47 @@ class WorkflowRenderer:
             template_checkpoint or checkpoint_logical_name,
         )
         params = job.generation_params
-        values: dict[str, Any] = {
+        common_values: dict[str, Any] = {
             "positive_prompt": job.positive_prompt,
             "negative_prompt": job.negative_prompt,
             "checkpoint": checkpoint,
             "seed": seed,
-            "steps": params.steps,
-            "cfg": params.cfg,
-            "sampler": params.sampler,
-            "scheduler": params.scheduler,
             "width": params.width,
             "height": params.height,
             "batch_size": params.batch_size,
             "filename_prefix": f"Anima_{run_id[:8]}",
         }
+        values = dict(common_values)
+        if workflow_profile.workflow_kind != HIRES_FIX_WORKFLOW_KIND:
+            values.update({
+                "steps": params.steps,
+                "cfg": params.cfg,
+                "sampler": params.sampler,
+                "scheduler": params.scheduler,
+            })
         for field_name, value in values.items():
             binding = workflow_profile.bindings.get(field_name)
             if binding is not None:
                 self._set_binding(workflow, binding, value)
+
+        metadata: dict[str, Any] = {"workflow_kind": workflow_profile.workflow_kind}
+        if workflow_profile.workflow_kind == HIRES_FIX_WORKFLOW_KIND:
+            refiner_seed = (seed + 1) % (2**63 - 1)
+            refiner_seed_binding = workflow_profile.bindings.get("refiner_seed")
+            if refiner_seed_binding is None:
+                raise WorkflowRenderError("高清修复工作流缺少第二阶段 Seed 绑定。")
+            self._set_binding(workflow, refiner_seed_binding, refiner_seed)
+            scale = self._binding_number(workflow, workflow_profile.bindings.get("upscale_factor"), 1.5)
+            metadata.update({
+                "operation": "txt2img_hiresfix",
+                "scale": scale,
+                "base_width": params.width,
+                "base_height": params.height,
+                "output_width": round(params.width * scale),
+                "output_height": round(params.height * scale),
+                "base_sampler": self._sampler_snapshot(workflow, workflow_profile.bindings.get("seed")),
+                "refiner_sampler": self._sampler_snapshot(workflow, refiner_seed_binding),
+            })
 
         if len(job.lora_selection) > len(workflow_profile.lora_slots):
             raise WorkflowRenderError(
@@ -134,8 +163,41 @@ class WorkflowRenderer:
                 node_inputs[slot.model_strength_input] = 0.0
                 node_inputs[slot.clip_strength_input] = 0.0
 
-        return WorkflowRenderResult(workflow=workflow, resolved_seed=seed, checkpoint_name=checkpoint)
+        return WorkflowRenderResult(
+            workflow=workflow,
+            resolved_seed=seed,
+            checkpoint_name=checkpoint,
+            metadata=metadata,
+        )
 
     @staticmethod
     def _set_binding(workflow: dict[str, Any], binding: WorkflowBinding, value: Any) -> None:
         workflow[binding.node_id]["inputs"][binding.input_name] = value
+
+    @staticmethod
+    def _binding_number(
+        workflow: dict[str, Any],
+        binding: WorkflowBinding | None,
+        fallback: float,
+    ) -> float:
+        if binding is None:
+            return fallback
+        value = workflow.get(binding.node_id, {}).get("inputs", {}).get(binding.input_name, fallback)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    @staticmethod
+    def _sampler_snapshot(
+        workflow: dict[str, Any],
+        binding: WorkflowBinding | None,
+    ) -> dict[str, Any]:
+        if binding is None:
+            return {}
+        inputs = workflow.get(binding.node_id, {}).get("inputs", {})
+        return {
+            key: inputs[key]
+            for key in ("seed", "steps", "cfg", "sampler_name", "scheduler", "denoise")
+            if key in inputs and not isinstance(inputs[key], (list, tuple, dict))
+        }

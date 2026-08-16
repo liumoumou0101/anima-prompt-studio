@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
@@ -17,6 +18,7 @@ class ComfyAPIError(RuntimeError):
 
 class ComfyUIClient:
     MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
+    MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
     def __init__(
         self,
@@ -75,6 +77,44 @@ class ComfyUIClient:
         if not returned:
             raise ComfyAPIError("ComfyUI 未返回 prompt_id。", code="missing_prompt_id", details=result)
         return str(returned)
+
+    def upload_image(
+        self,
+        image_path: Path,
+        *,
+        subfolder: str = "anima_gallery",
+        remote_name: str = "",
+    ) -> str:
+        """Upload a local gallery image to ComfyUI and return its LoadImage name."""
+        source = image_path.expanduser().resolve()
+        try:
+            size = source.stat().st_size
+        except OSError as exc:
+            raise ComfyAPIError(f"无法读取待处理图片：{exc}", code="source_unreadable") from exc
+        if size <= 0:
+            raise ComfyAPIError("待处理图片是空文件。", code="source_empty")
+        if size > self.MAX_UPLOAD_BYTES:
+            raise ComfyAPIError("待处理图片超过 100 MB 上传限制。", code="source_too_large")
+        filename = remote_name or source.name
+        try:
+            with source.open("rb") as stream:
+                response = self.session.post(
+                    f"{self.base_url}/upload/image",
+                    files={"image": (filename, stream, "application/octet-stream")},
+                    data={"type": "input", "subfolder": subfolder, "overwrite": "true"},
+                    timeout=self.timeout,
+                )
+            self._raise_for_status(response, "/upload/image")
+            result = response.json()
+        except ComfyAPIError:
+            raise
+        except Exception as exc:
+            raise ComfyAPIError(f"上传原图到 ComfyUI 失败：{exc}", code="upload_failed") from exc
+        if not isinstance(result, dict) or not result.get("name"):
+            raise ComfyAPIError("ComfyUI 未返回上传文件名。", code="invalid_upload_response")
+        uploaded_subfolder = str(result.get("subfolder") or subfolder).strip("/\\")
+        uploaded_name = str(result["name"])
+        return f"{uploaded_subfolder}/{uploaded_name}" if uploaded_subfolder else uploaded_name
 
     def get_history_entry(self, prompt_id: str) -> dict[str, Any] | None:
         result = self._get_json(f"/history/{prompt_id}")
