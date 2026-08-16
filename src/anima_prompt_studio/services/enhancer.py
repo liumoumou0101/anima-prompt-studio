@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from anima_prompt_studio.domain.models import EnhancementItem
+from anima_prompt_studio.domain.models import EnhancementItem, SemanticFrame
 
 
 SCENE_RULES = [
@@ -44,7 +44,7 @@ class PromptEnhancer:
         text = re.sub(r",\s*(?:and\s*)?with\s+", " with ", text, flags=re.I)
         return text.strip()
 
-    def enhance(self, chinese: str, english: str = "") -> list[EnhancementItem]:
+    def enhance(self, chinese: str, english: str = "", semantic_frame: SemanticFrame | None = None) -> list[EnhancementItem]:
         items: list[EnhancementItem] = []
         english_lower = english.lower()
         for rule in sorted(self.rules, key=lambda x: x.get("priority", 0), reverse=True):
@@ -66,7 +66,9 @@ class PromptEnhancer:
         for rule_id, triggers, sentence, tags in SCENE_RULES:
             if any(t in chinese for t in triggers):
                 items.append(EnhancementItem(id=rule_id, type="场景", source_rule=rule_id, content=sentence, tags=tags))
-        explicit_emotion = any(x in chinese for x in ("悲伤", "生气", "愤怒", "害怕", "开心", "兴奋", "哭", "大笑"))
+        explicit_emotion = bool(semantic_frame and semantic_frame.visual_slots.get("emotion")) or any(
+            x in chinese for x in ("悲伤", "生气", "愤怒", "害怕", "开心", "兴奋", "哭", "大笑")
+        )
         if not explicit_emotion and any(x in chinese for x in ("窗边", "抱膝", "低头", "撩头发", "看镜头", "探出窗外")):
             items.append(EnhancementItem(id="weak_emotion", type="情绪", source_rule="weak_emotion", content="She has a calm, soft expression.", tags=["soft expression"]))
         hand_scope = self._hand_scope(chinese)

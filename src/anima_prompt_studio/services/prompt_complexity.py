@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from anima_prompt_studio.domain.models import SemanticWarning, WarningLevel
+from anima_prompt_studio.domain.models import SemanticFrame, SemanticWarning, WarningLevel
 
 
 class PromptComplexityService:
@@ -44,3 +44,20 @@ class PromptComplexityService:
                 "程序仍会继续处理，原文不会被自动删改。"
             ),
         )
+
+    @staticmethod
+    def analyze_model_fit(model_profile_id: str, frame: SemanticFrame) -> list[SemanticWarning]:
+        """Warn when a model profile is a poor fit for a normalized pose."""
+        warnings: list[SemanticWarning] = []
+        if model_profile_id != "anima_turbo_v1":
+            return warnings
+        if frame.visual_slots.get("limb_relation"):
+            warnings.append(SemanticWarning(
+                level=WarningLevel.YELLOW,
+                concept="复杂肢体关系",
+                message=(
+                    "当前动作包含左右肢体之间的精确接触关系。ANIMA Turbo 容易简化姿势、"
+                    "混淆左右或生成额外肢体；实测建议切换 ANIMA Base，必要时再使用姿势控制。"
+                ),
+            ))
+        return warnings

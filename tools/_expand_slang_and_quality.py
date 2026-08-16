@@ -342,7 +342,7 @@ def expand_quality_profiles() -> int:
             "rendering_style_tags": ["anime illustration"],
             "detail_tags": [
                 "detailed skin", "shiny skin", "detailed breasts", "detailed navel",
-                "detailed legs", "detailed fingers",
+                "detailed legs",
             ],
         },
         {

@@ -32,3 +32,11 @@ def test_last_conflicting_hair_colour_wins():
     result = TagMatcher().match("white hair, but now black hair")
     assert "black hair" in tags(result)
     assert "white hair" not in tags(result)
+
+
+def test_view_angle_does_not_match_horns():
+    assert "horns" not in tags(TagMatcher().match("front three-quarter view", "全身侧前方视角"))
+
+
+def test_explicit_horns_still_match():
+    assert "horns" in tags(TagMatcher().match("a woman with horns", "头上长角的女人"))

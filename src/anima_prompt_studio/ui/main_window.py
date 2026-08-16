@@ -42,6 +42,7 @@ from anima_prompt_studio.services.remote.credential_store import CredentialStore
 from anima_prompt_studio.services.remote.workflow_discovery import parse_ssh_command
 from anima_prompt_studio.services.remote.workflow_compatibility import infer_workflow_model_profiles
 from anima_prompt_studio.ui.image_gallery import ImageGalleryWidget
+from anima_prompt_studio.ui.interaction_guide_dialog import InteractionGuideDialog
 from anima_prompt_studio.ui.library_dialog import EntityLibraryDialog
 from anima_prompt_studio.ui.remote_dialogs import (
     RemoteProfileDialog,
@@ -206,6 +207,11 @@ class MainWindow(QMainWindow):
         browse_tags.setShortcut("Ctrl+T")
         browse_tags.triggered.connect(self.open_tag_browser)
         tags_menu.addAction(browse_tags)
+        help_menu = self.menuBar().addMenu("帮助")
+        self.interaction_guide_action = QAction("复杂动作与场景互动写法…", self)
+        self.interaction_guide_action.setShortcut("F1")
+        self.interaction_guide_action.triggered.connect(self.open_interaction_guide)
+        help_menu.addAction(self.interaction_guide_action)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -593,6 +599,9 @@ class MainWindow(QMainWindow):
         tl.addWidget(QLabel("回译中文（仅供检查）"))
         self.back_chinese = QTextEdit(); self.back_chinese.setReadOnly(True); tl.addWidget(self.back_chinese, 2)
         tl.addWidget(QLabel("关键差异检查"))
+        interaction_help = QPushButton("查看复杂动作写法说明")
+        interaction_help.clicked.connect(self.open_interaction_guide)
+        tl.addWidget(interaction_help)
         self.warning_list = QListWidget(); self.warning_list.setMaximumHeight(100); tl.addWidget(self.warning_list)
         tabs.addTab(translation, "翻译与回译")
 
@@ -1204,6 +1213,9 @@ class MainWindow(QMainWindow):
     def open_tag_browser(self) -> None:
         dialog = TagBrowserDialog(self)
         dialog.exec()
+
+    def open_interaction_guide(self) -> None:
+        InteractionGuideDialog(self).exec()
 
     def open_entity_library(self, initial: type) -> None:
         dialog = EntityLibraryDialog(self.repository, initial, self)

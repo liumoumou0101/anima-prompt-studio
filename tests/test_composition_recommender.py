@@ -55,6 +55,16 @@ def test_explicit_terms_outrank_action_rules(recommender):
     assert job.composition.camera_height == "低机位"
 
 
+def test_knee_contact_does_not_become_cowboy_shot(recommender):
+    job = recommend(recommender, "女孩把右脚踝搭在左膝上，要求全身侧前方视角")
+    assert job.composition.shot == "全身"
+    assert job.composition.angle == "三分之四"
+
+
+def test_explicit_cowboy_shot_phrase_still_works(recommender):
+    assert recommend(recommender, "女孩坐着，使用膝上景别").composition.shot == "膝上"
+
+
 @pytest.mark.parametrize("state", [CompositionFieldState.USER_SELECTED, CompositionFieldState.LOCKED])
 def test_manual_and_locked_values_are_preserved(recommender, state):
     job = PromptJob(original_zh="天使从天而降", normalized_zh="天使从天而降")

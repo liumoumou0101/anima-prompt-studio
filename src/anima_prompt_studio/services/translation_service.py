@@ -257,7 +257,58 @@ class TranslationService:
                 r"(?:,?\s*and\s+|,?\s*)(?:she\s+)?(?:doesn't|does not|didn't|did not) have (?:a |any )?(?:foot|feet)",
                 ", with her feet off the ground", translated, flags=re.I,
             )
+        translated = TranslationService._guard_hand_scope(source, translated)
         translated = TranslationService._guard_nsfw_and_composition_terms(source, translated)
+        return translated
+
+    @staticmethod
+    def _guard_hand_scope(source: str, translated: str) -> str:
+        """Keep explicit left/right/both-hand scope grounded in the source.
+
+        Statistical translation commonly turns one specified hand into plural
+        ``hands``.  That changes the requested action and makes hand-object
+        interactions unnecessarily difficult for the image model.
+        """
+        has_right = "右手" in source
+        has_left = "左手" in source
+        explicit_both = any(token in source for token in ("双手", "两只手", "两手"))
+
+        # Separate left- and right-hand actions need the relation grammar in the
+        # enhancer; do not collapse either side here.
+        if has_right and has_left:
+            return translated
+
+        if explicit_both:
+            # Correct a singular hand only when the source explicitly says both.
+            if not re.search(r"\bboth\s+(?:of\s+)?(?:(?:her|his|their)\s+)?hands\b", translated, flags=re.I):
+                translated = re.sub(
+                    r"\b(?:her|his|their)\s+(?:left\s+|right\s+)?hand\b",
+                    "both hands",
+                    translated,
+                    count=1,
+                    flags=re.I,
+                )
+            return translated
+
+        if not (has_right or has_left):
+            return translated
+
+        side = "right" if has_right else "left"
+        possessive = "her" if any(token in source for token in ("女孩", "女人", "女性", "少女", "她")) else (
+            "his" if any(token in source for token in ("男孩", "男人", "男性", "少年", "他")) else "their"
+        )
+        scoped_hand = f"{possessive} {side} hand"
+
+        # Replace plural or wrongly-sided forms while retaining the sentence's
+        # verb and object.  The possessive is source-derived, not MT-derived.
+        hand_phrase = r"(?:both\s+(?:of\s+)?)?(?:her|his|their)\s+(?:left\s+|right\s+)?hands?"
+        translated, count = re.subn(hand_phrase, scoped_hand, translated, flags=re.I)
+        if not count:
+            translated, count = re.subn(r"\bboth\s+hands\b|\b(?:left|right)\s+hand\b|\bhands\b", scoped_hand, translated, count=1, flags=re.I)
+
+        if not re.search(rf"\b{re.escape(side)}\s+hand\b", translated, flags=re.I):
+            subject = "She" if possessive == "her" else "He" if possessive == "his" else "The character"
+            translated = translated.rstrip(". ") + f". {subject} uses {scoped_hand} for this action."
         return translated
 
     @staticmethod

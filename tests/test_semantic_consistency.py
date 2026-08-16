@@ -82,6 +82,55 @@ def test_left_right_hand_scope_replaces_broken_translation():
     assert "hair on her right hand" not in prose
 
 
+def test_single_right_hand_scope_corrects_plural_translation():
+    service = TranslationService(type("Engine", (), {
+        "name": "hand-drift",
+        "zh_to_en": lambda self, text: "An elf raises her skirt with her hands.",
+        "en_to_zh": lambda self, text: text,
+    })())
+    translated = service.zh_to_en("一个精灵，她用右手把自己的裙摆提起来")
+    assert "with her right hand" in translated
+    assert "with her hands" not in translated
+
+
+def test_skirt_lift_variant_keeps_right_hand_and_emits_canonical_action_tag():
+    source = "一个精灵，她用右手把自己的裙摆提起来"
+    service = TranslationService(type("Engine", (), {
+        "name": "hand-drift",
+        "zh_to_en": lambda self, text: "An elf raises her skirt with her hands.",
+        "en_to_zh": lambda self, text: text,
+    })())
+    job = PromptJob(original_zh=source)
+    PromptPipeline(translation=service).translate(job)
+    tags, _, prose = job.positive_prompt.partition("\n\n")
+    assert "skirt lift" in tags.split(", ")
+    assert "upskirt" not in tags.split(", ")
+    assert "with her right hand" in prose
+    assert "with her hands" not in prose
+    assert prose.count("skirt lift") == 0
+
+
+def test_single_left_hand_scope_is_restored_when_translation_drops_it():
+    service = TranslationService(type("Engine", (), {
+        "name": "hand-drift",
+        "zh_to_en": lambda self, text: "A woman lifts the cup.",
+        "en_to_zh": lambda self, text: text,
+    })())
+    translated = service.zh_to_en("一个女人用左手举起杯子")
+    assert "left hand" in translated
+    assert "right hand" not in translated
+
+
+def test_explicit_both_hands_are_not_reduced_to_one_hand():
+    service = TranslationService(type("Engine", (), {
+        "name": "hand-drift",
+        "zh_to_en": lambda self, text: "A woman holds the box in her hand.",
+        "en_to_zh": lambda self, text: text,
+    })())
+    translated = service.zh_to_en("一个女人双手抱着箱子")
+    assert "both hands" in translated
+
+
 def test_canonical_prose_aligns_window_gaze_and_removes_bad_translation():
     job = PromptJob(original_zh="女孩倚着窗户看向远方")
     pipeline().translate(job)

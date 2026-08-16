@@ -1377,19 +1377,31 @@
     "triggers": [
       "掀裙",
       "撩起裙子",
-      "把裙子掀起来"
+      "把裙子掀起来",
+      "提起裙子",
+      "把裙子提起来",
+      "裙子提起来",
+      "提起裙摆",
+      "提裙摆",
+      "把裙摆提起来",
+      "裙摆提起来",
+      "撩起裙摆",
+      "裙摆撩起来",
+      "掀起裙摆",
+      "裙摆掀起来"
     ],
     "canonical_en": "skirt lift",
     "tags": [
-      "skirt lift",
-      "upskirt"
+      "skirt lift"
     ],
     "category": "clothing",
     "priority": 93,
     "ensure_en": [
       "skirt lift",
-      "skirt lift",
-      "upskirt"
+      "raises her skirt",
+      "raised her skirt",
+      "lifts her skirt",
+      "lifted her skirt"
     ],
     "ensure_phrase": "Skirt lift."
   },

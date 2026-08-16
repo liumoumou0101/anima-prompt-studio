@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QTableWidgetItem
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QTableWidgetItem, QTextBrowser
 
 from anima_prompt_studio.domain.execution_models import (
     HIRES_FIX_WORKFLOW_KIND,
@@ -24,6 +24,7 @@ from anima_prompt_studio.repositories import SQLiteRepository
 from anima_prompt_studio.services.remote.workflow_renderer import WorkflowRenderer
 from anima_prompt_studio.services.remote.credential_store import CredentialStore, MemoryCredentialBackend
 from anima_prompt_studio.ui.main_window import MainWindow
+from anima_prompt_studio.ui.interaction_guide_dialog import InteractionGuideDialog
 from anima_prompt_studio.ui.remote_dialogs import build_auto_workflow_profile
 
 
@@ -102,6 +103,19 @@ def test_main_window_switches_to_scrollable_compact_layout(window):
     window.resize(1300, 800)
     window._apply_responsive_layout()
     assert window.main_splitter.orientation() == Qt.Horizontal
+
+
+def test_interaction_writing_guide_is_available_in_frontend(window):
+    assert window.interaction_guide_action.text().startswith("复杂动作与场景互动写法")
+    dialog = InteractionGuideDialog(window)
+    assert dialog.tabs.count() == 4
+    page_text = " ".join(
+        browser.toPlainText()
+        for index in range(dialog.tabs.count())
+        for browser in dialog.tabs.widget(index).findChildren(QTextBrowser)
+    )
+    assert "右脚踝搭在左膝上" in page_text
+    assert "LoRA" in page_text
 
 
 def test_composition_value_change_becomes_user_selected(window):
