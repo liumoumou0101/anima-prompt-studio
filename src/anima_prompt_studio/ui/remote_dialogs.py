@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from anima_prompt_studio.domain.execution_models import (
+    HIRES_FIX_WORKFLOW_KIND,
     RemoteAuthType,
     RemoteProfile,
     LoRASlotBinding,
@@ -67,6 +68,16 @@ AUTO_REQUIRED_FIELDS = {
     "filename_prefix",
 }
 
+HIRES_FIX_BINDING_INPUTS = {
+    "refiner_seed": "seed",
+    "refiner_steps": "steps",
+    "refiner_cfg": "cfg",
+    "refiner_sampler": "sampler_name",
+    "refiner_scheduler": "scheduler",
+    "refiner_denoise": "denoise",
+    "upscale_factor": "scale_by",
+}
+
 
 def _linked_node_id(value: Any, workflow: dict[str, Any]) -> str:
     if isinstance(value, (list, tuple)) and value:
@@ -98,6 +109,34 @@ def _find_upstream_node(
     return ""
 
 
+def _detect_hires_fix_nodes(workflow: dict[str, Any]) -> tuple[str, str, str] | None:
+    """Return base sampler, refiner sampler, and latent-upscale node for a two-pass graph."""
+    sampler_ids = [
+        str(node_id)
+        for node_id, node in workflow.items()
+        if isinstance(node, dict) and str(node.get("class_type", "")).casefold() == "ksampler"
+    ]
+    for refiner_id in sampler_ids:
+        refiner_inputs = workflow.get(refiner_id, {}).get("inputs", {})
+        upscale_id = _linked_node_id(refiner_inputs.get("latent_image"), workflow)
+        upscale = workflow.get(upscale_id, {})
+        if "latentupscaleby" not in str(upscale.get("class_type", "")).casefold():
+            continue
+        base_id = _linked_node_id(upscale.get("inputs", {}).get("samples"), workflow)
+        if base_id not in sampler_ids or base_id == refiner_id:
+            continue
+        base_latent_id = _linked_node_id(
+            workflow.get(base_id, {}).get("inputs", {}).get("latent_image"),
+            workflow,
+        )
+        if "emptylatentimage" not in str(
+            workflow.get(base_latent_id, {}).get("class_type", "")
+        ).casefold():
+            continue
+        return base_id, refiner_id, upscale_id
+    return None
+
+
 def detect_workflow_bindings(workflow: dict[str, Any]) -> dict[str, WorkflowBinding]:
     by_class: dict[str, list[str]] = {}
     for node_id, node in workflow.items():
@@ -115,7 +154,8 @@ def detect_workflow_bindings(workflow: dict[str, Any]) -> dict[str, WorkflowBind
                 return node_ids[0]
         return ""
 
-    sampler = first_matching("KSampler", "KSamplerAdvanced")
+    hires_fix_nodes = _detect_hires_fix_nodes(workflow)
+    sampler = hires_fix_nodes[0] if hires_fix_nodes else first_matching("KSampler", "KSamplerAdvanced")
     sampler_inputs = workflow.get(sampler, {}).get("inputs", {})
     positive = _linked_node_id(sampler_inputs.get("positive"), workflow)
     negative = _linked_node_id(sampler_inputs.get("negative"), workflow)
@@ -170,6 +210,12 @@ def detect_workflow_bindings(workflow: dict[str, Any]) -> dict[str, WorkflowBind
         node = workflow.get(node_id, {})
         if node_id and input_name in node.get("inputs", {}):
             result[field_name] = WorkflowBinding(node_id=node_id, input=input_name)
+    if hires_fix_nodes:
+        _base_sampler, refiner, upscale = hires_fix_nodes
+        for field_name, input_name in HIRES_FIX_BINDING_INPUTS.items():
+            node_id = upscale if field_name == "upscale_factor" else refiner
+            if input_name in workflow.get(node_id, {}).get("inputs", {}):
+                result[field_name] = WorkflowBinding(node_id=node_id, input=input_name)
     return result
 
 
@@ -187,6 +233,39 @@ def classify_workflow(workflow: dict[str, Any], bindings: dict[str, WorkflowBind
         for node in workflow.values()
         if isinstance(node, dict)
     ]
+    hires_fix_nodes = _detect_hires_fix_nodes(workflow)
+    hires_required = {"refiner_seed", "refiner_denoise", "upscale_factor"}
+    if hires_fix_nodes and hires_required <= bindings.keys():
+        scale_binding = bindings["upscale_factor"]
+        scale_value = workflow.get(scale_binding.node_id, {}).get("inputs", {}).get(scale_binding.input_name)
+        hires_allowed_fragments = (
+            "ksampler",
+            "cliptextencode",
+            "emptylatentimage",
+            "latentupscaleby",
+            "vaedecode",
+            "saveimage",
+            "checkpointloader",
+            "unetloader",
+            "cliploader",
+            "vaeloader",
+            "loraloader",
+            "modelsampling",
+            "resolutionselector",
+        )
+        try:
+            scale_is_supported = abs(float(scale_value) - 1.5) < 1e-9
+        except (TypeError, ValueError):
+            scale_is_supported = False
+        if (
+            scale_is_supported
+            and sum(class_type == "ksampler" for class_type in class_types) == 2
+            and sum(class_type == "latentupscaleby" for class_type in class_types) == 1
+            and sum(class_type == "emptylatentimage" for class_type in class_types) == 1
+            and sum(class_type == "saveimage" for class_type in class_types) == 1
+            and all(any(fragment in class_type for fragment in hires_allowed_fragments) for class_type in class_types)
+        ):
+            return HIRES_FIX_WORKFLOW_KIND
     basic_allowed_fragments = (
         "ksampler",
         "cliptextencode",

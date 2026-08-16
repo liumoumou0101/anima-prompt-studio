@@ -5,6 +5,7 @@ import hashlib
 import logging
 import mimetypes
 import os
+import secrets
 import subprocess
 import threading
 from datetime import datetime
@@ -17,6 +18,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImageReader
 
 from anima_prompt_studio.repositories import SQLiteRepository
+from anima_prompt_studio.domain.execution_models import RemoteCredentials, RemoteProfile, WorkflowProfile
 from anima_prompt_studio.services.gallery_assets import (
     IMAGE_SUFFIXES,
     TRASH_DIR_NAME,
@@ -27,6 +29,7 @@ from anima_prompt_studio.services.gallery_assets import (
     restore_images_from_trash,
 )
 from anima_prompt_studio.services.gallery_index import load_gallery_batches
+from anima_prompt_studio.services.gallery_upscale import GalleryUpscaleError, GalleryUpscaleManager
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +43,7 @@ class GalleryServer:
         output_root: Path,
         static_root: Path | None = None,
         port: int = 0,
+        upscale_manager: GalleryUpscaleManager | None = None,
     ) -> None:
         self.repository = repository
         self._output_root = output_root.expanduser()
@@ -49,6 +53,11 @@ class GalleryServer:
         self._server: _GalleryHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._thumbnail_lock = threading.Lock()
+        self._session_token = secrets.token_urlsafe(24)
+        self.upscale_manager = upscale_manager or GalleryUpscaleManager(
+            repository.db_path,
+            self._output_root,
+        )
 
     @property
     def running(self) -> bool:
@@ -61,7 +70,17 @@ class GalleryServer:
         return f"http://127.0.0.1:{self._server.server_port}/"
 
     def set_output_root(self, output_root: Path) -> None:
-        self._output_root = output_root.expanduser()
+        resolved = output_root.expanduser()
+        self.upscale_manager.set_output_root(resolved)
+        self._output_root = resolved
+
+    def configure_gallery_upscale(
+        self,
+        remote_profile: RemoteProfile | None,
+        workflow_profile: WorkflowProfile | None,
+        credentials: RemoteCredentials | None,
+    ) -> None:
+        self.upscale_manager.configure(remote_profile, workflow_profile, credentials)
 
     def start(self) -> str:
         if self._server is not None:
@@ -131,7 +150,54 @@ class GalleryServer:
                 key=lambda item: item["title"],
             ),
             "trashCount": self._trash_count(root),
+            "processing": self.upscale_manager.configuration_payload(),
+            "processingToken": self._session_token,
         }
+
+    def start_upscale(self, relative_path: str) -> dict[str, Any]:
+        result = self.start_upscales([relative_path])
+        if result["jobs"]:
+            return result["jobs"][0]
+        failure = result["failed"][0] if result["failed"] else {"error": "无法加入任务队列"}
+        raise GalleryUpscaleError(str(failure["error"]))
+
+    def start_upscales(self, relative_paths: list[str]) -> dict[str, Any]:
+        decoded_paths = list(dict.fromkeys(unquote(path) for path in relative_paths if path))
+        assets = {item["path"]: item for item in self.gallery_payload()["assets"]}
+        jobs: list[dict[str, Any]] = []
+        failed: list[dict[str, str]] = []
+        for decoded in decoded_paths:
+            source = self.image_path(decoded)
+            asset = assets.get(decoded)
+            if source is None or asset is None:
+                failed.append({"path": decoded, "error": "画廊中找不到待处理图片"})
+                continue
+            try:
+                jobs.append(self.upscale_manager.submit(source, decoded, asset))
+            except GalleryUpscaleError as exc:
+                failed.append({"path": decoded, "error": str(exc)})
+        return {"jobs": jobs, "failed": failed}
+
+    def upscale_status(self, job_id: str) -> dict[str, Any] | None:
+        return self.upscale_manager.get(job_id)
+
+    def upscale_jobs(self) -> dict[str, Any]:
+        return {
+            "jobs": self.upscale_manager.list_jobs(),
+            "processing": self.upscale_manager.configuration_payload(),
+        }
+
+    def upscale_action(self, job_id: str, action: str) -> dict[str, Any]:
+        if action == "cancel":
+            return {"job": self.upscale_manager.cancel(job_id)}
+        if action == "retry":
+            return {"job": self.upscale_manager.retry(job_id)}
+        if action == "clear_completed":
+            return {"cleared": self.upscale_manager.clear_completed()}
+        raise ValueError("不支持的任务操作")
+
+    def valid_processing_token(self, value: str) -> bool:
+        return bool(value) and secrets.compare_digest(value, self._session_token)
 
     def image_path(self, relative_path: str) -> Path | None:
         return resolve_gallery_image(unquote(relative_path), self._output_root)
@@ -186,7 +252,18 @@ class GalleryServer:
 
     def trash(self, relative_paths: list[str]) -> dict[str, Any]:
         root = self._output_root.resolve()
-        paths = [path for raw in relative_paths if (path := resolve_gallery_image(raw, root)) is not None]
+        locked = {Path(path).as_posix() for path in self.upscale_manager.locked_paths()}
+        locked_requested = {
+            Path(raw).as_posix()
+            for raw in relative_paths
+            if Path(raw).as_posix() in locked
+        }
+        paths = [
+            path
+            for raw in relative_paths
+            if Path(raw).as_posix() not in locked
+            and (path := resolve_gallery_image(raw, root)) is not None
+        ]
         requested = {str(Path(raw).as_posix()) for raw in relative_paths}
         moved, failed = move_images_to_trash(paths, root)
         valid_relative = {
@@ -194,6 +271,10 @@ class GalleryServer:
             for path in paths
         }
         failed_payload = [{"path": _request_path_label(path, root), "error": error} for path, error in failed]
+        failed_payload.extend(
+            {"path": path, "error": "图片正在处理或等待处理，不能移入回收站"}
+            for path in sorted(locked_requested)
+        )
         failed_set = {item["path"] for item in failed_payload}
         moved_set = valid_relative - failed_set
         for raw in sorted(requested - moved_set):
@@ -246,7 +327,13 @@ class GalleryServer:
                     "prompt": "",
                     "parameters": {},
                 })
-        return {"root": str(root), "assets": assets, "trashCount": len(assets)}
+        return {
+            "root": str(root),
+            "assets": assets,
+            "trashCount": len(assets),
+            "processing": self.upscale_manager.configuration_payload(),
+            "processingToken": self._session_token,
+        }
 
     def restore(self, relative_paths: list[str]) -> dict[str, Any]:
         root = self._output_root.resolve()
@@ -311,6 +398,23 @@ def _make_handler(service: GalleryServer):
                 if parsed.path == "/api/gallery/trash":
                     self._send_json(service.trash_payload())
                     return
+                if parsed.path == "/api/gallery/process":
+                    if not service.valid_processing_token(self.headers.get("X-Gallery-Token", "")):
+                        self._send_json({"error": "画廊处理会话无效，请刷新页面后重试。"}, status=403)
+                        return
+                    query = parse_qs(parsed.query)
+                    job = service.upscale_status(query.get("job", [""])[0])
+                    if job is None:
+                        self._send_json({"error": "处理任务不存在"}, status=404)
+                    else:
+                        self._send_json(job)
+                    return
+                if parsed.path == "/api/gallery/process/jobs":
+                    if not service.valid_processing_token(self.headers.get("X-Gallery-Token", "")):
+                        self._send_json({"error": "画廊处理会话无效，请刷新页面后重试。"}, status=403)
+                        return
+                    self._send_json(service.upscale_jobs())
+                    return
                 if parsed.path == "/api/image":
                     query = parse_qs(parsed.query)
                     raw_path = query.get("path", [""])[0]
@@ -358,12 +462,42 @@ def _make_handler(service: GalleryServer):
                 "/api/gallery/restore",
                 "/api/gallery/delete",
                 "/api/gallery/reveal",
+                "/api/gallery/process",
+                "/api/gallery/process/action",
             }:
                 self.send_error(404)
                 return
             try:
                 length = min(int(self.headers.get("Content-Length", "0")), 2_000_000)
                 payload = json.loads(self.rfile.read(length) or b"{}")
+                if (
+                    parsed.path in {"/api/gallery/process", "/api/gallery/process/action"}
+                    and not service.valid_processing_token(self.headers.get("X-Gallery-Token", ""))
+                ):
+                    self._send_json({"error": "画廊处理会话无效，请刷新页面后重试。"}, status=403)
+                    return
+                if parsed.path == "/api/gallery/process":
+                    raw_paths = payload.get("paths")
+                    if raw_paths is None:
+                        raw_path = payload.get("path", "")
+                        if not isinstance(raw_path, str) or not raw_path:
+                            raise ValueError("path 必须是非空字符串")
+                        self._send_json(service.start_upscale(raw_path), status=202)
+                        return
+                    if not isinstance(raw_paths, list) or not raw_paths or not all(
+                        isinstance(path, str) and path for path in raw_paths
+                    ):
+                        raise ValueError("path 或 paths 必须包含非空字符串")
+                    result = service.start_upscales(raw_paths)
+                    self._send_json(result, status=202)
+                    return
+                if parsed.path == "/api/gallery/process/action":
+                    job_id = payload.get("job", "")
+                    action = payload.get("action", "")
+                    if not isinstance(job_id, str) or not isinstance(action, str):
+                        raise ValueError("job 和 action 必须是字符串")
+                    self._send_json(service.upscale_action(job_id, action))
+                    return
                 if parsed.path == "/api/gallery/reveal":
                     raw_path = payload.get("path", "")
                     if not isinstance(raw_path, str):
@@ -388,6 +522,10 @@ def _make_handler(service: GalleryServer):
                 else:
                     result = service.delete_forever(raw_paths)
                 self._send_json(result)
+            except FileNotFoundError as exc:
+                self._send_json({"error": str(exc)}, status=404)
+            except GalleryUpscaleError as exc:
+                self._send_json({"error": str(exc)}, status=409)
             except (ValueError, TypeError, json.JSONDecodeError):
                 self._send_json({"error": "请求格式无效"}, status=400)
             except Exception:

@@ -10,6 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from anima_prompt_studio.domain.models import utc_now
 
 
+HIRES_FIX_WORKFLOW_KIND = "txt2img_hiresfix_1_5x"
+SUPPORTED_GENERATION_WORKFLOW_KINDS = frozenset({"txt2img_basic", HIRES_FIX_WORKFLOW_KIND})
+
+
 class RemoteAuthType(StrEnum):
     PRIVATE_KEY = "private_key"
     PASSWORD = "password"
@@ -75,7 +79,7 @@ class WorkflowProfile(BaseModel):
     display_name: str
     api_workflow: dict[str, Any]
     bindings: dict[str, WorkflowBinding]
-    workflow_kind: Literal["txt2img_basic", "unknown"] = "unknown"
+    workflow_kind: Literal["txt2img_basic", "txt2img_hiresfix_1_5x", "unknown"] = "unknown"
     lora_slots: list[LoRASlotBinding] = Field(default_factory=list)
     compatible_model_profiles: list[str] = Field(default_factory=list)
     source_path: str = ""

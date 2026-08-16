@@ -18,7 +18,7 @@ def infer_workflow_model_profiles(
     name = Path(source_name).stem.casefold()
     if name.startswith(("21_", "22_")):
         return ["anima_aesthetic_v1"]
-    if name.startswith("01_"):
+    if name.startswith(("01_", "04_")):
         return ["anima_base_v1"]
     if name.startswith(("02_", "05_")):
         return ["anima_turbo_v1"]
