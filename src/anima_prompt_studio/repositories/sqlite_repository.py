@@ -301,8 +301,12 @@ class SQLiteRepository:
             """SELECT payload_json FROM gallery_process_jobs
             WHERE output_root=?
             ORDER BY
-                CASE WHEN state IN ('queued','starting','connecting','preparing','running','downloading')
-                    THEN 0 ELSE 1 END,
+                CASE
+                    WHEN state IN ('queued','starting','connecting','preparing','running','downloading')
+                        THEN 0
+                    WHEN state = 'failed' THEN 1
+                    ELSE 2
+                END,
                 queue_position ASC, updated_at DESC
             LIMIT ?""",
             (root_key, limit),

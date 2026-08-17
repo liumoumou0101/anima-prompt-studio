@@ -69,6 +69,9 @@ class GalleryServer:
             raise RuntimeError("画廊服务尚未启动")
         return f"http://127.0.0.1:{self._server.server_port}/"
 
+    def output_root_change_blocked_reason(self) -> str:
+        return self.upscale_manager.output_root_change_blocked_reason()
+
     def set_output_root(self, output_root: Path) -> None:
         resolved = output_root.expanduser()
         self.upscale_manager.set_output_root(resolved)

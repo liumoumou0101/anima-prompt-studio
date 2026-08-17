@@ -203,9 +203,9 @@ class TranslationService:
     @staticmethod
     def _guard_visual_terms(source: str, translated: str) -> str:
         """Correct common high-impact OPUS drift without inventing attributes."""
-        if "女孩" in source and not any(token in source for token in ("两个女孩", "两名女孩", "三个女孩", "三名女孩")):
+        if "女孩" in source and not re.search(r"[两二三四五六七八九十\d][个名位].{0,8}女孩", source):
             translated = re.sub(r"^Girls\b", "A girl", translated, flags=re.I)
-        if "男孩" in source and not any(token in source for token in ("两个男孩", "两名男孩", "三个男孩", "三名男孩")):
+        if "男孩" in source and not re.search(r"[两二三四五六七八九十\d][个名位].{0,8}男孩", source):
             translated = re.sub(r"^Boys\b", "A boy", translated, flags=re.I)
         hair_colours = {
             "白发": "white", "白色头发": "white", "黑发": "black", "黑色头发": "black",
@@ -367,6 +367,26 @@ class TranslationService:
                 translated = re.sub(r"\bA couple\b", "A man and a woman", translated, count=1, flags=re.I)
                 if not re.search(r"\b(?:man and a woman|couple)\b", translated, flags=re.I):
                     translated = translated.rstrip(". ") + " A man and a woman."
+        # 全身 is a shot size. Marian often emits "all over her body/face",
+        # which the image model treats as a smear instead of a full figure.
+        if "全身" in source:
+            translated = re.sub(
+                r"\ball over (?:her |his |the |their )?(?:body|face|head)\b",
+                "full body",
+                translated,
+                flags=re.I,
+            )
+        if any(token in source for token in (
+            "闭合的雨伞", "闭合的伞", "收起的雨伞", "收起的伞", "合上的雨伞", "合上的伞",
+        )):
+            translated = re.sub(
+                r"\b(?:an |the )?(?:open(?:ed)?|unfolded)\s+(?:umbrella|parasol)\b",
+                "a closed umbrella",
+                translated,
+                flags=re.I,
+            )
+            if not re.search(r"\bclosed (?:umbrella|parasol)\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " Holding a closed umbrella."
         if "男上位" in source and not re.search(r"\bmissionary\b", translated, flags=re.I):
             translated = re.sub(r"\ba man in top\b|\bman on top\b", "missionary position", translated, flags=re.I)
             if not re.search(r"\bmissionary\b", translated, flags=re.I):

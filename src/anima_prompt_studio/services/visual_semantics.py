@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from anima_prompt_studio.domain.models import MatchedTag, SemanticFrame
+from .negation import span_negated_zh
 
 
 @dataclass(frozen=True)
@@ -286,15 +287,33 @@ class VisualSemanticNormalizer:
                 matches.append((match.start(), match.end(), source, natural, tags))
         return max(matches, key=lambda item: (len(item[2]), -item[0]), default=None)
 
+    def _adult_context(self, text: str) -> bool:
+        return any(cue in text for cue in self.rules.get("adult_context_cues", []))
+
+    def _emotion_payload(self, family: dict, adult: bool) -> tuple[str, list[str]]:
+        if adult and family.get("adult_canonical_en"):
+            canonical = family["adult_canonical_en"]
+            tag = family.get("adult_tag") or family.get("tag") or ""
+        else:
+            canonical = family["canonical_en"]
+            tag = family.get("tag") or ""
+        canonical = re.sub(r"^(?:an?|the)\s+", "", canonical, flags=re.I)
+        return canonical, [tag] if tag else []
+
     def _match_emotion(self, text: str, occupied: list[tuple[int, int]]):
         matches = []
+        adult = self._adult_context(text)
         for family in self.rules.get("emotions", []):
-            canonical = re.sub(r"^(?:an?|the)\s+", "", family["canonical_en"], flags=re.I)
+            if family.get("adult_only") and not adult:
+                continue
+            if family.get("skip_in_adult") and adult:
+                continue
+            canonical, tags = self._emotion_payload(family, adult)
             for alias in family.get("aliases", []):
                 pattern = rf"(?:(?:神色|神情|表情|眼神)(?:显得|看起来|有些|略显|十分|很)?)?{re.escape(alias)}"
                 for match in re.finditer(pattern, text):
                     if not self._overlaps(match.start(), match.end(), occupied):
-                        matches.append((match.start(), match.end(), match.group(0), canonical, [family["tag"]]))
+                        matches.append((match.start(), match.end(), match.group(0), canonical, tags))
         return max(matches, key=lambda item: (len(item[2]), -item[0]), default=None)
 
     def _match_gaze(self, text: str, occupied: list[tuple[int, int]]):
@@ -307,18 +326,25 @@ class VisualSemanticNormalizer:
             for alias in target.get("aliases", []):
                 pattern = rf"(?:{verb_pattern})\s*(?:着|向)?\s*{re.escape(alias)}"
                 for match in re.finditer(pattern, text):
-                    if not self._overlaps(match.start(), match.end(), occupied):
-                        matches.append((
-                            match.start(), match.end(), match.group(0), target["canonical_en"],
-                            [target["tag"]], target["intent"],
-                        ))
+                    if self._overlaps(match.start(), match.end(), occupied):
+                        continue
+                    if span_negated_zh(text, match.start()):
+                        continue
+                    matches.append((
+                        match.start(), match.end(), match.group(0), target["canonical_en"],
+                        [target["tag"]], target["intent"],
+                    ))
         return max(matches, key=lambda item: (len(item[2]), -item[0]), default=None)
 
     @staticmethod
-    def _sentence_span(text: str, start: int) -> tuple[int, int, str]:
+    def _containing_sentence(text: str, start: int) -> str:
+        sentence_start = 0
+        for index, char in enumerate(text[:start]):
+            if char in "。.;；！？!?":
+                sentence_start = index + 1
         end_match = re.search(r"[。.;；！？!?]", text[start:])
-        end = start + end_match.start() if end_match else len(text)
-        return start, end, text[start:end].strip(" ，,")
+        sentence_end = start + end_match.start() if end_match else len(text)
+        return text[sentence_start:sentence_end].strip(" ，,")
 
     def _match_limb_relation(self, text: str, occupied: list[tuple[int, int]]):
         relation = re.search(
@@ -327,9 +353,10 @@ class VisualSemanticNormalizer:
         )
         if not relation or relation.group(1) == relation.group(2):
             return None
-        start, end, source = self._sentence_span(text, relation.start())
+        start, end = relation.start(), relation.end()
         if self._overlaps(start, end, occupied):
             return None
+        source = self._containing_sentence(text, start)
 
         side_names = {"左": "left", "右": "right"}
         raised = side_names[relation.group(1)]
@@ -353,12 +380,11 @@ class VisualSemanticNormalizer:
             canonical += " The torso is slightly arched back."
             tags.append("arched back")
         if any(token in source for token in ("全身", "完整身体", "从头到脚")):
-            canonical += " The complete head and face and the full figure from head to toe are visible, with clear space above the head and below the feet."
             tags.append("full body")
         if any(token in source for token in ("侧前方", "斜前方", "三分之四")):
             canonical += " The character is shown from a front three-quarter view."
             tags.append("three-quarter view")
-        return start, end, source, canonical, tags
+        return start, end, relation.group(0), canonical, tags
 
     @staticmethod
     def _store(frame: SemanticFrame, slot: str, source: str, canonical: str, tags: list[str]) -> None:
@@ -374,7 +400,7 @@ class VisualSemanticNormalizer:
     def _infer_category(tag: str, frame: SemanticFrame) -> str:
         if tag in {"looking away", "looking at viewer"}:
             return "gaze"
-        if tag in {"sad", "happy", "angry", "surprised", "confused", "sleepy", "nervous", "serious"}:
+        if tag in {"sad", "happy", "angry", "surprised", "confused", "sleepy", "nervous", "serious", "aroused"}:
             return "expression"
         if tag in frame.visual_tags and "race" in frame.visual_slots:
             return "race"

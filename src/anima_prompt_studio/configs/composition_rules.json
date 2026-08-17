@@ -33,8 +33,8 @@
     "gaze": [
       {"value":"看镜头","zh":["看镜头","看向镜头"],"en":["looking at viewer","looks at the camera"],"reason":"用户明确要求看镜头"},
       {"value":"看人物","zh":["看着对方","看向另一人","看向对方"],"en":["looking at another","looks at the other"],"reason":"视线有明确的人物目标"},
-      {"value":"看物体","zh":["看书","看向手中","看着手中","看蘑菇","看向蘑菇"],"en":["looking at the book","looks at the book","looking at the mushrooms"],"reason":"视线应跟随明确动作目标"},
-      {"value":"看向画外","zh":["看向画外","看向窗外","不看镜头"],"en":["looking away","looks outside","doesn't look at the camera"],"reason":"用户明确说明视线离开镜头"}
+      {"value":"看物体","zh":["看书","看手机","看向手中","看着手中","看手里","看蘑菇","看向蘑菇"],"en":["looking at the book","looks at the book","looking at the phone","looking at the mushrooms"],"reason":"视线应跟随明确动作目标"},
+      {"value":"看向画外","zh":["看向画外","看画外","看向窗外","不看镜头","没有看镜头","不要看镜头","别看镜头"],"en":["looking away","looks outside","doesn't look at the camera","not looking at the camera"],"reason":"用户明确说明视线离开镜头"}
     ],
     "aspect": [
       {"value":"方形","zh":["方形构图","方图"],"en":["square composition"],"reason":"用户明确要求方形画幅"},

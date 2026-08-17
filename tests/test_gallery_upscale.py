@@ -4,6 +4,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from anima_prompt_studio.domain.execution_models import (
     GenerationRun,
     GenerationRunState,
@@ -16,6 +18,7 @@ from anima_prompt_studio.domain.execution_models import (
 )
 from anima_prompt_studio.services.gallery_upscale import (
     GALLERY_UPSCALE_OPERATION,
+    GalleryUpscaleError,
     GalleryUpscaleExecutionResult,
     GalleryUpscaleManager,
     GalleryUpscaleRenderer,
@@ -265,3 +268,77 @@ def test_gallery_upscale_manager_can_cancel_and_retry_a_waiting_job(tmp_path):
     controller["release_first"].set()
     _wait_for(lambda: manager.get(waiting["id"])["state"] == "completed")
     assert controller["started"] == ["first.png", "second.png"]
+
+
+def test_gallery_upscale_manager_refuses_output_root_change_while_busy(tmp_path):
+    manager, controller, output_root = _queue_manager(tmp_path)
+    source = output_root / "busy.png"
+    source.write_bytes(b"busy")
+    manager.submit(source, "busy.png", {"project": "queue", "model": "test", "prompt": "", "width": 64, "height": 48})
+    assert controller["first_started"].wait(timeout=5)
+
+    assert "未完成" in manager.output_root_change_blocked_reason()
+    with pytest.raises(GalleryUpscaleError, match="未完成"):
+        manager.set_output_root(tmp_path / "other-gallery")
+    assert manager.output_root.resolve() == output_root.resolve()
+
+    controller["release_first"].set()
+    _wait_for(lambda: manager.get(manager.list_jobs()[0]["id"])["state"] == "completed")
+    manager.set_output_root(tmp_path / "other-gallery")
+    assert manager.output_root.resolve() == (tmp_path / "other-gallery").resolve()
+    assert manager.output_root_change_blocked_reason() == ""
+
+
+class _FailingCoordinator:
+    def __init__(self, *, organizer, on_update):
+        self.organizer = organizer
+        self.on_update = on_update
+
+    def execute(self, **kwargs):
+        raise RuntimeError("cloud failed")
+
+
+def test_gallery_upscale_manager_clear_completed_includes_failed_jobs(tmp_path):
+    output_root = tmp_path / "images"
+    output_root.mkdir()
+    manager = GalleryUpscaleManager(
+        tmp_path / "queue.db",
+        output_root,
+        coordinator_factory=_FailingCoordinator,
+    )
+    manager.configure(
+        RemoteProfile(
+            display_name="test",
+            ssh_host="localhost",
+            ssh_user="tester",
+            auth_type=RemoteAuthType.AGENT,
+            known_host_fingerprint="SHA256:test",
+        ),
+        _tile_profile(),
+        RemoteCredentials(),
+    )
+    source = output_root / "failed.png"
+    source.write_bytes(b"failed")
+    submitted = manager.submit(
+        source,
+        "failed.png",
+        {"project": "queue", "model": "test", "prompt": "", "width": 64, "height": 48},
+    )
+    _wait_for(lambda: manager.get(submitted["id"])["state"] == "failed")
+
+    assert manager.clear_completed() == 1
+    assert manager.list_jobs() == []
+
+
+def test_gallery_upscale_manager_marks_interrupted_jobs_failed_on_reload(tmp_path):
+    manager, controller, output_root = _queue_manager(tmp_path)
+    source = output_root / "live.png"
+    source.write_bytes(b"live")
+    submitted = manager.submit(source, "live.png", {"project": "queue", "model": "test", "prompt": "", "width": 64, "height": 48})
+    assert controller["first_started"].wait(timeout=5)
+
+    reloaded = GalleryUpscaleManager(tmp_path / "queue.db", output_root)
+    reloaded_job = reloaded.get(submitted["id"])
+    assert reloaded_job["state"] == "failed"
+    assert "退出" in reloaded_job["message"]
+    controller["release_first"].set()

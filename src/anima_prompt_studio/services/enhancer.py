@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from anima_prompt_studio.domain.models import EnhancementItem, SemanticFrame
+from .negation import phrase_has_unnegated_zh
 
 
 SCENE_RULES = [
@@ -27,10 +28,13 @@ class PromptEnhancer:
         if any(value in chinese for value in rule.get("forbidden_context", [])):
             return False
         groups = rule.get("triggers_all", [])
-        if groups and not all(any(trigger in chinese for trigger in group) for group in groups):
+        if groups and not all(
+            any(phrase_has_unnegated_zh(chinese, trigger) for trigger in group)
+            for group in groups
+        ):
             return False
         triggers = rule.get("triggers", [])
-        return bool(groups) or any(trigger in chinese for trigger in triggers)
+        return bool(groups) or any(phrase_has_unnegated_zh(chinese, trigger) for trigger in triggers)
 
     def normalize_translation(self, chinese: str, english: str) -> str:
         text = english
@@ -69,7 +73,10 @@ class PromptEnhancer:
         explicit_emotion = bool(semantic_frame and semantic_frame.visual_slots.get("emotion")) or any(
             x in chinese for x in ("悲伤", "生气", "愤怒", "害怕", "开心", "兴奋", "哭", "大笑")
         )
-        if not explicit_emotion and any(x in chinese for x in ("窗边", "抱膝", "低头", "撩头发", "看镜头", "探出窗外")):
+        if not explicit_emotion and any(
+            phrase_has_unnegated_zh(chinese, x)
+            for x in ("窗边", "抱膝", "低头", "撩头发", "看镜头", "探出窗外")
+        ):
             items.append(EnhancementItem(id="weak_emotion", type="情绪", source_rule="weak_emotion", content="She has a calm, soft expression.", tags=["soft expression"]))
         hand_scope = self._hand_scope(chinese)
         if hand_scope:

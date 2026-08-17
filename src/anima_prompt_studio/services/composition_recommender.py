@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -11,6 +10,7 @@ from anima_prompt_studio.domain.models import (
 )
 from .config_service import ConfigService
 from .composition_context import CompositionContextExtractor
+from .negation import phrase_has_unnegated_zh
 
 
 @dataclass
@@ -72,11 +72,7 @@ class CompositionRecommendationService:
 
     @staticmethod
     def _negated_chinese(text: str, phrase: str) -> bool:
-        start = text.find(phrase)
-        if start < 0:
-            return False
-        prefix = text[max(0, start - 5):start]
-        return re.search(r"(?:不|不要|不是|没有|并非|别)[^，。；！？]{0,4}$", prefix) is not None
+        return bool(phrase) and phrase in text and not phrase_has_unnegated_zh(text, phrase)
 
     def _rule_matches(self, rule: dict, chinese: str, english: str, people_count: int, job: PromptJob) -> bool:
         if people_count < rule.get("people_min", 1):
@@ -92,11 +88,15 @@ class CompositionRecommendationService:
         zh, en = rule.get("zh_any", []), rule.get("en_any", [])
         zh_all = rule.get("zh_all", [])
         en_all = rule.get("en_all", [])
-        zh_all_match = bool(zh_all) and all(self._contains_any(chinese, group) for group in zh_all)
+        zh_all_match = bool(zh_all) and all(
+            any(phrase_has_unnegated_zh(chinese, phrase) for phrase in group)
+            for group in zh_all
+        )
         en_all_match = bool(en_all) and all(self._contains_any(english, group) for group in en_all)
         if not zh and not en and not zh_all and not en_all:
             return True
-        return self._contains_any(chinese, zh) or self._contains_any(english, en) or zh_all_match or en_all_match
+        zh_match = any(phrase_has_unnegated_zh(chinese, phrase) for phrase in zh)
+        return zh_match or self._contains_any(english, en) or zh_all_match or en_all_match
 
     @staticmethod
     def _add_candidate(
@@ -149,6 +149,12 @@ class CompositionRecommendationService:
         if gaze:
             self._add_candidate(candidates, "gaze", gaze, 500, "语义事实明确指定视线目标", "semantic_gaze")
             matched_rules.append("semantic_gaze")
+        excluded_tags = {item.canonical_tag for item in job.semantic_frame.excluded_concepts}
+        if "looking at viewer" in excluded_tags and job.semantic_frame.gaze_intent != "viewer":
+            candidates["gaze"].pop("看镜头", None)
+            if job.semantic_frame.gaze_intent in {"away", "none"} and "看向画外" not in candidates["gaze"]:
+                self._add_candidate(candidates, "gaze", "看向画外", 500, "否定看镜头时视线离开镜头", "semantic_gaze")
+                matched_rules.append("semantic_gaze")
         angle_map = {"front":"正面", "side":"侧面", "back":"背面", "three_quarter":"三分之四"}
         angle = angle_map.get(job.semantic_frame.angle_intent)
         if angle:

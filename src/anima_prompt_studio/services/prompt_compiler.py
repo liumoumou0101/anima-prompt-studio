@@ -6,6 +6,7 @@ from anima_prompt_studio.domain.models import (
     CharacterSlot, GenerationFieldState, MatchedTag, PromptJob, SubjectMode,
 )
 from .config_service import ConfigService
+from .negation import phrase_has_unnegated_zh
 from .quality_guard import QualityTagGuard
 
 
@@ -81,42 +82,82 @@ class PromptCompiler:
         job.generation_preset_id = preset_id
         self.apply_model_defaults(job, reset_user_selected_fields=PRESET_MANAGED_FIELDS)
 
-    def _people_tag(self, job: PromptJob) -> str:
-        n = job.composition.people_count
-        genders = [slot.gender_tag for slot in job.character_slots[:n] if slot.gender_tag]
-        source = job.authoritative_text() or job.translated_en
-        female_source = bool(
-            re.search(r"女孩|女人|女性|少女|女仆|公主", source)
-            or (job.uses_english_authority() and re.search(
+    @staticmethod
+    def _is_count_tag(tag: str) -> bool:
+        return re.fullmatch(r"\d+(?:girls?|boys?|others?|people)|solo", tag.replace("_", " ").strip()) is not None
+
+    @staticmethod
+    def _gender_signals(job: PromptJob, source: str) -> tuple[bool, bool]:
+        if job.uses_english_authority():
+            female = bool(re.search(
                 r"\b(?:\d+girls?|girls?|woman|women|female|maids?|princess(?:es)?)\b", source, re.I,
             ))
-        )
-        male_source = bool(
-            re.search(r"男孩|男人|男性|少年|王子", source)
-            or (job.uses_english_authority() and re.search(
+            male = bool(re.search(
                 r"\b(?:\d+boys?|boys?|man|men|male|princes?)\b", source, re.I,
             ))
-        )
+            return female, male
+        female = any(phrase_has_unnegated_zh(source, token) for token in (
+            "女孩", "女人", "女性", "少女", "女仆", "公主",
+        ))
+        male = any(phrase_has_unnegated_zh(source, token) for token in (
+            "男孩", "男人", "男性", "少年", "王子",
+        ))
+        return female, male
+
+    def _people_tags(self, job: PromptJob) -> list[str]:
+        n = job.composition.people_count
+        mix = job.semantic_frame.final_attributes.get("people_mix", "")
+        genders = [slot.gender_tag for slot in job.character_slots[:n] if slot.gender_tag]
+        source = job.authoritative_text() or job.translated_en
+        female_source, male_source = self._gender_signals(job, source)
+        if not mix:
+            if female_source and male_source:
+                mix = "hetero"
+            elif female_source:
+                mix = "female"
+            elif male_source:
+                mix = "male"
         if n == 1:
             if genders:
-                return genders[0]
-            if male_source and not female_source:
-                return "1boy"
+                return [genders[0]]
+            if mix == "male" or (male_source and not female_source):
+                return ["1boy"]
+            if mix == "female" or (female_source and not male_source):
+                return ["1girl"]
+            return ["1other"]
+        if n == 2:
+            if len(genders) >= 2:
+                if all(x == "1girl" for x in genders[:2]):
+                    return ["2girls"]
+                if all(x == "1boy" for x in genders[:2]):
+                    return ["2boys"]
+                if set(genders[:2]) == {"1girl", "1boy"}:
+                    return ["1girl", "1boy"]
+            if mix == "hetero":
+                return ["1girl", "1boy"]
+            if mix == "female":
+                return ["2girls"]
+            if mix == "male":
+                return ["2boys"]
             if female_source and not male_source:
-                return "1girl"
-            return "1other"
+                return ["2girls"]
+            if male_source and not female_source:
+                return ["2boys"]
+            return ["2people"]
         if len(genders) >= n and all(x == "1girl" for x in genders[:n]):
-            return f"{n}girls"
+            return [f"{n}girls"]
         if len(genders) >= n and all(x == "1boy" for x in genders[:n]):
-            return f"{n}boys"
+            return [f"{n}boys"]
         if genders and len(genders) >= n and all(x == "1other" for x in genders[:n]):
-            return f"{n}others"
-        if not genders:
-            if female_source and not male_source:
-                return f"{n}girls"
-            if male_source and not female_source:
-                return f"{n}boys"
-        return f"{n}people"
+            return [f"{n}others"]
+        if mix == "female" or (female_source and not male_source):
+            return [f"{n}girls"]
+        if mix == "male" or (male_source and not female_source):
+            return [f"{n}boys"]
+        return [f"{n}people"]
+
+    def _people_tag(self, job: PromptJob) -> str:
+        return self._people_tags(job)[0]
 
     @staticmethod
     def _attribute_category(tag: str) -> str | None:
@@ -293,8 +334,7 @@ class PromptCompiler:
                        })]
         quality_tags = self.effective_quality_tags(job)
         scene_mode = job.effective_subject_mode() == SubjectMode.SCENE
-        people = self._people_tag(job)
-        tags = [] if scene_mode else [people]
+        tags = [] if scene_mode else list(self._people_tags(job))
         source_text = job.authoritative_text()
         if job.uses_english_authority():
             positive_crowd = re.search(r"\b(?:crowd|group of people|background people)\b", source_text, re.I)
@@ -304,7 +344,7 @@ class PromptCompiler:
             negative_crowd = re.search(r"背景.{0,6}(?:没有|没|无|不要).{0,4}(?:其他人|人物|人群)", source_text)
         if not scene_mode and job.composition.people_count == 1 and (not positive_crowd or negative_crowd):
             tags.append("solo")
-        tags += [x.tag for x in matched if x.category != "count"]
+        tags += [x.tag for x in matched if x.category != "count" and not self._is_count_tag(x.tag)]
         tags += [tag for item in job.enhancements if item.enabled for tag in item.tags]
         explicit_natural = self._explicit_natural_categories(job)
         composition_category = {"shot":"shot", "camera_height":"camera", "angle":"angle", "gaze":"gaze", "subject_position":"position"}

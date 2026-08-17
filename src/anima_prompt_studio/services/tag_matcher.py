@@ -6,6 +6,7 @@ from pathlib import Path
 
 from anima_prompt_studio.domain.models import CompositionContext, ItemState, MatchedTag
 from anima_prompt_studio.repositories import TagDatabase
+from .negation import phrase_all_negated_zh, phrase_negated_en
 from .resource_manager import ResourceManager
 
 
@@ -67,25 +68,11 @@ class TagMatcher:
 
     @staticmethod
     def _negated_english(text: str, phrase: str) -> bool:
-        words = re.findall(r"[a-z0-9]+", phrase.lower())
-        if not words:
-            return False
-        target = words[-1]
-        for match in re.finditer(rf"\b{re.escape(target)}\b", text.lower()):
-            prefix = text.lower()[max(0, match.start() - 45):match.start()]
-            if re.search(r"(?:\bwithout\b|\bno\b|\bnot\b|n't\b|\bnever\b|\binstead of\b)[^.!?,;]{0,35}$", prefix):
-                return True
-        return False
+        return phrase_negated_en(text, phrase)
 
     @staticmethod
     def _negated_chinese(text: str, phrase: str) -> bool:
-        start = text.find(phrase)
-        while start >= 0:
-            prefix = text[max(0, start - 7):start]
-            if re.search(r"(?:不|没有|没|未|无|并非|不是)[^，。；！？]{0,5}$", prefix):
-                return True
-            start = text.find(phrase, start + 1)
-        return False
+        return phrase_all_negated_zh(text, phrase)
 
     @classmethod
     def _context_allowed(
@@ -101,6 +88,18 @@ class TagMatcher:
         """Shared false-positive guards for builtin and external tags."""
         lower = english.lower()
         name = (name or tag).replace("_", " ")
+        if tag == "holding hands":
+            chinese_hold = any(x in chinese for x in ("牵手", "握手", "拉着手", "手拉手"))
+            english_hold = bool(re.search(r"\bholding hands\b", lower))
+            if not chinese_hold and not english_hold:
+                return False
+        if tag == "leaf":
+            chinese_leaf = any(x in chinese for x in ("叶子", "树叶", "落叶", "枫叶"))
+            english_leaf = bool(re.search(r"\blea(?:f|ves)\b", lower)) and not re.search(
+                r"\bleaves?\s+(?:her|his|their|the|a|an)\b", lower,
+            )
+            if not chinese_leaf and not english_leaf:
+                return False
         if tag == "camera":
             chinese_gaze = any(x in chinese for x in ("看镜头", "看向镜头", "俯视镜头", "低头看镜头"))
             english_gaze = bool(re.search(r"\b(?:looks?|looking)\s+(?:at|toward|towards)\s+(?:the )?camera\b", lower))
@@ -215,6 +214,10 @@ class TagMatcher:
             "hand", "hands", "neck", "torso", "floor", "planted", "figure", "cross", "holding",
             "torso only", "cramped", "opening", "leaving", "space", "resting",
             "brace",
+            # Marian debris: "leaves her right foot" → leaf, "falling", "stuck",
+            # "upside-down" from ahegao, loose "holding … hands" from 倒茶.
+            "leaf", "stuck", "falling", "upside-down", "upside down",
+
             "one", "two", "three", "four", "five", "first", "second", "third",
             "girl", "boy", "man", "woman", "person", "people", "character",
             "she", "he", "her", "his", "him", "they", "them", "their", "it", "its",

@@ -14,9 +14,17 @@
     },
     {
       "id": "happy",
-      "aliases": ["开心", "高兴", "愉快", "喜悦", "兴奋"],
+      "aliases": ["开心", "高兴", "愉快", "喜悦"],
       "canonical_en": "a happy expression",
       "tag": "happy"
+    },
+    {
+      "id": "excited",
+      "aliases": ["兴奋"],
+      "canonical_en": "an excited expression",
+      "tag": "",
+      "adult_canonical_en": "an aroused expression",
+      "adult_tag": "aroused"
     },
     {
       "id": "angry",
@@ -56,7 +64,7 @@
     }
   ],
   "gaze": {
-    "verbs": ["看向", "看着", "望向", "望着", "凝视", "注视", "眺望"],
+    "verbs": ["看向", "看着", "望向", "望着", "凝视", "注视", "眺望", "看"],
     "targets": [
       {
         "aliases": ["窗户外面", "窗户外", "窗外"],
@@ -83,5 +91,12 @@
         "intent": "away"
       }
     ]
-  }
+  },
+  "adult_context_cues": [
+    "裸", "全裸", "半裸", "赤裸", "一丝不挂",
+    "做爱", "性交", "性爱", "高潮", "阿嘿颜", "啊嘿颜",
+    "口交", "后入", "女上位", "男上位", "骑乘", "反骑乘",
+    "胸部", "乳头", "乳沟", "内裤", "内衣", "比基尼",
+    "丁字", "开档", "湿透", "捆绑", "绳缚", "蒙眼"
+  ]
 }

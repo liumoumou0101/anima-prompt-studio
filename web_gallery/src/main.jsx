@@ -127,8 +127,9 @@ function App() {
   const processStatesRef = useRef(new Map());
   const processPollReadyRef = useRef(false);
 
-  const load = async (nextView = view) => {
-    setLoading(true);
+  const load = async (nextView = view, options = {}) => {
+    const silent = Boolean(options.silent);
+    if (!silent) setLoading(true);
     setError("");
     try {
       const endpoint = nextView === "trash" ? "/api/gallery/trash" : "/api/gallery";
@@ -140,7 +141,7 @@ function App() {
     } catch (reason) {
       setError("无法读取画廊数据：" + (reason.message || reason));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -180,7 +181,7 @@ function App() {
             setNotice("1.5× 高清修复完成，结果已加入画廊");
             setPendingResultPath(completed.resultPath || "");
             if (view !== "all") setView("all");
-            else await load("all");
+            else await load("all", { silent: true });
           }
           if (failed) setError("高清修复失败：" + (failed.error || failed.message));
         }
@@ -354,10 +355,15 @@ function App() {
     setBusy(true);
     try {
       const result = await postJson("/api/gallery/trash", { paths });
+      const moved = result.moved || [];
+      const failed = result.failed || [];
       setSelected(new Set());
       setActive(null);
-      setNotice(`已将 ${result.moved.length} 张图片移入画廊回收站`);
-      await load(view);
+      if (moved.length) setNotice(`已将 ${moved.length} 张图片移入画廊回收站`);
+      if (failed.length) {
+        setError(failed.map((item) => `${item.path || "图片"}：${item.error}`).join("；"));
+      }
+      await load(view, { silent: true });
     } catch (reason) {
       setError("批量管理失败：" + (reason.message || reason));
     } finally {
@@ -809,7 +815,7 @@ function ProcessStatus({ job, queuedCount, onOpen }) {
 }
 
 function TaskCenter({ jobs, assets, processing, onClose, onAction, onOpenResult }) {
-  const terminalCount = jobs.filter((job) => ["completed", "canceled"].includes(job.state)).length;
+  const terminalCount = jobs.filter((job) => ["completed", "canceled", "failed"].includes(job.state)).length;
   const stateLabel = (job) => {
     if (job.state === "queued") return `等待中 · 第 ${job.queuePosition} 位`;
     if (job.state === "completed") return "已完成";
@@ -848,7 +854,7 @@ function TaskCenter({ jobs, assets, processing, onClose, onAction, onOpenResult 
           );
         })}
       </div>
-      {terminalCount > 0 && <footer><button onClick={() => onAction(null, "clear_completed")}>清理已完成记录</button></footer>}
+      {terminalCount > 0 && <footer><button onClick={() => onAction(null, "clear_completed")}>清理已结束记录</button></footer>}
     </aside>
   );
 }

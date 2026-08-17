@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from anima_prompt_studio.domain.models import MatchedTag, ResolvedConcept
+from .negation import phrase_has_unnegated_zh
 
 
 class ConceptResolver:
@@ -19,7 +20,13 @@ class ConceptResolver:
         for rule in self.rules:
             if any(x in chinese for x in rule.get("exclude_triggers", [])):
                 continue
-            trigger = next((x for x in sorted(rule["triggers"], key=len, reverse=True) if x in chinese), None)
+            trigger = next(
+                (
+                    x for x in sorted(rule["triggers"], key=len, reverse=True)
+                    if phrase_has_unnegated_zh(chinese, x)
+                ),
+                None,
+            )
             if trigger:
                 candidates.append((rule.get("priority", 0), len(trigger), chinese.rfind(trigger), trigger, rule))
         for _, _, _, trigger, rule in sorted(candidates, key=lambda item: item[:4], reverse=True):

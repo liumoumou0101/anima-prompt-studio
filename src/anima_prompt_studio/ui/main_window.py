@@ -29,7 +29,7 @@ from anima_prompt_studio.repositories import SQLiteRepository
 from anima_prompt_studio.services.config_service import ConfigService
 from anima_prompt_studio.services.export_service import ExportService
 from anima_prompt_studio.services.gallery_server import GalleryServer
-from anima_prompt_studio.services.gallery_upscale import GalleryUpscaleRenderer
+from anima_prompt_studio.services.gallery_upscale import GalleryUpscaleError, GalleryUpscaleRenderer
 from anima_prompt_studio.services.pipeline import PromptPipeline
 from anima_prompt_studio.services.translation_service import LazyLocalMarianEngine, TranslationService, marian_runtime_available
 from anima_prompt_studio.services.resource_manager import ResourceManager
@@ -1375,6 +1375,7 @@ class MainWindow(QMainWindow):
         ))
         self.remote_remember_password.setChecked(remember and self.credential_store.available)
         self.repository.set_setting("last_remote_profile_id", profile.id)
+        self._sync_gallery_upscale_config()
 
     def _load_current_remote_model_alias(self) -> None:
         if self._remote_form_loading or not self._direct_remote_id:
@@ -1585,15 +1586,33 @@ class MainWindow(QMainWindow):
             self._show_error("导入工作流失败", exc)
 
     def configure_output_root(self) -> None:
+        blocked = self._output_root_change_blocked_reason()
+        if blocked:
+            QMessageBox.warning(self, "无法切换图片目录", blocked)
+            return
         current = self.repository.get_setting("generation_output_root", str(Path.home() / "Pictures" / "AnimaPromptStudio"))
         path = QFileDialog.getExistingDirectory(self, "选择生成图片根目录", current)
-        if path:
-            self.repository.set_setting("generation_output_root", path)
-            self.image_gallery.refresh()
-            if self._gallery_server is not None:
+        if not path:
+            return
+        blocked = self._output_root_change_blocked_reason()
+        if blocked:
+            QMessageBox.warning(self, "无法切换图片目录", blocked)
+            return
+        if self._gallery_server is not None:
+            try:
                 self._gallery_server.set_output_root(Path(path))
-            self.remote_open_button.setEnabled(self.image_gallery.has_images)
-            self.statusBar().showMessage(f"生成图片将保存到：{path}", 6000)
+            except GalleryUpscaleError as exc:
+                QMessageBox.warning(self, "无法切换图片目录", str(exc))
+                return
+        self.repository.set_setting("generation_output_root", path)
+        self.image_gallery.refresh()
+        self.remote_open_button.setEnabled(self.image_gallery.has_images)
+        self.statusBar().showMessage(f"生成图片将保存到：{path}", 6000)
+
+    def _output_root_change_blocked_reason(self) -> str:
+        if self._gallery_server is None:
+            return ""
+        return self._gallery_server.output_root_change_blocked_reason()
 
     def _generation_output_root(self) -> Path:
         return Path(self.repository.get_setting(
@@ -1614,6 +1633,14 @@ class MainWindow(QMainWindow):
                 self.repository,
                 self._generation_output_root(),
             )
+        self._sync_gallery_upscale_config()
+        url = self._gallery_server.start()
+        QDesktopServices.openUrl(QUrl(url))
+        self.statusBar().showMessage("已在系统浏览器中打开本地图片画廊。", 5000)
+
+    def _sync_gallery_upscale_config(self) -> None:
+        if self._gallery_server is None:
+            return
         remote_profile = None
         workflow_profile = None
         credentials = RemoteCredentials()
@@ -1648,9 +1675,6 @@ class MainWindow(QMainWindow):
             workflow_profile,
             credentials,
         )
-        url = self._gallery_server.start()
-        QDesktopServices.openUrl(QUrl(url))
-        self.statusBar().showMessage("已在系统浏览器中打开本地图片画廊。", 5000)
 
     def open_gallery_root(self) -> None:
         root = self._generation_output_root()
@@ -1786,6 +1810,7 @@ class MainWindow(QMainWindow):
             return
         profile.known_host_fingerprint = fingerprint
         self.repository.save_remote_profile(profile)
+        self._sync_gallery_upscale_config()
         self.remote_status.setText("主机指纹已保存，请再次连接测试")
         QTimer.singleShot(100, self.test_remote_connection)
 
@@ -1831,6 +1856,7 @@ class MainWindow(QMainWindow):
             ),
             8000,
         )
+        self._sync_gallery_upscale_config()
 
     def generate_remote(self) -> None:
         try:

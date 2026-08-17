@@ -457,13 +457,27 @@ class GalleryUpscaleManager:
         )
         self._worker.start()
 
+    def pending_count(self) -> int:
+        with self._lock:
+            return sum(1 for job in self._jobs.values() if not job.terminal)
+
+    def output_root_change_blocked_reason(self) -> str:
+        pending = self.pending_count()
+        if not pending:
+            return ""
+        return (
+            f"还有 {pending} 项高清修复任务未完成。"
+            "请先在任务中心等待完成，或取消仍在排队的任务后再切换画廊目录。"
+        )
+
     def set_output_root(self, output_root: Path) -> None:
         with self._condition:
             resolved = output_root.expanduser()
             if resolved.resolve() == self.output_root.resolve():
                 return
-            if any(not job.terminal for job in self._jobs.values()):
-                raise GalleryUpscaleError("任务队列尚未清空，暂时不能切换画廊目录。")
+            reason = self.output_root_change_blocked_reason()
+            if reason:
+                raise GalleryUpscaleError(reason)
             self.output_root = resolved
             self._jobs.clear()
             self._load_jobs_locked()
@@ -609,17 +623,20 @@ class GalleryUpscaleManager:
 
     def clear_completed(self) -> int:
         with self._condition:
-            completed = [job for job in self._jobs.values() if job.state in {"completed", "canceled"}]
-            if not completed:
+            finished = [
+                job for job in self._jobs.values()
+                if job.state in {"completed", "canceled", "failed"}
+            ]
+            if not finished:
                 return 0
             repository = SQLiteRepository(self.repository_path)
             try:
-                for job in completed:
+                for job in finished:
                     repository.delete_gallery_process_job(self.output_root, job.id)
                     self._jobs.pop(job.id, None)
             finally:
                 repository.close()
-            return len(completed)
+            return len(finished)
 
     def locked_paths(self) -> set[str]:
         with self._lock:

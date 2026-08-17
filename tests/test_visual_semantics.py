@@ -119,6 +119,32 @@ def test_scene_specific_wall_interaction_is_not_hardcoded(normalizer):
     assert not {"through wall", "hole", "stuck", "punching"} & set(frame.visual_tags)
 
 
+@pytest.mark.parametrize(("source", "extra_slot", "extra_value"), [
+    ("右腿抬起并搭在左膝上，神色忧郁", "emotion", "melancholic expression"),
+    ("右腿抬起并搭在左膝上，看着窗外", "gaze", "looking out the window"),
+    ("右腿抬起并搭在左膝上的白发女孩", "hair", "white hair"),
+])
+def test_limb_relation_survives_emotion_gaze_and_hair_in_same_clause(normalizer, source, extra_slot, extra_value):
+    frame = normalizer.enrich(SemanticFrame(), source)
+    assert "right ankle resting across" in frame.visual_slots["limb_relation"]
+    assert frame.visual_slots[extra_slot] == extra_value
+    assert "crossed legs" in frame.visual_tags
+
+
+def test_pipeline_keeps_limb_and_emotion_when_written_in_one_sentence():
+    source = "一个白发女孩坐着，右腿抬起并搭在左膝上，看着窗外，神色忧郁"
+    pipe = PromptPipeline(translation=TranslationService(PlaceholderAwareBadEngine()))
+    job = PromptJob(original_zh=source)
+    pipe.translate(job)
+    translated = job.translated_en.lower()
+    assert "right ankle resting across" in translated
+    assert "melancholic expression" in translated
+    assert "looking out the window" in translated
+    assert "white hair" in translated
+    tags = set(job.positive_prompt.partition("\n\n")[0].split(", "))
+    assert {"crossed legs", "sad", "looking away", "white hair"} <= tags
+
+
 def test_cross_limb_relation_preserves_sides_contacts_and_full_body(normalizer):
     source = "右腿抬起并搭在左膝上，左脚踩地，右脚脚尖向下，一只手扶着抬起的膝盖，身体微微后仰，全身侧前方视角"
     frame = normalizer.enrich(SemanticFrame(), source)
@@ -126,7 +152,9 @@ def test_cross_limb_relation_preserves_sides_contacts_and_full_body(normalizer):
     assert "right ankle resting across their left knee" in relation
     assert "left foot stays planted on the floor" in relation
     assert "right toes point downward" in relation
-    assert "full figure from head to toe" in relation
+    assert "complete head and face" not in relation
+    assert "full figure from head to toe" not in relation
+    assert "clear space above the head" not in relation
     assert "front three-quarter view" in relation
     assert {"crossed legs", "arched back", "full body", "three-quarter view"} <= set(frame.visual_tags)
     assert "leg up" not in frame.visual_tags
@@ -165,3 +193,29 @@ def test_base_does_not_receive_turbo_relation_warning():
     )
     pipe.translate(job)
     assert "复杂肢体关系" not in {item.concept for item in job.semantic_warnings}
+
+
+def test_excitement_is_not_happy_and_becomes_aroused_in_adult_context(normalizer):
+    playful = normalizer.enrich(SemanticFrame(), "一个女孩很兴奋")
+    assert playful.visual_slots["emotion"] == "excited expression"
+    assert "happy" not in playful.visual_tags
+
+    adult = normalizer.enrich(SemanticFrame(), "一个裸体女孩很兴奋，看着镜头")
+    assert adult.visual_slots["emotion"] == "aroused expression"
+    assert adult.visual_slots["gaze"] == "looking at the viewer"
+    assert "aroused" in adult.visual_tags
+    assert "happy" not in adult.visual_tags
+
+
+def test_pipeline_keeps_adult_excitement_from_becoming_happy():
+    pipe = PromptPipeline(translation=TranslationService(PlaceholderAwareBadEngine()))
+    job = PromptJob(original_zh="一个裸体女孩很兴奋，看着镜头")
+    pipe.translate(job)
+    translated = job.translated_en.lower()
+    tags = set(job.positive_prompt.partition("\n\n")[0].split(", "))
+    assert "aroused expression" in translated
+    assert "happy" not in translated
+    assert "nude" in tags
+    assert "aroused" in tags
+    assert "looking at viewer" in tags
+    assert "happy" not in tags
