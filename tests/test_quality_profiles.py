@@ -131,6 +131,7 @@ def test_action_dynamic_does_not_animate_an_explicitly_still_pose():
     ("一个女孩站在窗边", "safe"),
     ("一个女孩穿着蕾丝内衣", "sensitive"),
     ("一个裸体女孩", "explicit"),
+    ("一个女孩穿着完整的校服站着，没有裸体", "safe"),
 ])
 def test_safety_level_is_derived_from_content_not_quality_pack(source: str, expected: str):
     tags = _compiled_tags("dramatic_light", source)

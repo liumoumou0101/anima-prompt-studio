@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Protocol
 
+from .negation import phrase_all_negated_zh, phrase_has_unnegated_zh
+
 
 class TranslationEngine(Protocol):
     name: str
@@ -361,6 +363,16 @@ class TranslationService:
                 translated = translated.rstrip(". ") + " Ahegao expression, tongue out, rolling eyes."
         if "眼睛上翻" in source:
             translated = re.sub(r"\ban eye out\b|\beye out\b", "rolling eyes", translated, flags=re.I)
+            if not any(token in source for token in ("倒立", "倒置", "上下颠倒")):
+                translated = re.sub(
+                    r"\b(?:her |his |their )?eyes? (?:are |is )?(?:upside[- ]down|inverted)\b",
+                    "rolling eyes",
+                    translated,
+                    flags=re.I,
+                )
+                translated = re.sub(r"\bupside[- ]down\b", "rolling eyes", translated, flags=re.I)
+            if not re.search(r"\brolling eyes\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " Rolling eyes."
         # Couple phrasing for 一对男女 style inputs.
         if any(token in source for token in ("一对男女", "一男一女", "一女一男")):
             if not re.search(r"\b(?:man and a woman|woman and a man|couple|1boy|a boy)\b", translated, flags=re.I):
@@ -376,6 +388,77 @@ class TranslationService:
                 translated,
                 flags=re.I,
             )
+            # Marian often dumps a bare "all over" for 全身 after the sentence.
+            translated = re.sub(r",?\s*\ball over\b", "", translated, flags=re.I)
+            translated = re.sub(r"\s{2,}", " ", translated).strip(" ,.")
+            if not re.search(r"\bfull body\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " Full body."
+        if any(token in source for token in ("垂下", "垂在身侧", "自然垂")) and not any(
+            token in source for token in ("摔倒", "倒下", "坠落", "跌倒", "掉下去")
+        ):
+            translated = re.sub(
+                r"\b((?:her|his|their)\s+(?:left|right)\s+(?:hand|arm))\s+"
+                r"(?:fell|falls|fallen|falling)\s+(?:down|on her side|at her side|by her side)\b",
+                r"\1 hangs naturally at her side",
+                translated,
+                flags=re.I,
+            )
+            translated = re.sub(
+                r"\b(?:fell|falls|fallen|falling)\s+(?:down|on her side|at her side)\b",
+                "hangs at her side",
+                translated,
+                flags=re.I,
+            )
+        if phrase_all_negated_zh(source, "抱膝") or phrase_all_negated_zh(source, "抱着膝盖"):
+            # Image models treat "not hugging her knees" as the forbidden pose.
+            # Delete the concept; keep the positive alternative when the source
+            # already says the hands stay at her sides.
+            translated = re.sub(
+                r",?\s*\b(?:not |without )?(?:hugging|hugs|hug) (?:her |his |their )?(?:own )?(?:knees|legs)\b",
+                "",
+                translated,
+                flags=re.I,
+            )
+            translated = re.sub(
+                r",?\s*\bno knees\b|,?\s*\bwithout knees\b|,?\s*\b(?:does not|doesn't|don't) have knees\b",
+                "",
+                translated,
+                flags=re.I,
+            )
+            translated = re.sub(r"\s{2,}", " ", translated)
+            translated = re.sub(r",\s*,+", ",", translated).strip(" ,.")
+            if any(token in source for token in ("双手放在身侧", "双手在身侧", "手在身侧", "垂在身侧")):
+                if not re.search(r"\bhands? (?:at|on|by) (?:her |his |their )?sid", translated, flags=re.I):
+                    translated = translated.rstrip(". ") + " Hands at her sides."
+        if (
+            phrase_all_negated_zh(source, "裸体")
+            or any(token in source for token in ("穿着完整", "完整的校服", "完整校服"))
+        ) and not phrase_has_unnegated_zh(source, "裸体"):
+            translated = re.sub(
+                r",?\s*\b(?:not |without )?(?:completely )?nude\b",
+                "",
+                translated,
+                flags=re.I,
+            )
+            translated = re.sub(r",?\s*\b(?:not |without )?naked\b", "", translated, flags=re.I)
+            translated = re.sub(r"\s{2,}", " ", translated)
+            translated = re.sub(r",\s*,+", ",", translated).strip(" ,.")
+            if not re.search(r"\b(?:fully clothed|fully dressed)\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " Fully clothed."
+        if any(token in source for token in ("马克杯", "杯子", "茶杯", "咖啡杯")):
+            translated = re.sub(r"\bmarquees?\b", "mug", translated, flags=re.I)
+            singular_cup = not re.search(
+                r"[两二三四五六七八九十\d][只个].{0,6}(?:杯子|马克杯|茶杯|咖啡杯)", source
+            )
+            if singular_cup:
+                translated = re.sub(r"\bwhite cups\b", "a mug", translated, flags=re.I)
+                translated = re.sub(r"\bcups\b", "mug", translated, count=1, flags=re.I)
+            if "马克杯" in source and not re.search(r"\bmug\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " Holding a mug."
+        if re.search(r"看书|一本书|拿着书|手里的书", source) and not re.search(
+            r"[两二三四五六七八九十\d][本册]书", source
+        ):
+            translated = re.sub(r"\btwo books\b|\bbooks\b", "a book", translated, flags=re.I)
         if any(token in source for token in (
             "闭合的雨伞", "闭合的伞", "收起的雨伞", "收起的伞", "合上的雨伞", "合上的伞",
         )):
@@ -391,7 +474,27 @@ class TranslationService:
             translated = re.sub(r"\ba man in top\b|\bman on top\b", "missionary position", translated, flags=re.I)
             if not re.search(r"\bmissionary\b", translated, flags=re.I):
                 translated = translated.rstrip(". ") + " Missionary position."
-        if any(token in source for token in ("女上位", "骑乘位")) and not re.search(r"\bcowgirl\b", translated, flags=re.I):
+        reverse_cowgirl = any(token in source for token in ("反骑乘", "反向女上位", "背向女上位"))
+        if reverse_cowgirl:
+            translated = re.sub(
+                r"\brides? back(?: and backs?)?(?: to the boy)?\b",
+                "sits with her back to the boy",
+                translated,
+                flags=re.I,
+            )
+            translated = re.sub(
+                r"\b(?:backs to the boy|facing away from the boy)\b",
+                "with her back to the boy",
+                translated,
+                flags=re.I,
+            )
+            if "背对" in source and not re.search(r"\bback to the boy\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + " With her back to the boy."
+        if (
+            any(token in source for token in ("女上位", "骑乘位"))
+            and not reverse_cowgirl
+            and not re.search(r"\bcowgirl\b", translated, flags=re.I)
+        ):
             translated = translated.rstrip(". ") + " Cowgirl position."
         if any(token in source for token in ("后入", "后入式")) and not re.search(r"\bdoggy\b", translated, flags=re.I):
             translated = translated.rstrip(". ") + " Doggy style."

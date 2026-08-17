@@ -32,9 +32,12 @@ def test_school_uniform_not_nude_does_not_emit_nude():
     tags = _tags(job)
     assert "nude" not in tags
     assert "completely nude" not in tags
+    assert "explicit" not in tags
+    assert "safe" in tags
     assert "nude" in {item.canonical_tag for item in job.semantic_frame.excluded_concepts}
     assert "nude" not in {concept.id.lower() for concept in job.resolved_concepts}
     assert "STATE_NUDE" not in {concept.id for concept in job.resolved_concepts}
+    assert "fully clothed" in (job.translated_en or "").lower()
 
 
 def test_look_away_and_not_at_camera_do_not_default_to_viewer():
@@ -64,6 +67,15 @@ def test_enhancer_does_not_inject_hug_knees_when_negated():
     assert "hug_knees" not in {item.id for item in job.enhancements}
     assert "hugging own legs" not in tags
     assert "hugging own legs" in {item.canonical_tag for item in job.semantic_frame.excluded_concepts}
+
+
+def test_negated_hug_knees_does_not_restate_the_forbidden_pose():
+    job = _pipeline("一个女孩坐在窗边，双手放在身侧，没有抱膝，全身")
+    english = (job.translated_en or "").lower()
+    assert "hug" not in english
+    assert "knees" not in english
+    assert "hands" in english and "side" in english
+    assert "hugging own legs" not in _tags(job)
 
 
 def test_pouring_tea_does_not_match_holding_hands():

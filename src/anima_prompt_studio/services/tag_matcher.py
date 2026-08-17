@@ -88,6 +88,21 @@ class TagMatcher:
         """Shared false-positive guards for builtin and external tags."""
         lower = english.lower()
         name = (name or tag).replace("_", " ")
+        if tag == "facing away" and re.search(
+            r"\bfacing away from (?:the )?(?:boy|man|girl|woman|partner|him|her)\b", lower
+        ):
+            return False
+        if tag == "cowgirl position":
+            reverse_zh = any(x in chinese for x in ("反骑乘", "反向女上位", "背向女上位"))
+            reverse_en = bool(re.search(r"\breverse cowgirl\b", lower))
+            independent_zh = bool(re.search(r"(?<!反向)(?<!背向)女上位|(?<!反)骑乘位", chinese))
+            if (reverse_zh or reverse_en) and not independent_zh:
+                return False
+        if tag in {"fallen down", "falling down", "fallen", "falling"}:
+            hanging = any(x in chinese for x in ("垂下", "垂在身侧", "自然垂"))
+            actually_fallen = any(x in chinese for x in ("摔倒", "倒下", "坠落", "跌倒"))
+            if hanging and not actually_fallen:
+                return False
         if tag == "holding hands":
             chinese_hold = any(x in chinese for x in ("牵手", "握手", "拉着手", "手拉手"))
             english_hold = bool(re.search(r"\bholding hands\b", lower))

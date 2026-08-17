@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from anima_prompt_studio.domain.models import PromptJob
+from .negation import phrase_has_unnegated_zh, phrase_negated_en
 
 
 class QualityTagGuard:
@@ -12,15 +13,17 @@ class QualityTagGuard:
     NIGHT_STYLE_TAGS = {"night", "neon lights", "cyberpunk atmosphere", "rim lighting"}
     DYNAMIC_TAGS = {"dynamic angle", "motion lines", "speed lines", "dynamic pose", "action shot"}
 
-    _explicit_re = re.compile(
-        r"(?:裸体|全裸|露点|乳头|阴茎|阴部|性交|性爱|做爱|后入|男上位|女上位|高潮|"
-        r"\bnude\b|\bnaked\b|\bnipples?\b|\bpenis\b|\bvagina\b|\bsex\b|\bexplicit\b|"
-        r"\bmissionary\b|\bcowgirl\b|\bdoggy style\b)",
+    _EXPLICIT_ZH = (
+        "裸体", "全裸", "露点", "乳头", "阴茎", "阴部", "性交", "性爱", "做爱",
+        "后入", "男上位", "女上位", "反骑乘", "高潮", "口交", "阿嘿颜",
+    )
+    _SENSITIVE_ZH = ("内衣", "情趣", "比基尼", "泳装", "乳沟", "胸部", "透视", "薄纱", "蕾丝")
+    _explicit_en = re.compile(
+        r"\b(?:nude|naked|nipples?|penis|vagina|sex|explicit|missionary|cowgirl|doggy style|fellatio|ahegao)\b",
         re.I,
     )
-    _sensitive_re = re.compile(
-        r"(?:内衣|情趣|比基尼|泳装|乳沟|胸部|透视|薄纱|蕾丝|"
-        r"\blingerie\b|\bbikini\b|\bswimsuit\b|\bcleavage\b|\bbreasts?\b|\bsheer\b|\blace\b)",
+    _sensitive_en = re.compile(
+        r"\b(?:lingerie|bikini|swimsuit|cleavage|breasts?|sheer|lace)\b",
         re.I,
     )
     _day_re = re.compile(
@@ -53,11 +56,39 @@ class QualityTagGuard:
         )
         return " ".join(filter(None, (job.authoritative_text(), job.canonical_prose, matched, slots)))
 
+    @staticmethod
+    def _source_zh(job: PromptJob) -> str:
+        return job.normalized_zh or job.original_zh or ""
+
+    @staticmethod
+    def _english_context(job: PromptJob) -> str:
+        matched = " ".join(item.tag for item in job.matched_tags if item.state.value != "excluded")
+        return " ".join(filter(None, (job.translated_en, job.canonical_prose, matched)))
+
+    def _has_explicit(self, job: PromptJob) -> bool:
+        zh = self._source_zh(job)
+        if any(phrase_has_unnegated_zh(zh, token) for token in self._EXPLICIT_ZH):
+            return True
+        english = self._english_context(job)
+        return any(
+            not phrase_negated_en(english, match.group(0))
+            for match in self._explicit_en.finditer(english)
+        )
+
+    def _has_sensitive(self, job: PromptJob) -> bool:
+        zh = self._source_zh(job)
+        if any(phrase_has_unnegated_zh(zh, token) for token in self._SENSITIVE_ZH):
+            return True
+        english = self._english_context(job)
+        return any(
+            not phrase_negated_en(english, match.group(0))
+            for match in self._sensitive_en.finditer(english)
+        )
+
     def safety_tag(self, job: PromptJob) -> str:
-        context = self._context(job)
-        if job.quality_profile_id in {"uncensored_detail", "ultimate_adult"} or self._explicit_re.search(context):
+        if job.quality_profile_id in {"uncensored_detail", "ultimate_adult"} or self._has_explicit(job):
             return "explicit"
-        if self._sensitive_re.search(context):
+        if self._has_sensitive(job):
             return "sensitive"
         return "safe"
 

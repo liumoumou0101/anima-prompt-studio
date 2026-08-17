@@ -57,6 +57,11 @@ def test_reverse_cowgirl_with_him_is_pair():
     assert job.composition.people_count == 2
     assert {"1girl", "1boy"} <= tags
     assert "solo" not in tags
+    assert "reverse cowgirl" in tags
+    assert "cowgirl position" not in tags
+    assert "cowgirl" not in tags
+    assert "facing away" not in tags
+    assert "back to the boy" in (job.translated_en or "").lower()
 
 
 def test_doggy_names_both_genders():

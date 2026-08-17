@@ -40,3 +40,29 @@ def test_view_angle_does_not_match_horns():
 
 def test_explicit_horns_still_match():
     assert "horns" in tags(TagMatcher().match("a woman with horns", "头上长角的女人"))
+
+
+def test_reverse_cowgirl_does_not_also_match_cowgirl():
+    result = TagMatcher().match(
+        "A nude girl sits on him reverse cowgirl.",
+        "一个裸体女孩反骑乘，背对男孩坐在他身上",
+    )
+    matched = set(tags(result))
+    assert "reverse cowgirl" in matched
+    assert "cowgirl position" not in matched
+
+
+def test_plain_cowgirl_still_matches():
+    result = TagMatcher().match(
+        "A nude girl in cowgirl position.",
+        "一个裸体女孩女上位骑在男孩身上",
+    )
+    assert "cowgirl position" in tags(result)
+
+
+def test_hanging_hand_does_not_match_fallen_down():
+    result = TagMatcher().match(
+        "A girl raised her skirt and her left hand fell down.",
+        "一个女孩右手掀裙，左手自然垂下",
+    )
+    assert "fallen down" not in tags(result)

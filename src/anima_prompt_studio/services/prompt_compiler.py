@@ -346,6 +346,16 @@ class PromptCompiler:
             tags.append("solo")
         tags += [x.tag for x in matched if x.category != "count" and not self._is_count_tag(x.tag)]
         tags += [tag for item in job.enhancements if item.enabled for tag in item.tags]
+        normalized = [tag.replace("_", " ") for tag in tags]
+        if any(tag in {"reverse cowgirl", "reverse cowgirl position"} for tag in normalized):
+            tags = [
+                tag for tag in tags
+                if tag.replace("_", " ") not in {
+                    "cowgirl position", "cowgirl",
+                    "multiple views", "reference sheet", "turnaround",
+                    "character sheet", "comic", "2koma", "4koma",
+                }
+            ]
         explicit_natural = self._explicit_natural_categories(job)
         composition_category = {"shot":"shot", "camera_height":"camera", "angle":"angle", "gaze":"gaze", "subject_position":"position"}
         tags += [COMPOSITION_MAP[key].get(getattr(job.composition, key), "") for key in COMPOSITION_MAP

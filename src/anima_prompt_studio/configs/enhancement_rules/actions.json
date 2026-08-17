@@ -875,6 +875,11 @@
       "女上位",
       "骑乘位"
     ],
+    "forbidden_context": [
+      "反骑乘",
+      "反向女上位",
+      "背向女上位"
+    ],
     "content": "She is in cowgirl position.",
     "canonical_phrases": [
       "cowgirl position",
@@ -1047,6 +1052,16 @@
     "tags": [
       "reverse cowgirl",
       "sex"
+    ],
+    "suppress_tags": [
+      "cowgirl position",
+      "multiple views",
+      "reference sheet",
+      "turnaround",
+      "character sheet",
+      "comic",
+      "2koma",
+      "4koma"
     ]
   },
   {
