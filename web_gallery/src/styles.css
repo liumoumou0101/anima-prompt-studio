@@ -134,6 +134,12 @@ kbd { min-width: 20px; padding: 2px 6px; color: #aab4c4; background: #0d1118; bo
 .drawer-footer { flex: none; margin-top: 10px; padding-top: 10px; background: rgba(18, 23, 31, .99); border-top: 1px solid #2a3441; }
 .drawer-footer .drawer-state-actions { margin-top: 0; }
 .upscale-button { width: 100%; min-height: 43px; margin-bottom: 9px; color: #dfe6ff; background: linear-gradient(135deg, rgba(83, 108, 222, .38), rgba(86, 65, 173, .36)); border-color: #526ed5; font-weight: 600; }
+.regen-button { color: #dff6ea; background: linear-gradient(135deg, rgba(46, 140, 108, .38), rgba(38, 102, 92, .36)); border-color: #3d9a78; }
+.regen-button:hover:not(:disabled) { background: linear-gradient(135deg, rgba(54, 158, 122, .5), rgba(46, 118, 106, .46)); }
+.process-badge.regen { color: #b7ecd4; background: rgba(48, 122, 96, .34); }
+.regen-count { display: flex; align-items: center; gap: 10px; margin-top: 14px; color: #c5cedb; font-size: 13px; }
+.regen-count select { min-width: 88px; min-height: 34px; color: #e8eef8; background: #121820; border: 1px solid #344153; border-radius: 7px; }
+.regen-prompt { max-height: 88px; overflow: auto; padding: 8px 10px; background: #0d1219; border: 1px solid #293443; border-radius: 8px; color: #c5cedb; }
 .upscale-button:hover:not(:disabled) { background: linear-gradient(135deg, rgba(92, 119, 238, .5), rgba(100, 75, 196, .46)); }
 .upscale-unavailable { margin: -2px 0 9px; color: #7f8b9d; font-size: 10px; line-height: 1.45; }
 .drawer-progress { width: 100%; height: 5px; margin: -1px 0 9px; accent-color: var(--blue); }
@@ -210,6 +216,7 @@ kbd { min-width: 20px; padding: 2px 6px; color: #aab4c4; background: #0d1118; bo
 .selection-actions button:hover { background: #232d3a; }
 .selection-actions button.keep { color: #89e99f; background: var(--green-soft); border-color: #2b7040; }
 .selection-actions button.upscale { color: #cbd6ff; background: rgba(69, 88, 170, .24); border-color: #4b62b4; }
+.selection-actions button.regen { color: #c8f0dd; background: rgba(46, 122, 96, .24); border-color: #3b8a6c; }
 .selection-actions button.danger { color: #ff9ca3; background: var(--red-soft); border-color: #75343e; }
 
 .compare-overlay { position: fixed; inset: 0; z-index: 100; display: grid; grid-template-rows: 66px 1fr; padding: 0 22px 22px; background: rgba(5, 7, 10, .97); backdrop-filter: blur(18px); }

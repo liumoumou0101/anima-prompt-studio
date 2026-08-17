@@ -1670,10 +1670,19 @@ class MainWindow(QMainWindow):
             remote_profile = None
             workflow_profile = None
             credentials = RemoteCredentials()
+        txt2img_workflows = []
+        try:
+            txt2img_workflows = [
+                profile for profile in self.repository.list_workflow_profiles()
+                if profile.workflow_kind == "txt2img_basic"
+            ]
+        except Exception:
+            txt2img_workflows = []
         self._gallery_server.configure_gallery_upscale(
             remote_profile,
             workflow_profile,
             credentials,
+            txt2img_workflows=txt2img_workflows,
         )
 
     def open_gallery_root(self) -> None:

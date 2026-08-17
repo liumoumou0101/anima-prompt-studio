@@ -82,8 +82,14 @@ class GalleryServer:
         remote_profile: RemoteProfile | None,
         workflow_profile: WorkflowProfile | None,
         credentials: RemoteCredentials | None,
+        txt2img_workflows: list[WorkflowProfile] | None = None,
     ) -> None:
-        self.upscale_manager.configure(remote_profile, workflow_profile, credentials)
+        self.upscale_manager.configure(
+            remote_profile,
+            workflow_profile,
+            credentials,
+            txt2img_workflows=txt2img_workflows,
+        )
 
     def start(self) -> str:
         if self._server is not None:
@@ -177,6 +183,23 @@ class GalleryServer:
                 continue
             try:
                 jobs.append(self.upscale_manager.submit(source, decoded, asset))
+            except GalleryUpscaleError as exc:
+                failed.append({"path": decoded, "error": str(exc)})
+        return {"jobs": jobs, "failed": failed}
+
+    def start_regenerates(self, relative_paths: list[str], count: int = 1) -> dict[str, Any]:
+        decoded_paths = list(dict.fromkeys(unquote(path) for path in relative_paths if path))
+        assets = {item["path"]: item for item in self.gallery_payload()["assets"]}
+        jobs: list[dict[str, Any]] = []
+        failed: list[dict[str, str]] = []
+        for decoded in decoded_paths:
+            source = self.image_path(decoded)
+            asset = assets.get(decoded)
+            if source is None or asset is None:
+                failed.append({"path": decoded, "error": "画廊中找不到待处理图片"})
+                continue
+            try:
+                jobs.append(self.upscale_manager.submit_regenerate(source, decoded, asset, count))
             except GalleryUpscaleError as exc:
                 failed.append({"path": decoded, "error": str(exc)})
         return {"jobs": jobs, "failed": failed}
@@ -480,18 +503,32 @@ def _make_handler(service: GalleryServer):
                     self._send_json({"error": "画廊处理会话无效，请刷新页面后重试。"}, status=403)
                     return
                 if parsed.path == "/api/gallery/process":
+                    operation = payload.get("operation") or "upscale"
+                    count = payload.get("count", 1)
+                    try:
+                        count = int(count)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError("count 必须是 1 到 4 的整数") from exc
                     raw_paths = payload.get("paths")
                     if raw_paths is None:
                         raw_path = payload.get("path", "")
                         if not isinstance(raw_path, str) or not raw_path:
                             raise ValueError("path 必须是非空字符串")
-                        self._send_json(service.start_upscale(raw_path), status=202)
-                        return
+                        raw_paths = [raw_path]
                     if not isinstance(raw_paths, list) or not raw_paths or not all(
                         isinstance(path, str) and path for path in raw_paths
                     ):
                         raise ValueError("path 或 paths 必须包含非空字符串")
-                    result = service.start_upscales(raw_paths)
+                    if operation in {"txt2img_more", "gallery_txt2img_more", "regen"}:
+                        result = service.start_regenerates(raw_paths, count)
+                    else:
+                        result = service.start_upscales(raw_paths)
+                    if payload.get("paths") is None:
+                        if result.get("jobs"):
+                            self._send_json(result["jobs"][0], status=202)
+                            return
+                        failure = result["failed"][0] if result.get("failed") else {"error": "无法加入任务队列"}
+                        raise GalleryUpscaleError(str(failure["error"]))
                     self._send_json(result, status=202)
                     return
                 if parsed.path == "/api/gallery/process/action":
