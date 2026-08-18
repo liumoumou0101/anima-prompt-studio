@@ -280,7 +280,7 @@ class Composition(BaseModel):
     gaze: str = "看镜头"
     aspect: str = "竖图"
     subject_position: str = "中"
-    mode: Literal["smart", "mixed", "manual"] = "mixed"
+    mode: Literal["smart", "mixed", "manual"] = "smart"
     decisions: dict[str, CompositionDecision] = Field(default_factory=default_composition_decisions)
 
     @model_validator(mode="before")
@@ -358,6 +358,7 @@ class PromptJob(BaseModel):
     resolved_concepts: list[ResolvedConcept] = Field(default_factory=list)
     positive_prompt: str = ""
     negative_prompt: str = ""
+    compiled_prompt_state: ItemState = ItemState.AUTO
     generation_params: GenerationParams = Field(default_factory=GenerationParams)
     workflow_template_id: str | None = None
     user_rating: int | None = None

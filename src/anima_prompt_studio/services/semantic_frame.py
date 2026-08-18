@@ -13,7 +13,8 @@ class SemanticFrameResolver:
     """Extracts a small set of high-confidence facts shared by prose, tags and audits."""
 
     _people = re.compile(
-        r"女孩|男孩|女人|男人|少女|少年|人物|角色|天使|精灵|狐娘|猫娘|龙娘|女仆|骑士|公主|王子|人群|她|(?<!其)他"
+        r"女孩|男孩|女人|男人|少女|少年|人物|角色|天使|精灵|狐娘|猫娘|龙娘|女仆|骑士|公主|王子|"
+        r"女女|两女|两男|一女|一男|三人行|3P|人群|她|(?<!其)他"
     )
     _female_tokens = ("女孩", "女人", "女性", "少女", "女仆", "公主")
     _male_tokens = ("男孩", "男人", "男性", "少年", "王子")
@@ -22,7 +23,10 @@ class SemanticFrameResolver:
         "女上位", "男上位", "后入", "反骑乘", "口交", "骑乘位", "传教士",
         "六九式", "六九", "架腿位", "做爱", "性交", "性爱",
     )
-    _yuri_markers = ("百合", "女女", "两个女孩", "两名女孩", "两位女孩")
+    _yuri_markers = (
+        "百合", "女女", "两个女孩", "两名女孩", "两位女孩",
+        "另一个女孩", "另一名女孩", "另一位女孩",
+    )
     _hetero_markers = ("一对男女", "一男一女", "一女一男", "男女在", "一对情侣")
     _count_prefixes = (
         ("十个", 10), ("十名", 10), ("十位", 10),
@@ -32,7 +36,12 @@ class SemanticFrameResolver:
         ("三个", 3), ("三名", 3), ("三位", 3), ("三人", 3),
         ("两个", 2), ("两名", 2), ("两位", 2), ("两人", 2),
         ("一对", 2),
+        ("一个", 1), ("一名", 1), ("一位", 1),
     )
+    _name_pair_skip = {
+        "桌子", "椅子", "窗户", "房间", "床铺", "门边", "门外", "树下", "花丛",
+        "杯子", "茶壶", "手机", "雨伞", "书籍", "墙壁", "沙发",
+    }
     _person_nouns = (
         "女孩", "男孩", "女人", "男人", "少女", "少年", "女性", "男性",
         "人物", "角色", "人",
@@ -82,29 +91,72 @@ class SemanticFrameResolver:
             male = True
         return female, male
 
+    def _gender_of_span(self, span: str) -> str:
+        female = any(token in span for token in self._female_tokens)
+        male = any(token in span for token in self._male_tokens)
+        if female and not male:
+            return "female"
+        if male and not female:
+            return "male"
+        if any(marker in span for marker in ("男女", "情侣")):
+            return "hetero"
+        return ""
+
+    def _counted_groups_zh(self, text: str) -> list[tuple[int, str]]:
+        """Collect every 一个/两个… + person-noun group so mixed counts can be added."""
+        noun_pattern = "|".join(map(re.escape, self._person_nouns))
+        occupied: list[tuple[int, int]] = []
+        groups: list[tuple[int, str]] = []
+        for prefix, count in self._count_prefixes:
+            for match in re.finditer(
+                rf"(?<![第每]){re.escape(prefix)}(?:[^，。；！？]{{0,8}}?)(?:{noun_pattern})",
+                text,
+            ):
+                start, end = match.span()
+                if any(start < taken_end and end > taken_start for taken_start, taken_end in occupied):
+                    continue
+                occupied.append((start, end))
+                groups.append((count, self._gender_of_span(match.group(0))))
+        return groups
+
     def _counted_group_zh(self, text: str) -> tuple[int, str] | None:
         """Match 两个裸体女孩 / 三名男孩 / 五个人, allowing short modifiers."""
-        noun_pattern = "|".join(map(re.escape, self._person_nouns))
-        for prefix, count in self._count_prefixes:
-            match = re.search(
-                rf"{re.escape(prefix)}(?:[^，。；！？]{{0,8}}?)(?:{noun_pattern})",
-                text,
-            )
-            if not match:
-                continue
-            span = match.group(0)
-            if any(token in span for token in self._female_tokens) and not any(
-                token in span for token in self._male_tokens
-            ):
-                return count, "female"
-            if any(token in span for token in self._male_tokens) and not any(
-                token in span for token in self._female_tokens
-            ):
-                return count, "male"
-            if any(marker in span for marker in ("男女", "情侣")):
-                return count, "hetero"
-            return count, ""
+        groups = self._counted_groups_zh(text)
+        return groups[0] if groups else None
+
+    def _compact_mix_zh(self, text: str) -> tuple[int, str] | None:
+        if re.search(r"两女一男|两个女孩.{0,8}一个男孩|一个男孩.{0,8}两个女孩", text):
+            return 3, "2f1m"
+        if re.search(r"两男一女|两个男孩.{0,8}一个女孩|一个女孩.{0,8}两个男孩", text):
+            return 3, "1f2m"
+        if re.search(r"三个女孩|三名女孩|三女", text):
+            return 3, "female"
+        if re.search(r"三个男孩|三名男孩|三男", text):
+            return 3, "male"
         return None
+
+    def _named_pair_zh(self, text: str) -> bool:
+        match = re.search(
+            r"([\u4e00-\u9fff]{2,4})(?:和|与)([\u4e00-\u9fff]{2,4})(?:一起)?(?:站|坐|走|躺|亲吻|拥抱|牵手)",
+            text,
+        )
+        if not match:
+            return False
+        return match.group(1) not in self._name_pair_skip and match.group(2) not in self._name_pair_skip
+
+    @staticmethod
+    def _mix_from_counts(female_n: int, male_n: int) -> str:
+        if female_n and male_n:
+            if female_n == 2 and male_n == 1:
+                return "2f1m"
+            if female_n == 1 and male_n == 2:
+                return "1f2m"
+            return "hetero"
+        if female_n and not male_n:
+            return "female"
+        if male_n and not female_n:
+            return "male"
+        return ""
 
     def _resolve_people_zh(
         self,
@@ -120,13 +172,31 @@ class SemanticFrameResolver:
         hetero_phrase = any(marker in text for marker in self._hetero_markers)
         pair_act = any(phrase_has_unnegated_zh(text, act) for act in self._pair_acts)
 
-        counted = self._counted_group_zh(text)
+        groups = self._counted_groups_zh(text)
+        compact = self._compact_mix_zh(text)
+        female_n = sum(count for count, gender in groups if gender == "female")
+        male_n = sum(count for count, gender in groups if gender == "male")
+        counted_total = sum(count for count, _gender in groups)
         people_count: int | None = None
         mix = ""
-        if any(token in text for token in ("3P", "三人行")):
-            people_count = 3
-        elif counted:
-            people_count, mix = counted
+        if compact:
+            people_count, mix = compact
+        elif female_n and male_n:
+            people_count = female_n + male_n
+            mix = self._mix_from_counts(female_n, male_n)
+        elif any(token in text for token in ("3P", "三人行")):
+            people_count = max(3, counted_total)
+            if female_n or male_n:
+                mix = self._mix_from_counts(female_n, male_n)
+        elif counted_total:
+            people_count = counted_total
+            mix = groups[0][1] if len(groups) == 1 else self._mix_from_counts(female_n, male_n)
+            if counted_total == 1 and pair_act and not solo:
+                people_count = 2
+                if yuri:
+                    mix = "female"
+                elif mix in {"female", "male"}:
+                    mix = "hetero"
         elif hetero_phrase or any(token in text for token in (
             "一个女孩和一个男孩", "一个男孩和一个女孩",
             "两个女孩亲吻", "两个女孩做爱",
@@ -142,6 +212,11 @@ class SemanticFrameResolver:
             people_count = 2
         elif character_entity_count > 1:
             people_count = character_entity_count
+        elif self._named_pair_zh(text):
+            people_count = 2
+        elif yuri or "女女" in text:
+            people_count = 2
+            mix = "female"
         elif pair_act and not solo:
             people_count = 2
         elif has_person:
@@ -149,13 +224,13 @@ class SemanticFrameResolver:
         elif subject_mode == SubjectMode.SCENE:
             people_count = 0
 
-        if solo and (people_count is None or people_count <= 2) and not counted and not hetero_phrase:
+        if solo and (people_count is None or people_count <= 2) and not groups and not hetero_phrase:
             people_count = 1
 
         if not mix:
             if hetero_phrase or (female and male):
                 mix = "hetero"
-            elif yuri:
+            elif yuri or "女女" in text:
                 mix = "female"
             elif people_count == 2 and pair_act and female and not male and not solo:
                 mix = "hetero"
@@ -183,6 +258,8 @@ class SemanticFrameResolver:
             text, has_person=has_person, subject_mode=subject_mode,
             character_entity_count=character_entity_count,
         )
+        if (people_count or 0) >= 1 and subject_mode == SubjectMode.SCENE:
+            subject_mode = SubjectMode.CHARACTER
         frame = SemanticFrame(subject_mode=subject_mode, people_count=people_count)
         if people_mix:
             frame.final_attributes["people_mix"] = people_mix

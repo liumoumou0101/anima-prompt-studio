@@ -170,6 +170,7 @@ def test_locked_composition_survives_recommend_and_model_switch(window):
 
 def test_smart_mode_resets_nonlocked_fields_to_auto(window):
     window.job = PromptJob(original_zh="女孩读书", normalized_zh="女孩读书")
+    window.job.composition.mode = "mixed"
     window.job.composition.shot = "远景"
     window.job.composition.decision("shot").state = CompositionFieldState.USER_SELECTED
     window._load_job_into_ui()
@@ -223,9 +224,46 @@ def test_dynamic_composition_preset_updates_dimensions(window):
     window.pipeline.compiler.apply_model_defaults(window.job)
     window._load_job_into_ui()
     window.composition_preset.setCurrentIndex(window.composition_preset.findData("dynamic_action"))
-    window.apply_composition_preset()
     assert window.job.composition.aspect == "横图"
     assert (window.job.generation_params.width, window.job.generation_params.height) == (1152, 896)
+
+
+def test_startup_generation_size_is_automatic_model_default(window):
+    params = window.job.generation_params
+    assert (window.width.value(), window.height.value()) == (896, 1152)
+    assert (params.width, params.height) == (896, 1152)
+    assert params.state("width") == GenerationFieldState.AUTO
+    assert params.state("height") == GenerationFieldState.AUTO
+    assert window.parameter_state_boxes["width"].currentData() == GenerationFieldState.AUTO.value
+    assert window.composition_mode.currentData() == "smart"
+
+
+def test_selecting_composition_preset_applies_without_extra_click(window):
+    window.job = PromptJob(model_profile_id="anima_base_v1")
+    window.pipeline.compiler.apply_model_defaults(window.job)
+    window._load_job_into_ui()
+    window.composition_preset.setCurrentIndex(window.composition_preset.findData("low_angle_hero"))
+    assert window.job.composition.shot == "全身"
+    assert window.job.composition.camera_height == "低机位"
+    assert window.job.composition.decision("shot").state == CompositionFieldState.USER_SELECTED
+    assert window.camera.currentText() == "低机位"
+
+
+def test_alternative_button_cycles_classic_preset_for_generic_portrait(window):
+    window.job = PromptJob(original_zh="一个短发女孩看向镜头微笑", normalized_zh="一个短发女孩看向镜头微笑")
+    window._load_job_into_ui()
+    window.recommend_composition()
+    before = (
+        window.job.composition.shot, window.job.composition.camera_height,
+        window.job.composition.angle, window.job.composition.aspect,
+    )
+    window.recommend_alternative_composition()
+    after = (
+        window.job.composition.shot, window.job.composition.camera_height,
+        window.job.composition.angle, window.job.composition.aspect,
+    )
+    assert after != before
+    assert window.pipeline.composition_recommender.last_result.fallback_preset_name
 
 
 def test_enhancement_can_be_disabled_and_edited_in_ui(window):
@@ -696,6 +734,153 @@ def test_workflow_selection_switches_model_preset_and_submission_snapshot(window
     assert rendered.workflow["4"]["inputs"]["ckpt_name"] == "anima-base-v1.0.safetensors"
     assert rendered.workflow["5"]["inputs"]["batch_size"] == 3
     assert rendered.workflow["7"]["inputs"]["text"]
+
+
+def test_final_compiled_prompt_is_editable_and_used_for_generation(window, monkeypatch, tmp_path):
+    assert not window.positive.isReadOnly()
+    assert not window.negative.isReadOnly()
+    window.job.translated_en = "A girl standing in a school uniform."
+    window.pipeline.compiler.compile(window.job)
+    window._load_job_into_ui()
+    compiled = window.positive.toPlainText()
+    assert compiled
+
+    window.positive.setPlainText(compiled + "\n\nhand-edited phrase")
+    assert window.job.compiled_prompt_state == ItemState.USER_EDITED
+    window.quality_combo.setCurrentIndex(window.quality_combo.findData("portrait_detail"))
+    assert "hand-edited phrase" in window.positive.toPlainText()
+    assert "hand-edited phrase" in window.job.positive_prompt
+
+    workflow = WorkflowProfile(
+        id="basic-edit",
+        display_name="01 基础文生图",
+        api_workflow={},
+        bindings={},
+        workflow_kind="txt2img_basic",
+    )
+    window.repository.save_workflow_profile(workflow)
+    window.remote_host_edit.setText("gpu.example.invalid")
+    window._refresh_remote_controls(selected_workflow_id=workflow.id)
+    launched = []
+    monkeypatch.setattr(window, "_selected_remote_profile", lambda: RemoteProfile(
+        ssh_host="gpu.example.invalid",
+        ssh_user="root",
+        known_host_fingerprint="SHA256:test",
+    ))
+    monkeypatch.setattr(window, "_request_remote_credentials", lambda _profile: RemoteCredentials(password="test"))
+    monkeypatch.setattr(window, "_launch_generation_worker", launched.append)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+    window.generate_remote()
+    assert launched
+    assert "hand-edited phrase" in launched[0].job.positive_prompt
+
+
+def test_locked_compiled_prompt_survives_translate_and_can_be_restored(window):
+    window.chinese.setPlainText("一个穿校服的女孩站着")
+    window.job.original_zh = "一个穿校服的女孩站着"
+    window.job.translated_en = "A girl standing in a school uniform."
+    window.pipeline.compiler.compile(window.job)
+    window._load_job_into_ui()
+    window.positive.setPlainText("KEEP THIS PROMPT")
+    window.lock_compiled_prompt.setChecked(True)
+    assert window.job.compiled_prompt_state == ItemState.LOCKED
+
+    window.pipeline.update_english(window.job, "A completely different sentence.")
+    window.compile_edited_english()
+    assert window.positive.toPlainText() == "KEEP THIS PROMPT"
+
+    window.restore_compiled_prompt_from_compiler()
+    assert window.job.compiled_prompt_state == ItemState.AUTO
+    assert window.positive.toPlainText() != "KEEP THIS PROMPT"
+    assert window.positive.toPlainText()
+
+
+def test_generation_stays_enabled_and_queues_the_next_prompt(window, monkeypatch):
+    workflow = WorkflowProfile(
+        id="basic-queue",
+        display_name="01 基础文生图",
+        api_workflow={},
+        bindings={},
+        workflow_kind="txt2img_basic",
+    )
+    window.repository.save_workflow_profile(workflow)
+    window.remote_host_edit.setText("gpu.example.invalid")
+    window._refresh_remote_controls(selected_workflow_id=workflow.id)
+    window.positive.setPlainText("first prompt")
+
+    launched = []
+
+    def fake_launch(worker):
+        launched.append(worker)
+        window._active_generation_worker = worker
+        window._update_remote_ready_state()
+
+    monkeypatch.setattr(window, "_selected_remote_profile", lambda: RemoteProfile(
+        ssh_host="gpu.example.invalid",
+        ssh_user="root",
+        known_host_fingerprint="SHA256:test",
+    ))
+    monkeypatch.setattr(window, "_request_remote_credentials", lambda _profile: RemoteCredentials(password="test"))
+    monkeypatch.setattr(window, "_launch_generation_worker", fake_launch)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+
+    window.generate_remote()
+    assert len(launched) == 1
+    assert window.remote_generate_button.isEnabled()
+    assert window.remote_generate_button.text() == "加入队列"
+
+    window.chinese.setPlainText("第二个提示词")
+    window.positive.setPlainText("second prompt")
+    window.generate_remote()
+    assert len(launched) == 1
+    assert len(window._generation_queue) == 1
+    assert window._generation_queue[0].job.positive_prompt == "second prompt"
+    assert "加入队列" in window.remote_generate_button.text()
+    assert window.remote_cancel_button.isEnabled()
+
+    window.cancel_remote_generation()
+    assert window._generation_queue == []
+    assert window._active_generation_worker is launched[0]
+
+
+def test_generation_queue_starts_next_job_when_current_finishes(window, monkeypatch):
+    workflow = WorkflowProfile(
+        id="basic-next",
+        display_name="01 基础文生图",
+        api_workflow={},
+        bindings={},
+        workflow_kind="txt2img_basic",
+    )
+    window.repository.save_workflow_profile(workflow)
+    window.remote_host_edit.setText("gpu.example.invalid")
+    window._refresh_remote_controls(selected_workflow_id=workflow.id)
+    window.positive.setPlainText("first")
+
+    launched = []
+
+    def fake_launch(worker):
+        launched.append(worker)
+        window._active_generation_worker = worker
+        window._update_remote_ready_state()
+
+    monkeypatch.setattr(window, "_selected_remote_profile", lambda: RemoteProfile(
+        ssh_host="gpu.example.invalid",
+        ssh_user="root",
+        known_host_fingerprint="SHA256:test",
+    ))
+    monkeypatch.setattr(window, "_request_remote_credentials", lambda _profile: RemoteCredentials(password="test"))
+    monkeypatch.setattr(window, "_launch_generation_worker", fake_launch)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+
+    window.generate_remote()
+    window.positive.setPlainText("second")
+    window.generate_remote()
+    assert len(window._generation_queue) == 1
+
+    window._remote_generation_done()
+    assert len(launched) == 2
+    assert launched[1].job.positive_prompt == "second"
+    assert window._generation_queue == []
 
 
 def test_main_actions_have_visual_hierarchy_and_gallery_menu(window):

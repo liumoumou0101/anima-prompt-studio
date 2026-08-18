@@ -93,6 +93,46 @@ def test_quality_profiles_do_not_emit_unrecognized_hand_detail_phrases():
         assert {"detailed hands", "detailed fingers"}.isdisjoint(profile.all_tags())
 
 
+def test_removed_and_harmful_quality_tags_stay_out_of_the_catalog():
+    configs = ConfigService()
+    assert "sharp_focus" not in configs.quality_profiles
+    assert "daylight_clear" in configs.quality_profiles
+    assert "indoor_warm" in configs.quality_profiles
+    assert "overcast_rain" in configs.quality_profiles
+    for profile in configs.quality_profiles.values():
+        assert "anatomical detail" not in profile.all_tags(), profile.id
+        assert "crisp lines" not in profile.all_tags(), profile.id
+        if profile.id != "flat_color":
+            assert "clean lineart" not in profile.all_tags(), profile.id
+
+
+def test_daylight_clear_does_not_override_an_explicit_night_scene():
+    tags = _compiled_tags("daylight_clear", "夜晚月光下的短发女孩")
+    assert not {"sunlight", "bright lighting", "clear sky"} & tags
+
+
+def test_indoor_warm_does_not_move_an_outdoor_scene_inside():
+    tags = _compiled_tags("indoor_warm", "一个女孩站在海边")
+    assert not {"indoor lighting", "lamp light", "cozy atmosphere"} & tags
+    room = _compiled_tags("indoor_warm", "一个女孩坐在房间里")
+    assert {"indoor lighting", "lamp light", "cozy atmosphere"} <= room
+
+
+def test_overcast_rain_does_not_override_an_explicit_sunny_day():
+    tags = _compiled_tags("overcast_rain", "晴天街道上的短发女孩")
+    assert not {"overcast", "rain", "fog", "mist"} & tags
+    rainy = _compiled_tags("overcast_rain", "一个女孩站在小巷里")
+    assert {"overcast", "rain", "fog", "mist"} <= rainy
+    dry = _compiled_tags("overcast_rain", "一个女孩站着，没有下雨")
+    assert "rain" not in dry
+
+
+def test_adult_and_character_packs_do_not_compile_anatomical_detail():
+    for profile_id in ("uncensored_detail", "ultimate_adult", "ultimate_character"):
+        tags = _compiled_tags(profile_id, "一个裸体女孩站着")
+        assert "anatomical detail" not in tags
+
+
 def test_ultimate_material_profile_does_not_invent_clothing_type_or_transparency():
     assert _tags("ultimate_material").isdisjoint(
         {"lingerie", "lace details", "sheer fabric", "latex", "bikini"}

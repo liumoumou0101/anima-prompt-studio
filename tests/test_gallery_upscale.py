@@ -25,6 +25,7 @@ from anima_prompt_studio.services.gallery_upscale import (
     GalleryUpscaleRenderer,
     build_gallery_regen_job,
     choose_txt2img_workflow,
+    snapshot_regen_parameters,
 )
 from anima_prompt_studio.services.remote.execution_coordinator import ExecutionResult
 from anima_prompt_studio.services.remote.comfy_client import ComfyUIClient
@@ -401,7 +402,15 @@ def test_build_gallery_regen_job_requires_prompt_and_keeps_size():
             "model": "anima_base_v1",
             "width": 640,
             "height": 832,
-            "parameters": {"steps": 40, "cfg": 5.0, "sampler": "er_sde"},
+            "parameters": {
+                "steps": 40,
+                "cfg": 5.0,
+                "sampler": "er_sde",
+                "scheduler": "sgm_uniform",
+                "generation_preset": "quality",
+                "quality_profile": "ultimate_general",
+                "negative_prompt": "lowres, blurry",
+            },
         },
         workflow_id="01___Base_Quality_T2I",
         count=3,
@@ -411,7 +420,29 @@ def test_build_gallery_regen_job_requires_prompt_and_keeps_size():
     assert job.generation_params.height == 832
     assert job.generation_params.batch_size == 3
     assert job.generation_params.steps == 40
+    assert job.generation_params.cfg == 5.0
+    assert job.generation_params.sampler == "er_sde"
+    assert job.generation_params.scheduler == "sgm_uniform"
+    assert job.generation_preset_id == "quality"
+    assert job.quality_profile_id == "ultimate_general"
+    assert job.negative_prompt == "lowres, blurry"
     assert job.generation_params.seed == -1
+
+
+def test_snapshot_regen_parameters_reads_nested_generation_params():
+    snapshot = snapshot_regen_parameters({
+        "parameters": {
+            "generation_params": {"steps": 35, "cfg": 4.5, "sampler": "euler", "scheduler": "normal"},
+            "generation_preset_id": "balanced",
+            "source": {"original_zh": "一个女孩"},
+        }
+    })
+    assert snapshot["steps"] == 35
+    assert snapshot["cfg"] == 4.5
+    assert snapshot["sampler"] == "euler"
+    assert snapshot["scheduler"] == "normal"
+    assert snapshot["generation_preset_id"] == "balanced"
+    assert snapshot["original_zh"] == "一个女孩"
 
 
 class _RegenCoordinator:
@@ -479,14 +510,30 @@ def test_gallery_manager_queues_same_prompt_regen(tmp_path):
             "prompt": "1girl, hugging own legs",
             "width": 896,
             "height": 1152,
+            "parameters": {
+                "steps": 40,
+                "cfg": 5.0,
+                "sampler": "er_sde",
+                "scheduler": "beta",
+                "generation_preset_id": "quality",
+                "negative_prompt": "lowres",
+            },
         },
         count=2,
     )
     assert submitted["operation"] == GALLERY_REGEN_OPERATION
     assert submitted["batchCount"] == 2
+    assert submitted["parameters"]["steps"] == 40
     _wait_for(lambda: manager.get(submitted["id"])["state"] == "completed")
-    assert controller["jobs"][0].generation_params.batch_size == 2
-    assert controller["jobs"][0].positive_prompt == "1girl, hugging own legs"
+    queued_job = controller["jobs"][0]
+    assert queued_job.generation_params.batch_size == 2
+    assert queued_job.positive_prompt == "1girl, hugging own legs"
+    assert queued_job.generation_params.steps == 40
+    assert queued_job.generation_params.cfg == 5.0
+    assert queued_job.generation_params.sampler == "er_sde"
+    assert queued_job.generation_params.scheduler == "beta"
+    assert queued_job.generation_preset_id == "quality"
+    assert queued_job.negative_prompt == "lowres"
     completed = manager.get(submitted["id"])
     assert completed["resultPath"]
     assert "再出图完成" in completed["message"]

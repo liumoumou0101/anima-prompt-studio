@@ -36,6 +36,26 @@ class CompositionRecommendationResult:
     applied_fields: list[str] = field(default_factory=list)
     alternative_fields: list[str] = field(default_factory=list)
     matched_rule_ids: list[str] = field(default_factory=list)
+    fallback_preset_id: str | None = None
+    fallback_preset_name: str | None = None
+
+
+# Used when “换一种构图” has no scored runner-up. Skip the default
+# 半身肖像，保证第一次点击就能看出变化。
+ALTERNATIVE_PRESET_IDS = (
+    "portrait_closeup",
+    "front_fullbody",
+    "low_angle_hero",
+    "high_angle",
+    "back_view",
+    "cowboy_shot",
+    "thirds_left",
+    "thirds_right",
+    "cinematic_wide",
+    "dynamic_action",
+    "two_person",
+    "large_scene",
+)
 
 
 class CompositionRecommendationService:
@@ -64,6 +84,7 @@ class CompositionRecommendationService:
                     })
         self.configs = configs
         self.context_extractor = CompositionContextExtractor()
+        self.last_result = CompositionRecommendationResult()
 
     @staticmethod
     def _contains_any(text: str, phrases: list[str]) -> bool:
@@ -182,6 +203,7 @@ class CompositionRecommendationService:
             for field_name in COMPOSITION_FIELDS
         }
         alternative_field: str | None = None
+        use_preset_fallback = False
         if alternative_index > 0:
             eligible = [
                 field_name for field_name in COMPOSITION_FIELDS
@@ -204,6 +226,7 @@ class CompositionRecommendationService:
             eligible.sort(key=alternative_priority)
             if eligible:
                 alternative_field = eligible[(alternative_index - 1) % len(eligible)]
+        use_preset_fallback = alternative_index > 0 and alternative_field is None
         for field_name in COMPOSITION_FIELDS:
             decision = job.composition.decision(field_name)
             if decision.state != CompositionFieldState.AUTO:
@@ -230,8 +253,46 @@ class CompositionRecommendationService:
                     decision.reason = "纯场景不使用人物构图参数"
                     decision.source_rule_ids = ["semantic_scene_clear"]
                     decision.score = 1000
+        if use_preset_fallback:
+            self._apply_alternative_preset(job, rankings, alternative_index, result)
         self.apply_aspect_dimensions(job)
+        self.last_result = result
         return result
+
+    def _apply_alternative_preset(
+        self,
+        job: PromptJob,
+        rankings: dict,
+        alternative_index: int,
+        result: CompositionRecommendationResult,
+    ) -> None:
+        available = [preset_id for preset_id in ALTERNATIVE_PRESET_IDS if preset_id in self.configs.composition_presets]
+        if not available:
+            return
+        preset_id = available[(alternative_index - 1) % len(available)]
+        preset = self.configs.composition_presets[preset_id]
+        changed: list[str] = []
+        for field_name, value in preset.values.items():
+            decision = job.composition.decision(field_name)
+            if decision.state != CompositionFieldState.AUTO:
+                continue
+            ranked = rankings.get(field_name) or []
+            if ranked and self._is_semantically_fixed(ranked[0][1]):
+                continue
+            if value not in self.VALID_VALUES.get(field_name, set()):
+                continue
+            setattr(job.composition, field_name, value)
+            decision.reason = f"备选构图：经典预设 {preset.display_name}"
+            decision.source_rule_ids = [f"preset_{preset.id}"]
+            decision.score = 80
+            if field_name not in result.applied_fields:
+                result.applied_fields.append(field_name)
+            if field_name not in result.alternative_fields:
+                result.alternative_fields.append(field_name)
+            changed.append(field_name)
+        if changed:
+            result.fallback_preset_id = preset.id
+            result.fallback_preset_name = preset.display_name
 
     def apply_aspect_dimensions(self, job: PromptJob) -> None:
         params = job.generation_params

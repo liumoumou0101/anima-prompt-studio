@@ -43,6 +43,24 @@ def load_gallery_batches(
             continue
         snapshot = run.request_json.get("prompt_job", {})
         params = snapshot.get("generation_params", {}) if isinstance(snapshot, dict) else {}
+        params = dict(params) if isinstance(params, dict) else {}
+        if isinstance(snapshot, dict):
+            for key, aliases in (
+                ("negative_prompt", ("negative_prompt",)),
+                ("generation_preset_id", ("generation_preset_id", "generation_preset")),
+                ("quality_profile_id", ("quality_profile_id", "quality_profile")),
+                ("original_zh", ("original_zh",)),
+                ("translated_en", ("translated_en",)),
+            ):
+                if params.get(key):
+                    continue
+                value = next((snapshot.get(alias) for alias in aliases if snapshot.get(alias)), None)
+                if value not in (None, ""):
+                    params[key] = value
+            source = snapshot.get("source")
+            if isinstance(source, dict):
+                params.setdefault("original_zh", source.get("original_zh") or "")
+                params.setdefault("translated_en", source.get("translated_en") or "")
         params = _with_rendered_dimensions(params, run.request_json.get("render_metadata"))
         batches[run.id] = GalleryBatch(
             run_id=run.id,

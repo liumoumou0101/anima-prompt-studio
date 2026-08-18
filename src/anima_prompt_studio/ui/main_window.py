@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QThread, QTimer, Qt, QUrl
@@ -55,6 +56,19 @@ from anima_prompt_studio.ui.remote_workers import ConnectionTestWorker, Generati
 from anima_prompt_studio.ui.tag_browser_dialog import TagBrowserDialog
 
 log = logging.getLogger(__name__)
+
+MAX_GENERATION_QUEUE = 20
+
+
+@dataclass
+class QueuedGeneration:
+    job: PromptJob
+    profile: RemoteProfile
+    workflow: object
+    checkpoint_logical_name: str
+    credentials: RemoteCredentials
+    output_root: Path
+    summary: str
 
 
 class NoWheelSpinBox(QSpinBox):
@@ -128,6 +142,7 @@ class MainWindow(QMainWindow):
         self._remote_threads: list[QThread] = []
         self._remote_workers: list[object] = []
         self._active_generation_worker: GenerationWorker | None = None
+        self._generation_queue: list[QueuedGeneration] = []
         self._direct_remote_id = ""
         self._remote_form_loading = False
         self._last_output_dir = ""
@@ -144,6 +159,7 @@ class MainWindow(QMainWindow):
         self._create_menu()
         self._load_configured_translation()
         self.pipeline.compiler.apply_model_defaults(self.job)
+        self.pipeline.composition_recommender.apply_aspect_dimensions(self.job)
         self._load_job_into_ui()
         self.statusBar().showMessage(f"就绪 · 翻译引擎：{self.pipeline.translation.engine_name}")
         QTimer.singleShot(700, self._auto_connect_last_remote)
@@ -491,6 +507,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.remote_resume_button)
         self.remote_cancel_button = QPushButton("取消排队")
         self.remote_cancel_button.setProperty("buttonRole", "danger")
+        self.remote_cancel_button.setToolTip("有等待中的任务时，取消最后加入的一项；否则取消当前正在生成的任务。")
         self.remote_cancel_button.clicked.connect(self.cancel_remote_generation)
         self.remote_cancel_button.setEnabled(False)
         layout.addWidget(self.remote_cancel_button)
@@ -542,7 +559,15 @@ class MainWindow(QMainWindow):
         self.composition_preset.addItem("智能推荐", "smart")
         for preset in self.configs.composition_presets.values():
             self.composition_preset.addItem(preset.display_name, preset.id)
+            if preset.notes:
+                self.composition_preset.setItemData(
+                    self.composition_preset.count() - 1,
+                    preset.notes,
+                    Qt.ItemDataRole.ToolTipRole,
+                )
+        self.composition_preset.currentIndexChanged.connect(self.apply_composition_preset)
         apply_composition_preset = QPushButton("应用预设")
+        apply_composition_preset.setToolTip("把当前选中的构图预设再套一次；锁定项不会被覆盖。")
         apply_composition_preset.clicked.connect(self.apply_composition_preset)
         grid.addWidget(QLabel("构图预设"), 1, 0); grid.addWidget(self.composition_preset, 1, 1); grid.addWidget(apply_composition_preset, 1, 2)
         grid.addWidget(QLabel("主体类型"), 2, 0); grid.addWidget(self.subject_mode, 2, 1, 1, 2)
@@ -567,7 +592,9 @@ class MainWindow(QMainWindow):
         self.recalculate_composition_button.clicked.connect(self.recommend_composition)
         recommendation_buttons.addWidget(self.recalculate_composition_button)
         self.alternative_composition_button = QPushButton("换一种构图")
-        self.alternative_composition_button.setToolTip("在不改变明确景别、角度或视线要求的前提下，轮换次优候选。")
+        self.alternative_composition_button.setToolTip(
+            "先轮换规则算出的次优构图；如果没有次优，就轮换经典构图预设。明确要求和锁定项保持不变。"
+        )
         self.alternative_composition_button.clicked.connect(self.recommend_alternative_composition)
         recommendation_buttons.addWidget(self.alternative_composition_button)
         grid.addLayout(recommendation_buttons, 10, 1, 1, 2)
@@ -664,10 +691,10 @@ class MainWindow(QMainWindow):
 
         params = QGroupBox("模型参数（自动 / 手动 / 锁定）")
         grid = QGridLayout(params)
-        self.width = NoWheelSpinBox(); self.width.setRange(256, 4096); self.width.setSingleStep(64)
-        self.height = NoWheelSpinBox(); self.height.setRange(256, 4096); self.height.setSingleStep(64)
-        self.steps = NoWheelSpinBox(); self.steps.setRange(1, 200)
-        self.cfg = NoWheelDoubleSpinBox(); self.cfg.setRange(0, 30); self.cfg.setDecimals(2); self.cfg.setSingleStep(.5)
+        self.width = NoWheelSpinBox(); self.width.setRange(256, 4096); self.width.setSingleStep(64); self.width.setValue(896)
+        self.height = NoWheelSpinBox(); self.height.setRange(256, 4096); self.height.setSingleStep(64); self.height.setValue(1152)
+        self.steps = NoWheelSpinBox(); self.steps.setRange(1, 200); self.steps.setValue(28)
+        self.cfg = NoWheelDoubleSpinBox(); self.cfg.setRange(0, 30); self.cfg.setDecimals(2); self.cfg.setSingleStep(.5); self.cfg.setValue(4.5)
         self.sampler = QLineEdit(); self.scheduler = QLineEdit(); self.seed = QLineEdit("-1")
         self.batch = NoWheelSpinBox(); self.batch.setRange(1, 32)
         self.batch.setToolTip("一次提交生成并下载的图片数量")
@@ -694,12 +721,37 @@ class MainWindow(QMainWindow):
         grid.addWidget(QLabel("批量"), 7, 0); grid.addWidget(self.batch, 7, 1)
         layout.addWidget(params)
 
-        layout.addWidget(QLabel("Positive Prompt"))
-        self.positive = QTextEdit(); self.positive.setReadOnly(True); layout.addWidget(self.positive, 4)
+        prompt_header = QHBoxLayout()
+        prompt_header.addWidget(QLabel("最终英文提示词"))
+        prompt_header.addStretch()
+        self.lock_compiled_prompt = QCheckBox("锁定最终提示词")
+        self.lock_compiled_prompt.setToolTip(
+            "勾选后，翻译、改构图或改参数都不会覆盖你改过的最终提示词。"
+            "这和上面的「锁定英文」不同：后者只锁中间翻译，不会锁这一栏。"
+        )
+        self.lock_compiled_prompt.toggled.connect(self.on_compiled_prompt_lock_changed)
+        prompt_header.addWidget(self.lock_compiled_prompt)
+        self.restore_compiled_prompt = QPushButton("恢复自动编译")
+        self.restore_compiled_prompt.clicked.connect(self.restore_compiled_prompt_from_compiler)
+        prompt_header.addWidget(self.restore_compiled_prompt)
+        layout.addLayout(prompt_header)
+        self.positive = QTextEdit()
+        self.positive.setPlaceholderText("翻译并编译后会出现最终英文提示词，可在这里直接改几个词再生成。")
+        self.positive.textChanged.connect(self.on_compiled_prompt_edited)
+        layout.addWidget(self.positive, 4)
+        self.compiled_prompt_hint = QLabel()
+        self.compiled_prompt_hint.setWordWrap(True)
+        self.compiled_prompt_hint.setStyleSheet("color: #666; font-size: 11px")
+        layout.addWidget(self.compiled_prompt_hint)
         layout.addWidget(QLabel("Negative Prompt"))
-        self.negative = QTextEdit(); self.negative.setReadOnly(True); self.negative.setMaximumHeight(110); layout.addWidget(self.negative)
+        self.negative = QTextEdit()
+        self.negative.setMaximumHeight(110)
+        self.negative.setPlaceholderText("负向提示词也可直接修改。")
+        self.negative.textChanged.connect(self.on_compiled_prompt_edited)
+        layout.addWidget(self.negative)
         self.model_note = QLabel(); self.model_note.setWordWrap(True); self.model_note.setStyleSheet("color: #777")
         layout.addWidget(self.model_note)
+        self._update_compiled_prompt_hint()
         return panel
 
     @staticmethod
@@ -742,7 +794,7 @@ class MainWindow(QMainWindow):
         self.job.quality_profile_id = self.quality_combo.currentData()
         self.job.subject_mode = SubjectMode(self.subject_mode.currentData() or SubjectMode.AUTO.value)
         comp = self.job.composition
-        comp.mode = self.composition_mode.currentData() or "mixed"
+        comp.mode = self.composition_mode.currentData() or "smart"
         comp.people_count = self.people_count.value(); comp.shot = self.shot.currentText(); comp.camera_height = self.camera.currentText()
         comp.angle = self.angle.currentText(); comp.gaze = self.gaze.currentText(); comp.aspect = self.aspect.currentText(); comp.subject_position = self.position.currentText()
         for field_name, state_box in self.composition_state_boxes.items():
@@ -790,6 +842,12 @@ class MainWindow(QMainWindow):
         try: p.seed = int(self.seed.text())
         except ValueError: p.seed = -1
         p.batch_size = self.batch.value()
+        self.job.positive_prompt = self.positive.toPlainText()
+        self.job.negative_prompt = self.negative.toPlainText()
+        if self.lock_compiled_prompt.isChecked():
+            self.job.compiled_prompt_state = ItemState.LOCKED
+        elif self.job.compiled_prompt_state == ItemState.LOCKED:
+            self.job.compiled_prompt_state = ItemState.USER_EDITED
 
     @staticmethod
     def _split(text: str) -> list[str]:
@@ -811,6 +869,7 @@ class MainWindow(QMainWindow):
         j = self.job
         self.project_name.setText(j.project_name); self.chinese.setPlainText(j.original_zh); self.english.setPlainText(j.translated_en)
         self.back_chinese.setPlainText(j.back_translated_zh); self.lock_english.setChecked(j.translation_state == ItemState.LOCKED)
+        self.lock_compiled_prompt.setChecked(j.compiled_prompt_state == ItemState.LOCKED)
         self._set_combo_data(self.model_combo, j.model_profile_id); self._set_combo_data(self.generation_combo, j.generation_preset_id); self._set_combo_data(self.quality_combo, j.quality_profile_id)
         c = j.composition; self.people_count.setValue(c.people_count)
         self._set_combo_data(self.subject_mode, j.subject_mode.value)
@@ -846,7 +905,12 @@ class MainWindow(QMainWindow):
         previous_updating = self._updating
         self._updating = True
         self.english.setPlainText(j.translated_en); self.back_chinese.setPlainText(j.back_translated_zh)
-        self.positive.setPlainText(j.positive_prompt); self.negative.setPlainText(j.negative_prompt)
+        if self.positive.toPlainText() != j.positive_prompt:
+            self.positive.setPlainText(j.positive_prompt)
+        if self.negative.toPlainText() != j.negative_prompt:
+            self.negative.setPlainText(j.negative_prompt)
+        self.lock_compiled_prompt.setChecked(j.compiled_prompt_state == ItemState.LOCKED)
+        self._update_compiled_prompt_hint()
         c = j.composition
         if c.people_count > 0:
             self._cached_character_people_count = c.people_count
@@ -923,15 +987,33 @@ class MainWindow(QMainWindow):
                     profile.id, profile.display_name, Path(profile.file_name).stem,
                 } if value)
             self.job.translation_state = ItemState.LOCKED if self.lock_english.isChecked() and self.job.translated_en else ItemState.AUTO
+            preserve = self.lock_compiled_prompt.isChecked()
+            positive, negative = self.job.positive_prompt, self.job.negative_prompt
+            if not preserve:
+                self.job.compiled_prompt_state = ItemState.AUTO
             self.pipeline.translate(self.job, known_entities)
+            if preserve:
+                self.job.positive_prompt = positive
+                self.job.negative_prompt = negative
+                self.job.compiled_prompt_state = ItemState.LOCKED
             self._refresh_results()
             self.statusBar().showMessage("翻译、回译、匹配和编译已完成。", 5000)
         except Exception as exc: self._show_error("处理失败", exc)
 
     def compile_edited_english(self) -> None:
         try:
-            self._sync_ui_to_job(); self.pipeline.update_english(self.job, self.english.toPlainText())
-            if self.lock_english.isChecked(): self.job.translation_state = ItemState.LOCKED
+            self._sync_ui_to_job()
+            preserve = self.lock_compiled_prompt.isChecked()
+            positive, negative = self.job.positive_prompt, self.job.negative_prompt
+            self.pipeline.update_english(self.job, self.english.toPlainText())
+            if self.lock_english.isChecked():
+                self.job.translation_state = ItemState.LOCKED
+            if preserve:
+                self.job.positive_prompt = positive
+                self.job.negative_prompt = negative
+                self.job.compiled_prompt_state = ItemState.LOCKED
+            else:
+                self.job.compiled_prompt_state = ItemState.AUTO
             self._refresh_results()
         except Exception as exc: self._show_error("重新编译失败", exc)
 
@@ -943,8 +1025,55 @@ class MainWindow(QMainWindow):
 
     def _sync_and_recompile(self) -> None:
         self._sync_ui_to_job()
+        preserve = self.job.compiled_prompt_state in {ItemState.USER_EDITED, ItemState.LOCKED}
+        positive = self.job.positive_prompt
+        negative = self.job.negative_prompt
         people_override = None if self.job.effective_subject_mode() == SubjectMode.SCENE else self.job.composition.people_count
         self.pipeline.recompile(self.job, people_count_override=people_override)
+        if preserve:
+            self.job.positive_prompt = positive
+            self.job.negative_prompt = negative
+
+    def on_compiled_prompt_edited(self) -> None:
+        if self._updating:
+            return
+        if self.job.compiled_prompt_state != ItemState.LOCKED:
+            self.job.compiled_prompt_state = ItemState.USER_EDITED
+        self.job.positive_prompt = self.positive.toPlainText()
+        self.job.negative_prompt = self.negative.toPlainText()
+        self._update_compiled_prompt_hint()
+
+    def on_compiled_prompt_lock_changed(self) -> None:
+        if self._updating:
+            return
+        if self.lock_compiled_prompt.isChecked():
+            self.job.positive_prompt = self.positive.toPlainText()
+            self.job.negative_prompt = self.negative.toPlainText()
+            self.job.compiled_prompt_state = ItemState.LOCKED
+            self._update_compiled_prompt_hint()
+            return
+        if self.job.compiled_prompt_state == ItemState.LOCKED:
+            self.job.compiled_prompt_state = ItemState.USER_EDITED
+        self._update_compiled_prompt_hint()
+
+    def restore_compiled_prompt_from_compiler(self) -> None:
+        self.lock_compiled_prompt.setChecked(False)
+        self.job.compiled_prompt_state = ItemState.AUTO
+        self.recompile_from_ui()
+
+    def _update_compiled_prompt_hint(self) -> None:
+        if not hasattr(self, "compiled_prompt_hint"):
+            return
+        state = self.job.compiled_prompt_state
+        self.restore_compiled_prompt.setEnabled(state != ItemState.AUTO)
+        if state == ItemState.LOCKED:
+            self.compiled_prompt_hint.setText("最终提示词已锁定。翻译、改构图或改参数都不会覆盖这一栏。")
+        elif state == ItemState.USER_EDITED:
+            self.compiled_prompt_hint.setText("已手动修改。点「生成」会用这里的文本；点「翻译并编译」或「恢复自动编译」才会重写。")
+        else:
+            self.compiled_prompt_hint.setText(
+                "可直接改最终英文再生成。「锁定英文」只锁中间翻译，不会锁这一栏。"
+            )
 
     def on_people_count_changed(self, count: int) -> None:
         if self._updating:
@@ -1009,7 +1138,7 @@ class MainWindow(QMainWindow):
     def on_composition_mode_changed(self) -> None:
         if self._updating:
             return
-        mode = self.composition_mode.currentData() or "mixed"
+        mode = self.composition_mode.currentData() or "smart"
         self.job.composition.mode = mode
         previous = self._updating; self._updating = True
         if mode == "smart":
@@ -1047,10 +1176,15 @@ class MainWindow(QMainWindow):
                 alternative_index=self._composition_alternative_index,
             )
             self._refresh_results()
-            self.statusBar().showMessage(
-                f"已切换到备选构图 {self._composition_alternative_index + 1}；明确要求和锁定项保持不变。",
-                5000,
-            )
+            fallback = self.pipeline.composition_recommender.last_result.fallback_preset_name
+            if fallback:
+                message = f"已切换到经典构图「{fallback}」；明确要求和锁定项保持不变。"
+            else:
+                message = (
+                    f"已切换到备选构图 {self._composition_alternative_index + 1}；"
+                    "明确要求和锁定项保持不变。"
+                )
+            self.statusBar().showMessage(message, 5000)
         except Exception as exc:
             self._show_error("切换备选构图失败", exc)
 
@@ -1189,7 +1323,8 @@ class MainWindow(QMainWindow):
             except Exception as exc: self._show_error("读取历史失败", exc)
 
     def new_job(self) -> None:
-        self.job = PromptJob(); self.pipeline.compiler.apply_model_defaults(self.job); self._load_job_into_ui()
+        self.job = PromptJob(); self.pipeline.compiler.apply_model_defaults(self.job)
+        self.pipeline.composition_recommender.apply_aspect_dimensions(self.job); self._load_job_into_ui()
 
     def export_json(self) -> None:
         self._sync_and_recompile(); self._refresh_results()
@@ -1473,7 +1608,18 @@ class MainWindow(QMainWindow):
             except Exception:
                 workflow_supported = False
         ready = bool(self.remote_host_edit.text().strip()) and workflow_supported
-        self.remote_generate_button.setEnabled(ready and self._active_generation_worker is None)
+        queued = len(self._generation_queue)
+        at_cap = queued >= MAX_GENERATION_QUEUE
+        self.remote_generate_button.setEnabled(ready and not at_cap)
+        if self._active_generation_worker is not None or queued:
+            self.remote_generate_button.setText(
+                f"加入队列（已有 {queued} 项等待）" if queued else "加入队列"
+            )
+        else:
+            self.remote_generate_button.setText("生成并自动下载")
+        self.remote_cancel_button.setEnabled(
+            self._active_generation_worker is not None or queued > 0
+        )
 
     def _refresh_remote_controls(self, selected_remote_id: str = "", selected_workflow_id: str = "") -> None:
         if not hasattr(self, "remote_profile_combo"):
@@ -1722,7 +1868,7 @@ class MainWindow(QMainWindow):
 
     def _workflow_selection_changed(self) -> None:
         profile_id = self.workflow_profile_combo.currentData()
-        if not profile_id or self._active_generation_worker is not None:
+        if not profile_id:
             return
         try:
             profile = self._ensure_workflow_model_compatibility(
@@ -1869,25 +2015,37 @@ class MainWindow(QMainWindow):
 
     def generate_remote(self) -> None:
         try:
-            self._sync_and_recompile()
-            self._refresh_results()
-            profile = self._selected_remote_profile()
-            workflow = self._selected_workflow_profile()
-            if not profile.known_host_fingerprint:
-                raise ValueError("请先执行“连接测试”并确认 SSH 主机指纹。")
-            if workflow.workflow_kind not in SUPPORTED_GENERATION_WORKFLOW_KINDS:
-                raise ValueError(
-                    "这个复杂工作流已经识别并保留在列表中，但执行适配安排在下一版本。"
-                    "V2 请使用标有“V2 可直接生成”的工作流。"
-                )
-            model_profile = self.configs.get_model(self.job.model_profile_id)
-            output_root = Path(self.repository.get_setting(
-                "generation_output_root",
-                str(Path.home() / "Pictures" / "AnimaPromptStudio"),
-            ))
-            if not self.job.positive_prompt.strip():
-                raise ValueError("当前正向提示词为空，请先翻译并编译。")
-            params = self.job.generation_params
+            request = self._prepare_generation_request()
+            if request is None:
+                return
+            self._enqueue_or_start_generation(request)
+        except Exception as exc:
+            self._show_error("无法开始远程生成", exc)
+
+    def _prepare_generation_request(self) -> QueuedGeneration | None:
+        self._sync_and_recompile()
+        self._refresh_results()
+        profile = self._selected_remote_profile()
+        workflow = self._selected_workflow_profile()
+        if not profile.known_host_fingerprint:
+            raise ValueError("请先执行“连接测试”并确认 SSH 主机指纹。")
+        if workflow.workflow_kind not in SUPPORTED_GENERATION_WORKFLOW_KINDS:
+            raise ValueError(
+                "这个复杂工作流已经识别并保留在列表中，但执行适配安排在下一版本。"
+                "V2 请使用标有“V2 可直接生成”的工作流。"
+            )
+        model_profile = self.configs.get_model(self.job.model_profile_id)
+        output_root = Path(self.repository.get_setting(
+            "generation_output_root",
+            str(Path.home() / "Pictures" / "AnimaPromptStudio"),
+        ))
+        if not self.job.positive_prompt.strip():
+            raise ValueError("当前正向提示词为空，请先翻译并编译。")
+        if len(self._generation_queue) >= MAX_GENERATION_QUEUE:
+            raise ValueError(f"文生图队列已达到 {MAX_GENERATION_QUEUE} 项，请等当前任务完成后再添加。")
+        params = self.job.generation_params
+        busy = self._active_generation_worker is not None or bool(self._generation_queue)
+        if not busy:
             if workflow.workflow_kind == HIRES_FIX_WORKFLOW_KIND:
                 scale = self._workflow_upscale_factor(workflow)
                 output_width = round(params.width * scale)
@@ -1908,27 +2066,68 @@ class MainWindow(QMainWindow):
                 f"{size_summary}"
                 f"批量：{params.batch_size}\n"
                 f"保存根目录：{output_root}\n\n"
-                "提交后，本次任务将使用当前参数快照。是否继续？",
+                "提交后，本次任务将使用当前参数快照。生图过程中可以继续改提示词并加入队列。是否继续？",
             )
             if answer != QMessageBox.Yes:
-                return
-            credentials = self._request_remote_credentials(profile)
-            if credentials is None:
-                return
-            self.repository.save_job(self.job)
-            job_snapshot = self.job.model_copy(deep=True)
-            worker = GenerationWorker(
-                job=job_snapshot,
-                run=None,
-                profile=profile,
-                workflow_profile=workflow,
-                checkpoint_logical_name=model_profile.checkpoint_logical_name,
-                credentials=credentials,
-                output_root=output_root,
-            )
-            self._launch_generation_worker(worker)
-        except Exception as exc:
-            self._show_error("无法开始远程生成", exc)
+                return None
+        credentials = self._credentials_for_generation(profile)
+        if credentials is None:
+            return None
+        self.repository.save_job(self.job)
+        snapshot = self.job.model_copy(deep=True)
+        preview = (snapshot.original_zh or snapshot.positive_prompt).replace("\n", " ").strip()
+        return QueuedGeneration(
+            job=snapshot,
+            profile=profile,
+            workflow=workflow,
+            checkpoint_logical_name=model_profile.checkpoint_logical_name,
+            credentials=credentials,
+            output_root=output_root,
+            summary=preview[:40] or snapshot.project_name,
+        )
+
+    def _credentials_for_generation(self, profile: RemoteProfile) -> RemoteCredentials | None:
+        current = None
+        if self._active_generation_worker is not None and self._active_generation_worker.profile.id == profile.id:
+            current = self._active_generation_worker.credentials
+        elif self._generation_queue and self._generation_queue[-1].profile.id == profile.id:
+            current = self._generation_queue[-1].credentials
+        if current is not None and (
+            profile.auth_type != RemoteAuthType.PASSWORD or current.password
+        ):
+            return current
+        return self._request_remote_credentials(profile)
+
+    def _enqueue_or_start_generation(self, request: QueuedGeneration) -> None:
+        if self._active_generation_worker is None:
+            self._launch_generation_worker(self._worker_from_request(request))
+            return
+        self._generation_queue.append(request)
+        position = len(self._generation_queue)
+        self._update_remote_ready_state()
+        self.remote_status.setText(self._generation_status_text(self.remote_status.text()))
+        self.statusBar().showMessage(
+            f"已加入队列第 {position} 位：{request.summary}。可继续改提示词再点「加入队列」。",
+            8000,
+        )
+
+    def _worker_from_request(self, request: QueuedGeneration) -> GenerationWorker:
+        return GenerationWorker(
+            job=request.job,
+            run=None,
+            profile=request.profile,
+            workflow_profile=request.workflow,
+            checkpoint_logical_name=request.checkpoint_logical_name,
+            credentials=request.credentials,
+            output_root=request.output_root,
+        )
+
+    def _generation_status_text(self, message: str) -> str:
+        base = str(message or "").split(" · 队列")[0]
+        queued = len(self._generation_queue)
+        if queued:
+            return f"{base} · 队列 {queued} 项"
+        return base
 
     @staticmethod
     def _workflow_upscale_factor(workflow) -> float:
@@ -1942,6 +2141,9 @@ class MainWindow(QMainWindow):
             return 1.5
 
     def resume_remote_generation(self) -> None:
+        if self._active_generation_worker is not None:
+            QMessageBox.information(self, "正在生成", "请等当前文生图任务完成后再恢复未完成的任务。")
+            return
         active = [run for run in self.repository.list_active_generation_runs() if run.remote_prompt_id]
         if not active:
             QMessageBox.information(self, "没有可恢复任务", "当前没有已经提交到 ComfyUI 的未完成任务。")
@@ -1972,10 +2174,9 @@ class MainWindow(QMainWindow):
 
     def _launch_generation_worker(self, worker: GenerationWorker) -> None:
         self._active_generation_worker = worker
-        self.remote_generate_button.setEnabled(False)
         self.remote_resume_button.setEnabled(False)
-        self.remote_cancel_button.setEnabled(True)
         self.remote_progress.setValue(0)
+        self._update_remote_ready_state()
         worker.updated.connect(self._remote_generation_updated)
         worker.succeeded.connect(self._remote_generation_succeeded)
         worker.failed.connect(self._remote_generation_failed)
@@ -1985,31 +2186,60 @@ class MainWindow(QMainWindow):
     def _remote_generation_updated(self, run) -> None:
         self.repository.save_generation_run(run)
         self.remote_progress.setValue(round(run.progress * 100))
-        self.remote_status.setText(run.status_message or run.state.value)
-        self.remote_cancel_button.setEnabled(run.state.value in {"connecting", "preparing", "queued"})
-        self._refresh_remote_controls()
+        self.remote_status.setText(self._generation_status_text(run.status_message or run.state.value))
+        self._update_resume_button()
+        self._update_remote_ready_state()
 
     def _remote_generation_succeeded(self, run, artifacts) -> None:
         self.repository.save_generation_run(run)
         for artifact in artifacts:
             self.repository.save_generation_artifact(artifact)
         self._last_output_dir = run.output_dir
+        remaining = len(self._generation_queue)
+        if remaining:
+            self.image_gallery.refresh(run.id)
+            self.remote_open_button.setEnabled(self.image_gallery.has_images)
+            self.remote_status.setText(self._generation_status_text(f"完成 · 已下载 {len(artifacts)} 张图片"))
+            self.statusBar().showMessage(
+                f"远程生图完成：{run.output_dir}。队列中还有 {remaining} 项。",
+                8000,
+            )
+            return
         self.show_image_gallery(run.id)
         self.remote_status.setText(f"完成 · 已下载 {len(artifacts)} 张图片")
         self.statusBar().showMessage(f"远程生图完成：{run.output_dir}", 10000)
 
     def _remote_generation_failed(self, run, message: str) -> None:
         self.repository.save_generation_run(run)
-        self.remote_status.setText("远程生成失败")
-        QMessageBox.critical(self, "远程生成失败", message)
+        remaining = len(self._generation_queue)
+        self.remote_status.setText(self._generation_status_text("远程生成失败"))
+        suffix = f"\n\n队列中还有 {remaining} 项，将继续执行。" if remaining else ""
+        QMessageBox.critical(self, "远程生成失败", message + suffix)
 
     def _remote_generation_done(self) -> None:
         self._active_generation_worker = None
-        self.remote_cancel_button.setEnabled(False)
+        if self._generation_queue:
+            next_request = self._generation_queue.pop(0)
+            self.statusBar().showMessage(f"开始队列下一项：{next_request.summary}", 5000)
+            self._launch_generation_worker(self._worker_from_request(next_request))
+            return
         self.remote_resume_button.setEnabled(True)
-        self._refresh_remote_controls()
+        self._update_resume_button()
+        self._update_remote_ready_state()
+
+    def _update_resume_button(self) -> None:
+        if not hasattr(self, "remote_resume_button"):
+            return
+        active_count = len(self.repository.list_active_generation_runs())
+        self.remote_resume_button.setText(f"恢复未完成 ({active_count})" if active_count else "恢复未完成")
 
     def cancel_remote_generation(self) -> None:
+        if self._generation_queue:
+            dropped = self._generation_queue.pop()
+            self._update_remote_ready_state()
+            self.remote_status.setText(self._generation_status_text(self.remote_status.text()))
+            self.statusBar().showMessage(f"已取消排队：{dropped.summary}", 5000)
+            return
         if self._active_generation_worker:
             self._active_generation_worker.cancel()
             self.remote_status.setText("正在请求取消…")
@@ -2044,6 +2274,7 @@ class MainWindow(QMainWindow):
         log.exception(title, exc_info=exc); QMessageBox.critical(self, title, str(exc))
 
     def closeEvent(self, event) -> None:
+        self._generation_queue.clear()
         if self._active_generation_worker:
             self._active_generation_worker.cancel()
         still_running = []

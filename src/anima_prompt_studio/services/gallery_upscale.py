@@ -61,6 +61,32 @@ def choose_txt2img_workflow(
     )
 
 
+def snapshot_regen_parameters(asset: dict[str, Any]) -> dict[str, Any]:
+    """Keep the source image's sampling settings so regen does not fall back to defaults."""
+    raw = asset.get("parameters") if isinstance(asset.get("parameters"), dict) else {}
+    nested = raw.get("generation_params") if isinstance(raw.get("generation_params"), dict) else {}
+    source = raw.get("source") if isinstance(raw.get("source"), dict) else {}
+    snapshot: dict[str, Any] = {}
+    for field_name in ("steps", "cfg", "sampler", "scheduler"):
+        value = nested.get(field_name, raw.get(field_name))
+        if value not in (None, ""):
+            snapshot[field_name] = value
+    preset = raw.get("generation_preset_id") or raw.get("generation_preset") or nested.get("generation_preset_id")
+    quality = raw.get("quality_profile_id") or raw.get("quality_profile") or nested.get("quality_profile_id")
+    if preset:
+        snapshot["generation_preset_id"] = preset
+    if quality:
+        snapshot["quality_profile_id"] = quality
+    for field_name, value in (
+        ("negative_prompt", raw.get("negative_prompt") or nested.get("negative_prompt")),
+        ("original_zh", raw.get("original_zh") or source.get("original_zh")),
+        ("translated_en", raw.get("translated_en") or source.get("translated_en")),
+    ):
+        if value not in (None, ""):
+            snapshot[field_name] = value
+    return snapshot
+
+
 def build_gallery_regen_job(
     asset: dict[str, Any],
     *,
@@ -71,8 +97,8 @@ def build_gallery_regen_job(
     prompt = str(asset.get("prompt") or "").strip()
     if not prompt:
         raise GalleryUpscaleError("这张图片没有保存提示词，无法再出图。")
-    raw = asset.get("parameters") if isinstance(asset.get("parameters"), dict) else {}
-    nested = raw.get("generation_params") if isinstance(raw.get("generation_params"), dict) else raw
+    raw = snapshot_regen_parameters(asset)
+    nested = raw
     model_id = str(asset.get("model") or raw.get("model_profile_id") or "anima_base_v1")
     count = max(1, min(int(count), GALLERY_REGEN_MAX_COUNT))
     job = PromptJob(
@@ -436,6 +462,7 @@ class GalleryProcessJob:
     project: str = "画廊高清修复"
     model: str = "anima_base_v1"
     prompt: str = ""
+    parameters: dict[str, Any] = field(default_factory=dict)
     queue_position: int = 0
     generation_run_id: str = ""
     remote_prompt_id: str = ""
@@ -475,6 +502,7 @@ class GalleryProcessJob:
             project=str(payload.get("project") or "画廊高清修复"),
             model=str(payload.get("model") or "anima_base_v1"),
             prompt=str(payload.get("prompt") or ""),
+            parameters=dict(payload.get("parameters") or {}) if isinstance(payload.get("parameters"), dict) else {},
             queue_position=int(payload.get("queuePosition") or 0),
             generation_run_id=str(payload.get("generationRunId") or ""),
             remote_prompt_id=str(payload.get("remotePromptId") or ""),
@@ -503,6 +531,7 @@ class GalleryProcessJob:
             "project": self.project,
             "model": self.model,
             "prompt": self.prompt,
+            "parameters": dict(self.parameters),
             "queuePosition": self.queue_position,
             "generationRunId": self.generation_run_id,
             "remotePromptId": self.remote_prompt_id,
@@ -700,6 +729,7 @@ class GalleryUpscaleManager:
                 project=str(asset.get("project") or source.parent.name or "画廊再出图"),
                 model=model_id,
                 prompt=prompt,
+                parameters=snapshot_regen_parameters(asset),
                 queue_position=queue_position,
                 message=f"等待再出图 · 队列第 {queue_position} 位",
             )
@@ -1051,6 +1081,7 @@ class GalleryUpscaleManager:
             "prompt": process_job.prompt,
             "width": process_job.source_width,
             "height": process_job.source_height,
+            "parameters": dict(process_job.parameters),
         }
         try:
             job = build_gallery_regen_job(asset, workflow_id=workflow.id, count=process_job.batch_count)

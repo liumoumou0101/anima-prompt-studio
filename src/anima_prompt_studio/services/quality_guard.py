@@ -11,7 +11,11 @@ class QualityTagGuard:
 
     SAFETY_TAGS = {"safe", "sensitive", "nsfw", "explicit"}
     NIGHT_STYLE_TAGS = {"night", "neon lights", "cyberpunk atmosphere", "rim lighting"}
+    DAYLIGHT_TAGS = {"sunlight", "bright lighting", "clear sky"}
+    INDOOR_WARM_TAGS = {"indoor lighting", "lamp light", "cozy atmosphere"}
+    RAIN_MOOD_TAGS = {"overcast", "rain", "fog", "mist"}
     DYNAMIC_TAGS = {"dynamic angle", "motion lines", "speed lines", "dynamic pose", "action shot"}
+    HARMFUL_TAGS = {"anatomical detail"}
 
     _EXPLICIT_ZH = (
         "裸体", "全裸", "露点", "乳头", "阴茎", "阴部", "性交", "性爱", "做爱",
@@ -46,6 +50,22 @@ class QualityTagGuard:
     _navel_re = re.compile(r"(?:肚脐|小腹|腹部|露脐|腰腹|\bnavel\b|\bmidriff\b|\bbelly\b)", re.I)
     _sheer_re = re.compile(r"(?:透明衣|透视装|薄纱|半透明|\bsheer\b|\btransparent (?:fabric|clothes|clothing)\b)", re.I)
     _lace_re = re.compile(r"(?:蕾丝|花边|\blace\b)", re.I)
+    _outdoor_re = re.compile(
+        r"(?:街道|马路|街头|海边|沙滩|野外|山顶|山脚|公园|户外|广场|"
+        r"\boutdoors?\b|\bstreet\b|\bbeach\b|\bfield\b|\bmountain\b|\bplaza\b)",
+        re.I,
+    )
+    _indoor_re = re.compile(
+        r"(?:室内|房间|卧室|客厅|教室|咖啡馆|窗边|屋里|屋内|"
+        r"\bindoors?\b|\bbedroom\b|\bclassroom\b|\bliving room\b|\bby the window\b)",
+        re.I,
+    )
+    _sunny_re = re.compile(
+        r"(?:晴天|晴朗|烈日|阳光灿烂|大晴天|"
+        r"\bsunny\b|\bclear sky\b|\bbright sunlight\b)",
+        re.I,
+    )
+    _rain_re = re.compile(r"(?:下雨|雨天|阴天|起雾|雾气|\brain\b|\bovercast\b|\bfog\b|\bmist\b)", re.I)
 
     @staticmethod
     def _context(job: PromptJob) -> str:
@@ -95,6 +115,7 @@ class QualityTagGuard:
     def filter(self, job: PromptJob, tags: list[str]) -> list[str]:
         context = self._context(job)
         blocked = set(self.SAFETY_TAGS)
+        blocked.update(self.HARMFUL_TAGS)
 
         if self._day_re.search(context) and not self._night_re.search(context):
             blocked.add("night")
@@ -104,6 +125,14 @@ class QualityTagGuard:
                 blocked.add("cyberpunk atmosphere")
             if not re.search(r"(?:轮廓光|边缘光|\brim light(?:ing)?\b)", context, re.I):
                 blocked.add("rim lighting")
+        if self._night_re.search(context) and not self._day_re.search(context):
+            blocked.update(self.DAYLIGHT_TAGS)
+        if self._outdoor_re.search(context) and not self._indoor_re.search(context):
+            blocked.update(self.INDOOR_WARM_TAGS)
+        if self._sunny_re.search(context) and not self._rain_re.search(context):
+            blocked.update(self.RAIN_MOOD_TAGS)
+        if re.search(r"(?:不下雨|没有下雨|没有雨|无雨)", self._source_zh(job)):
+            blocked.add("rain")
         if self._still_re.search(context) and not self._motion_re.search(context):
             blocked.update(self.DYNAMIC_TAGS)
         if not self._breast_re.search(context):
