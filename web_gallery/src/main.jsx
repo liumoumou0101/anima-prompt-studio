@@ -10,6 +10,7 @@ import {
   FolderOpen,
   Funnel,
   Heart,
+  Images,
   ImageSquare,
   ListChecks,
   MagnifyingGlass,
@@ -30,7 +31,7 @@ import "./styles.css";
 
 const EMPTY_DATA = {
   assets: [], projects: [], models: [], batches: [], trashCount: 0,
-  processing: { available: false, reason: "", scale: 1.5, workflowName: "", activeJob: null, queuedCount: 0 },
+  processing: { available: false, reason: "", scale: 1.5, workflowName: "", regenAvailable: false, regenReason: "", regenWorkflowName: "", regenMaxCount: 4, activeJob: null, queuedCount: 0 },
   processingToken: "",
 };
 const THUMB_SIZE_KEY = "anima-gallery-thumb-size";
@@ -120,6 +121,8 @@ function App() {
   const [processSubmitting, setProcessSubmitting] = useState(false);
   const [processJobs, setProcessJobs] = useState([]);
   const [confirmAssets, setConfirmAssets] = useState([]);
+  const [regenAssets, setRegenAssets] = useState([]);
+  const [regenCount, setRegenCount] = useState(1);
   const [taskCenterOpen, setTaskCenterOpen] = useState(false);
   const [pendingResultPath, setPendingResultPath] = useState("");
   const [visibleLimit, setVisibleLimit] = useState(160);
@@ -263,6 +266,10 @@ function App() {
           setConfirmAssets([]);
           return;
         }
+        if (regenAssets.length) {
+          setRegenAssets([]);
+          return;
+        }
         if (taskCenterOpen) {
           setTaskCenterOpen(false);
           return;
@@ -282,7 +289,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [active, confirmAssets, taskCenterOpen, view, visible]);
+  }, [active, confirmAssets, regenAssets, taskCenterOpen, view, visible]);
 
   const selectedAssets = useMemo(
     () => data.assets.filter((asset) => selected.has(asset.id)),
@@ -455,6 +462,32 @@ function App() {
     }
   };
 
+  const startRegen = async () => {
+    const assets = regenAssets.filter((asset) => asset.prompt);
+    if (!assets.length || processSubmitting) return;
+    setProcessSubmitting(true);
+    setError("");
+    try {
+      const result = await postJson(
+        "/api/gallery/process",
+        { operation: "txt2img_more", count: regenCount, paths: assets.map((asset) => asset.path) },
+        data.processingToken,
+      );
+      setProcessJobs((previous) => [...(result.jobs || []), ...previous]);
+      setRegenAssets([]);
+      setSelected(new Set());
+      setTaskCenterOpen(true);
+      const accepted = result.jobs?.length || 0;
+      const failed = result.failed?.length || 0;
+      setNotice(`已加入 ${accepted} 项同提示词再出图任务${failed ? `，${failed} 项未加入` : ""}`);
+      if (failed) setError(result.failed.map((item) => `${item.path}：${item.error}`).join("；"));
+    } catch (reason) {
+      setError("无法加入再出图队列：" + (reason.message || reason));
+    } finally {
+      setProcessSubmitting(false);
+    }
+  };
+
   const processAction = async (job, action) => {
     try {
       await postJson("/api/gallery/process/action", { job: job?.id || "", action }, data.processingToken);
@@ -622,6 +655,7 @@ function App() {
           processing={data.processing}
           processJobs={processJobs}
           onUpscale={() => setConfirmAssets([active])}
+          onRegen={() => { setRegenCount(1); setRegenAssets([active]); }}
         />
       )}
 
@@ -630,6 +664,18 @@ function App() {
           job={activeProcessJob}
           queuedCount={queuedProcessCount}
           onOpen={() => setTaskCenterOpen(true)}
+        />
+      )}
+
+      {regenAssets.length > 0 && (
+        <RegenConfirmDialog
+          assets={regenAssets}
+          processing={data.processing}
+          count={regenCount}
+          submitting={processSubmitting}
+          onCount={setRegenCount}
+          onCancel={() => setRegenAssets([])}
+          onConfirm={startRegen}
         />
       )}
 
@@ -666,7 +712,9 @@ function App() {
           onRestore={restoreSelected}
           onDelete={deleteSelected}
           upscaleAvailable={data.processing?.available}
+          regenAvailable={data.processing?.regenAvailable}
           onUpscale={() => setConfirmAssets(selectedAssets)}
+          onRegen={() => { setRegenCount(1); setRegenAssets(selectedAssets); }}
         />
       )}
 
@@ -737,12 +785,13 @@ function PhotoCard({ asset, style, selected, active, onOpen, onPreview, onToggle
       {!isTrash && asset.state === "rejected" && <span className="state-badge rejected"><X size={14} weight="bold" />淘汰</span>}
       {!isTrash && asset.source === "external" && <span className="source-badge"><FolderOpen size={13} />外部图片</span>}
       {asset.parameters?.operation === "gallery_upscale_1_5x" && <span className="process-badge"><MagicWand size={13} />1.5× 修复</span>}
+      {asset.parameters?.operation === "gallery_txt2img_more" && <span className="process-badge regen"><Images size={13} />再出图</span>}
       <span className="photo-name">{asset.name}</span>
     </article>
   );
 }
 
-function DetailDrawer({ asset, isTrash, onClose, onPreview, onCopy, onReveal, onState, processing, processJobs, onUpscale }) {
+function DetailDrawer({ asset, isTrash, onClose, onPreview, onCopy, onReveal, onState, processing, processJobs, onUpscale, onRegen }) {
   const parameters = Object.entries(asset.parameters || {}).filter(([key]) => !["width", "height"].includes(key)).slice(0, 5);
   const processJob = processJobs.find((job) => job.sourcePath === asset.path && !["completed", "failed", "canceled"].includes(job.state));
   const activeForAsset = processJob && processJob.state !== "queued";
@@ -766,6 +815,16 @@ function DetailDrawer({ asset, isTrash, onClose, onPreview, onCopy, onReveal, on
         {asset.prompt && <section className="prompt-section"><h3>提示词</h3><p>{asset.prompt}</p><button onClick={() => onCopy(asset.prompt, "提示词")}><Copy size={17} />复制提示词</button></section>}
       </div>
       {!isTrash && <footer className="drawer-footer">
+        <button
+          className="upscale-button regen-button"
+          onClick={onRegen}
+          disabled={!processing?.regenAvailable || !asset.prompt || Boolean(processJob)}
+          title={!asset.prompt ? "这张图片没有保存提示词" : !processing?.regenAvailable ? processing?.regenReason : waitingForAsset ? `队列第 ${processJob.queuePosition} 位` : ""}
+        >
+          <Images size={19} weight="duotone" />
+          {asset.prompt ? "用同样提示词再出图" : "没有保存提示词"}
+        </button>
+        {!processing?.regenAvailable && <p className="upscale-unavailable">{processing?.regenReason}</p>}
         <button
           className="upscale-button"
           onClick={onUpscale}
@@ -804,11 +863,15 @@ function UpscaleConfirmDialog({ assets, processing, submitting, onCancel, onConf
   );
 }
 
+function processLabel(job) {
+  return job?.operation === "gallery_txt2img_more" ? "再出图" : "1.5× 高清修复";
+}
+
 function ProcessStatus({ job, queuedCount, onOpen }) {
   return (
     <button className="process-status" onClick={onOpen} type="button">
       <div className="process-status-icon">{job ? <SpinnerGap className="spin" size={20} /> : <ListChecks size={20} />}</div>
-      <div><strong>{job ? "正在进行 1.5× 高清修复" : "高清修复任务队列"}</strong><span>{job?.message || `等待处理 ${queuedCount} 项`}{queuedCount > 0 && job ? ` · 后面还有 ${queuedCount} 项` : ""}</span>{job && <progress max="1" value={job.progress || 0} aria-label="高清修复进度" />}</div>
+      <div><strong>{job ? `正在进行${processLabel(job)}` : "画廊任务队列"}</strong><span>{job?.message || `等待处理 ${queuedCount} 项`}{queuedCount > 0 && job ? ` · 后面还有 ${queuedCount} 项` : ""}</span>{job && <progress max="1" value={job.progress || 0} aria-label="任务进度" />}</div>
       <span className="process-status-open">查看任务</span>
     </button>
   );
@@ -824,15 +887,15 @@ function TaskCenter({ jobs, assets, processing, onClose, onAction, onOpenResult 
     return "处理中";
   };
   return (
-    <aside className="task-center" aria-label="高清修复任务中心">
-      <header><div><ListChecks size={21} /><span>高清修复任务</span></div><button onClick={onClose} aria-label="关闭任务中心"><X size={22} /></button></header>
+    <aside className="task-center" aria-label="画廊任务中心">
+      <header><div><ListChecks size={21} /><span>画廊任务</span></div><button onClick={onClose} aria-label="关闭任务中心"><X size={22} /></button></header>
       <div className="task-summary">
         <div><strong>{processing?.activeCount || 0}</strong><span>处理中</span></div>
         <div><strong>{processing?.queuedCount || 0}</strong><span>等待中</span></div>
         <div><strong>{processing?.failedCount || 0}</strong><span>失败</span></div>
       </div>
       <div className="task-list">
-        {!jobs.length && <div className="task-empty"><ListChecks size={32} weight="thin" /><span>还没有高清修复任务</span></div>}
+        {!jobs.length && <div className="task-empty"><ListChecks size={32} weight="thin" /><span>还没有画廊任务</span></div>}
         {jobs.map((job) => {
           const asset = assets.find((item) => item.path === job.sourcePath);
           const active = !["queued", "completed", "failed", "canceled"].includes(job.state);
@@ -841,7 +904,7 @@ function TaskCenter({ jobs, assets, processing, onClose, onAction, onOpenResult 
               <img src={asset?.thumbnail || `/api/thumbnail?path=${encodeURIComponent(job.sourcePath)}&size=240`} alt="" />
               <div className="task-card-body">
                 <div className="task-card-title"><strong>{job.sourceName}</strong><span>{stateLabel(job)}</span></div>
-                <small>{job.sourceWidth} × {job.sourceHeight} → {job.targetWidth} × {job.targetHeight}</small>
+                <small>{processLabel(job)} · {job.sourceWidth} × {job.sourceHeight}{job.operation === "gallery_txt2img_more" ? ` · ${job.batchCount || 1} 张` : ` → ${job.targetWidth} × ${job.targetHeight}`}</small>
                 <p>{job.state === "failed" ? job.error || job.message : job.message}</p>
                 {active && <progress max="1" value={job.progress || 0} aria-label={`${job.sourceName} 处理进度`} />}
                 <div className="task-actions">
@@ -859,14 +922,53 @@ function TaskCenter({ jobs, assets, processing, onClose, onAction, onOpenResult 
   );
 }
 
-function SelectionBar({ assets, isTrash, busy, onClear, onCompare, onState, onTrash, onRestore, onDelete, upscaleAvailable, onUpscale }) {
+function SelectionBar({ assets, isTrash, busy, onClear, onCompare, onState, onTrash, onRestore, onDelete, upscaleAvailable, regenAvailable, onUpscale, onRegen }) {
+  const canRegen = regenAvailable && assets.some((asset) => asset.prompt);
   return (
     <section className="selection-bar" aria-label="批量操作">
       <div className="selection-summary"><strong>已选择 {assets.length} 项</strong><button onClick={onClear}>清除</button><div>{assets.slice(0, 3).map((asset) => <img key={asset.id} src={asset.thumbnail || asset.src} alt="" />)}</div></div>
       <div className="selection-actions">
-        {isTrash ? <><button onClick={onRestore} disabled={busy}><ClockCounterClockwise size={19} />恢复</button><button className="danger" onClick={onDelete} disabled={busy}><Trash size={19} />永久删除</button></> : <><button className="upscale" onClick={onUpscale} disabled={busy || !upscaleAvailable}><MagicWand size={19} />1.5× 修复</button><button onClick={onCompare} disabled={assets.length < 2 || assets.length > 4}><SlidersHorizontal size={19} />比较</button><button className="keep" onClick={() => onState("kept")} disabled={busy}><Heart size={19} />保留</button><button onClick={() => onState("rejected")} disabled={busy}><X size={19} />淘汰</button><button className="danger" onClick={onTrash} disabled={busy}><Trash size={19} />移入画廊回收站</button></>}
+        {isTrash ? <><button onClick={onRestore} disabled={busy}><ClockCounterClockwise size={19} />恢复</button><button className="danger" onClick={onDelete} disabled={busy}><Trash size={19} />永久删除</button></> : <><button className="regen" onClick={onRegen} disabled={busy || !canRegen}><Images size={19} />再出图</button><button className="upscale" onClick={onUpscale} disabled={busy || !upscaleAvailable}><MagicWand size={19} />1.5× 修复</button><button onClick={onCompare} disabled={assets.length < 2 || assets.length > 4}><SlidersHorizontal size={19} />比较</button><button className="keep" onClick={() => onState("kept")} disabled={busy}><Heart size={19} />保留</button><button onClick={() => onState("rejected")} disabled={busy}><X size={19} />淘汰</button><button className="danger" onClick={onTrash} disabled={busy}><Trash size={19} />移入画廊回收站</button></>}
       </div>
     </section>
+  );
+}
+
+function RegenConfirmDialog({ assets, processing, count, submitting, onCount, onCancel, onConfirm }) {
+  const usable = assets.filter((asset) => asset.prompt);
+  const skipped = assets.length - usable.length;
+  const asset = usable[0] || assets[0];
+  const maxCount = processing?.regenMaxCount || 4;
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
+      <section className="upscale-dialog" role="dialog" aria-modal="true" aria-labelledby="regen-dialog-title">
+        <header><Images size={24} weight="duotone" /><div><h2 id="regen-dialog-title">用同样的提示词再出图</h2><p>按原图保存的提示词、尺寸和模型，用新的随机种子再生成 {usable.length} 组图片</p></div></header>
+        <div className="upscale-source">
+          <img src={asset?.thumbnail || asset?.src} alt="待再出图原图" />
+          <div>
+            <strong>{asset?.name}{usable.length > 1 ? ` 等 ${usable.length} 张` : ""}</strong>
+            <span>{asset?.width} × {asset?.height} · {asset?.model || "未知模型"}</span>
+            <span>{processing?.regenWorkflowName || "基础文生图"}</span>
+          </div>
+        </div>
+        {asset?.prompt && <p className="upscale-note regen-prompt">{asset.prompt}</p>}
+        <label className="regen-count">
+          <span>每张再出</span>
+          <select value={count} onChange={(event) => onCount(Number(event.target.value))} disabled={submitting}>
+            {Array.from({ length: maxCount }, (_, index) => index + 1).map((value) => (
+              <option key={value} value={value}>{value} 张</option>
+            ))}
+          </select>
+        </label>
+        <p className="upscale-note">结果不会覆盖原图。没有保存提示词的图片会被跳过{skipped ? `（本次跳过 ${skipped} 张）` : ""}。任务会和 1.5× 修复共用同一个云端队列。</p>
+        <footer>
+          <button onClick={onCancel} disabled={submitting}>取消</button>
+          <button className="confirm-upscale confirm-regen" onClick={onConfirm} disabled={submitting || !usable.length} autoFocus>
+            {submitting ? <><SpinnerGap className="spin" size={18} />正在加入…</> : <><Images size={18} />加入队列</>}
+          </button>
+        </footer>
+      </section>
+    </div>
   );
 }
 

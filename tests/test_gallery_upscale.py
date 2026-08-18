@@ -17,12 +17,17 @@ from anima_prompt_studio.domain.execution_models import (
     WorkflowProfile,
 )
 from anima_prompt_studio.services.gallery_upscale import (
+    GALLERY_REGEN_OPERATION,
     GALLERY_UPSCALE_OPERATION,
     GalleryUpscaleError,
     GalleryUpscaleExecutionResult,
     GalleryUpscaleManager,
     GalleryUpscaleRenderer,
+    build_gallery_regen_job,
+    choose_txt2img_workflow,
+    snapshot_regen_parameters,
 )
+from anima_prompt_studio.services.remote.execution_coordinator import ExecutionResult
 from anima_prompt_studio.services.remote.comfy_client import ComfyUIClient
 
 
@@ -342,3 +347,193 @@ def test_gallery_upscale_manager_marks_interrupted_jobs_failed_on_reload(tmp_pat
     assert reloaded_job["state"] == "failed"
     assert "退出" in reloaded_job["message"]
     controller["release_first"].set()
+
+
+def _txt2img_profile(profile_id="01___Base_Quality_T2I", model="anima_base_v1"):
+    return WorkflowProfile(
+        id=profile_id,
+        display_name=profile_id,
+        api_workflow={
+            "3": {"class_type": "KSampler", "inputs": {"seed": 1, "steps": 20, "cfg": 4.5, "sampler_name": "euler", "scheduler": "normal"}},
+            "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "anima.safetensors"}},
+            "5": {"class_type": "EmptyLatentImage", "inputs": {"width": 896, "height": 1152, "batch_size": 1}},
+            "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "pos"}},
+            "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "neg"}},
+            "8": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ComfyUI"}},
+        },
+        bindings={
+            "positive_prompt": WorkflowBinding(node_id="6", input="text"),
+            "negative_prompt": WorkflowBinding(node_id="7", input="text"),
+            "checkpoint": WorkflowBinding(node_id="4", input="ckpt_name"),
+            "seed": WorkflowBinding(node_id="3", input="seed"),
+            "steps": WorkflowBinding(node_id="3", input="steps"),
+            "cfg": WorkflowBinding(node_id="3", input="cfg"),
+            "sampler": WorkflowBinding(node_id="3", input="sampler_name"),
+            "scheduler": WorkflowBinding(node_id="3", input="scheduler"),
+            "width": WorkflowBinding(node_id="5", input="width"),
+            "height": WorkflowBinding(node_id="5", input="height"),
+            "batch_size": WorkflowBinding(node_id="5", input="batch_size"),
+            "filename_prefix": WorkflowBinding(node_id="8", input="filename_prefix"),
+        },
+        workflow_kind="txt2img_basic",
+        compatible_model_profiles=[model],
+    )
+
+
+def test_choose_txt2img_workflow_prefers_base_quality_for_anima_base():
+    profiles = [
+        _txt2img_profile("02___Turbo_Fast_T2I", "anima_turbo_v1"),
+        _txt2img_profile("01___Base_Quality_T2I", "anima_base_v1"),
+        _txt2img_profile("22___Aesthetic_v1.1", "anima_aesthetic_v1"),
+    ]
+    chosen = choose_txt2img_workflow(profiles, "anima_base_v1")
+    assert chosen is not None
+    assert chosen.id.startswith("01")
+
+
+def test_build_gallery_regen_job_requires_prompt_and_keeps_size():
+    with pytest.raises(GalleryUpscaleError, match="提示词"):
+        build_gallery_regen_job({"width": 640, "height": 832}, workflow_id="01", count=2)
+
+    job = build_gallery_regen_job(
+        {
+            "prompt": "1girl, solo, sitting",
+            "project": "测试项目",
+            "model": "anima_base_v1",
+            "width": 640,
+            "height": 832,
+            "parameters": {
+                "steps": 40,
+                "cfg": 5.0,
+                "sampler": "er_sde",
+                "scheduler": "sgm_uniform",
+                "generation_preset": "quality",
+                "quality_profile": "ultimate_general",
+                "negative_prompt": "lowres, blurry",
+            },
+        },
+        workflow_id="01___Base_Quality_T2I",
+        count=3,
+    )
+    assert job.positive_prompt == "1girl, solo, sitting"
+    assert job.generation_params.width == 640
+    assert job.generation_params.height == 832
+    assert job.generation_params.batch_size == 3
+    assert job.generation_params.steps == 40
+    assert job.generation_params.cfg == 5.0
+    assert job.generation_params.sampler == "er_sde"
+    assert job.generation_params.scheduler == "sgm_uniform"
+    assert job.generation_preset_id == "quality"
+    assert job.quality_profile_id == "ultimate_general"
+    assert job.negative_prompt == "lowres, blurry"
+    assert job.generation_params.seed == -1
+
+
+def test_snapshot_regen_parameters_reads_nested_generation_params():
+    snapshot = snapshot_regen_parameters({
+        "parameters": {
+            "generation_params": {"steps": 35, "cfg": 4.5, "sampler": "euler", "scheduler": "normal"},
+            "generation_preset_id": "balanced",
+            "source": {"original_zh": "一个女孩"},
+        }
+    })
+    assert snapshot["steps"] == 35
+    assert snapshot["cfg"] == 4.5
+    assert snapshot["sampler"] == "euler"
+    assert snapshot["scheduler"] == "normal"
+    assert snapshot["generation_preset_id"] == "balanced"
+    assert snapshot["original_zh"] == "一个女孩"
+
+
+class _RegenCoordinator:
+    def __init__(self, controller, *, organizer, renderer=None, on_update=None, **kwargs):
+        self.controller = controller
+        self.organizer = organizer
+        self.on_update = on_update
+
+    def execute(self, job, remote_profile, workflow_profile, checkpoint_logical_name, credentials=None):
+        run = GenerationRun(
+            prompt_job_id=job.id,
+            remote_profile_id=remote_profile.id,
+            workflow_profile_id=workflow_profile.id,
+        )
+        run.request_json = {"prompt_job": job.model_dump(mode="json"), "resolved_seed": 99}
+        if self.on_update:
+            self.on_update(run)
+        artifact = self.organizer.save_artifact(
+            job,
+            run,
+            RemoteArtifact(filename="more.png"),
+            b"regen-bytes",
+            1,
+            "image/png",
+        )
+        run.update_state(GenerationRunState.COMPLETED, "完成", 1.0)
+        if self.on_update:
+            self.on_update(run)
+        self.controller["jobs"].append(job)
+        return ExecutionResult(run=run, artifacts=[artifact])
+
+
+def test_gallery_manager_queues_same_prompt_regen(tmp_path):
+    output_root = tmp_path / "images"
+    output_root.mkdir()
+    source = output_root / "kept.png"
+    source.write_bytes(b"source")
+    controller = {"jobs": []}
+    manager = GalleryUpscaleManager(
+        tmp_path / "queue.db",
+        output_root,
+        regen_coordinator_factory=lambda **kwargs: _RegenCoordinator(controller, **kwargs),
+    )
+    manager.configure(
+        RemoteProfile(
+            display_name="test",
+            ssh_host="localhost",
+            ssh_user="tester",
+            auth_type=RemoteAuthType.AGENT,
+            known_host_fingerprint="SHA256:test",
+        ),
+        _tile_profile(),
+        RemoteCredentials(),
+        txt2img_workflows=[_txt2img_profile()],
+    )
+    payload = manager.configuration_payload()
+    assert payload["regenAvailable"] is True
+    submitted = manager.submit_regenerate(
+        source,
+        "kept.png",
+        {
+            "path": "kept.png",
+            "project": "动作验证",
+            "model": "anima_base_v1",
+            "prompt": "1girl, hugging own legs",
+            "width": 896,
+            "height": 1152,
+            "parameters": {
+                "steps": 40,
+                "cfg": 5.0,
+                "sampler": "er_sde",
+                "scheduler": "beta",
+                "generation_preset_id": "quality",
+                "negative_prompt": "lowres",
+            },
+        },
+        count=2,
+    )
+    assert submitted["operation"] == GALLERY_REGEN_OPERATION
+    assert submitted["batchCount"] == 2
+    assert submitted["parameters"]["steps"] == 40
+    _wait_for(lambda: manager.get(submitted["id"])["state"] == "completed")
+    queued_job = controller["jobs"][0]
+    assert queued_job.generation_params.batch_size == 2
+    assert queued_job.positive_prompt == "1girl, hugging own legs"
+    assert queued_job.generation_params.steps == 40
+    assert queued_job.generation_params.cfg == 5.0
+    assert queued_job.generation_params.sampler == "er_sde"
+    assert queued_job.generation_params.scheduler == "beta"
+    assert queued_job.generation_preset_id == "quality"
+    assert queued_job.negative_prompt == "lowres"
+    completed = manager.get(submitted["id"])
+    assert completed["resultPath"]
+    assert "再出图完成" in completed["message"]

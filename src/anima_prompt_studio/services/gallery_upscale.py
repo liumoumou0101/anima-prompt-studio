@@ -18,15 +18,123 @@ from anima_prompt_studio.domain.execution_models import (
     RemoteProfile,
     WorkflowProfile,
 )
-from anima_prompt_studio.domain.models import GenerationParams, PromptJob, utc_now
+from anima_prompt_studio.domain.models import GenerationFieldState, GenerationParams, PromptJob, utc_now
 from anima_prompt_studio.repositories import SQLiteRepository
+from anima_prompt_studio.services.config_service import ConfigService
+from anima_prompt_studio.services.prompt_compiler import PromptCompiler
 from anima_prompt_studio.services.remote.comfy_client import ComfyAPIError, ComfyUIClient
+from anima_prompt_studio.services.remote.execution_coordinator import (
+    RemoteExecutionCoordinator,
+    RemoteExecutionError,
+)
 from anima_prompt_studio.services.remote.result_organizer import ResultOrganizer
 from anima_prompt_studio.services.remote.ssh_tunnel import SshTunnel
+from anima_prompt_studio.services.remote.workflow_renderer import WorkflowRenderer, WorkflowRenderResult
 
 
 GALLERY_UPSCALE_OPERATION = "gallery_upscale_1_5x"
+GALLERY_REGEN_OPERATION = "gallery_txt2img_more"
 GALLERY_UPSCALE_SCALE = 1.5
+GALLERY_REGEN_MAX_COUNT = 4
+
+
+def choose_txt2img_workflow(
+    profiles: list[WorkflowProfile],
+    model_profile_id: str,
+) -> WorkflowProfile | None:
+    """Pick a tested basic txt2img workflow compatible with the source model."""
+    candidates = [
+        profile for profile in profiles
+        if profile.workflow_kind == "txt2img_basic"
+        and (
+            not profile.compatible_model_profiles
+            or model_profile_id in profile.compatible_model_profiles
+        )
+    ]
+    if not candidates:
+        candidates = [profile for profile in profiles if profile.workflow_kind == "txt2img_basic"]
+    preferred = "02" if model_profile_id == "anima_turbo_v1" else (
+        "22" if model_profile_id == "anima_aesthetic_v1" else "01"
+    )
+    return next((item for item in candidates if item.id.startswith(preferred)), None) or (
+        candidates[0] if candidates else None
+    )
+
+
+def snapshot_regen_parameters(asset: dict[str, Any]) -> dict[str, Any]:
+    """Keep the source image's sampling settings so regen does not fall back to defaults."""
+    raw = asset.get("parameters") if isinstance(asset.get("parameters"), dict) else {}
+    nested = raw.get("generation_params") if isinstance(raw.get("generation_params"), dict) else {}
+    source = raw.get("source") if isinstance(raw.get("source"), dict) else {}
+    snapshot: dict[str, Any] = {}
+    for field_name in ("steps", "cfg", "sampler", "scheduler"):
+        value = nested.get(field_name, raw.get(field_name))
+        if value not in (None, ""):
+            snapshot[field_name] = value
+    preset = raw.get("generation_preset_id") or raw.get("generation_preset") or nested.get("generation_preset_id")
+    quality = raw.get("quality_profile_id") or raw.get("quality_profile") or nested.get("quality_profile_id")
+    if preset:
+        snapshot["generation_preset_id"] = preset
+    if quality:
+        snapshot["quality_profile_id"] = quality
+    for field_name, value in (
+        ("negative_prompt", raw.get("negative_prompt") or nested.get("negative_prompt")),
+        ("original_zh", raw.get("original_zh") or source.get("original_zh")),
+        ("translated_en", raw.get("translated_en") or source.get("translated_en")),
+    ):
+        if value not in (None, ""):
+            snapshot[field_name] = value
+    return snapshot
+
+
+def build_gallery_regen_job(
+    asset: dict[str, Any],
+    *,
+    workflow_id: str,
+    count: int,
+) -> PromptJob:
+    """Rebuild a PromptJob from a gallery asset so the same prompt can run again."""
+    prompt = str(asset.get("prompt") or "").strip()
+    if not prompt:
+        raise GalleryUpscaleError("这张图片没有保存提示词，无法再出图。")
+    raw = snapshot_regen_parameters(asset)
+    nested = raw
+    model_id = str(asset.get("model") or raw.get("model_profile_id") or "anima_base_v1")
+    count = max(1, min(int(count), GALLERY_REGEN_MAX_COUNT))
+    job = PromptJob(
+        project_name=str(asset.get("project") or "画廊再出图") + "·再出图",
+        original_zh=str(raw.get("original_zh") or ""),
+        translated_en=str(raw.get("translated_en") or ""),
+        positive_prompt=prompt,
+        negative_prompt=str(raw.get("negative_prompt") or ""),
+        model_profile_id=model_id,
+        generation_preset_id=str(raw.get("generation_preset_id") or "balanced"),
+        quality_profile_id=str(raw.get("quality_profile_id") or "standard"),
+        workflow_template_id=workflow_id,
+        notes=f"画廊同提示词再出图，源图：{asset.get('path') or asset.get('name') or ''}",
+    )
+    PromptCompiler(ConfigService()).apply_model_defaults(job)
+    width = int(asset.get("width") or nested.get("width") or job.generation_params.width)
+    height = int(asset.get("height") or nested.get("height") or job.generation_params.height)
+    job.generation_params.width = width
+    job.generation_params.height = height
+    job.generation_params.batch_size = count
+    job.generation_params.seed = -1
+    job.generation_params.set_state("width", GenerationFieldState.USER_SELECTED)
+    job.generation_params.set_state("height", GenerationFieldState.USER_SELECTED)
+    job.generation_params.set_state("batch_size", GenerationFieldState.USER_SELECTED)
+    for field_name in ("steps", "cfg", "sampler", "scheduler"):
+        value = nested.get(field_name)
+        if value in (None, ""):
+            continue
+        if field_name == "cfg":
+            setattr(job.generation_params, field_name, float(value))
+        elif field_name in {"steps"}:
+            setattr(job.generation_params, field_name, int(value))
+        else:
+            setattr(job.generation_params, field_name, str(value))
+        job.generation_params.set_state(field_name, GenerationFieldState.USER_SELECTED)
+    return job
 
 
 class GalleryUpscaleError(RuntimeError):
@@ -349,9 +457,12 @@ class GalleryProcessJob:
     target_width: int
     target_height: int
     workflow_name: str
+    operation: str = GALLERY_UPSCALE_OPERATION
+    batch_count: int = 1
     project: str = "画廊高清修复"
     model: str = "anima_base_v1"
     prompt: str = ""
+    parameters: dict[str, Any] = field(default_factory=dict)
     queue_position: int = 0
     generation_run_id: str = ""
     remote_prompt_id: str = ""
@@ -386,9 +497,12 @@ class GalleryProcessJob:
             target_width=int(payload.get("targetWidth") or 0),
             target_height=int(payload.get("targetHeight") or 0),
             workflow_name=str(payload.get("workflowName") or ""),
+            operation=str(payload.get("operation") or GALLERY_UPSCALE_OPERATION),
+            batch_count=max(1, min(int(payload.get("batchCount") or 1), GALLERY_REGEN_MAX_COUNT)),
             project=str(payload.get("project") or "画廊高清修复"),
             model=str(payload.get("model") or "anima_base_v1"),
             prompt=str(payload.get("prompt") or ""),
+            parameters=dict(payload.get("parameters") or {}) if isinstance(payload.get("parameters"), dict) else {},
             queue_position=int(payload.get("queuePosition") or 0),
             generation_run_id=str(payload.get("generationRunId") or ""),
             remote_prompt_id=str(payload.get("remotePromptId") or ""),
@@ -412,9 +526,12 @@ class GalleryProcessJob:
             "targetWidth": self.target_width,
             "targetHeight": self.target_height,
             "workflowName": self.workflow_name,
+            "operation": self.operation,
+            "batchCount": self.batch_count,
             "project": self.project,
             "model": self.model,
             "prompt": self.prompt,
+            "parameters": dict(self.parameters),
             "queuePosition": self.queue_position,
             "generationRunId": self.generation_run_id,
             "remotePromptId": self.remote_prompt_id,
@@ -438,12 +555,15 @@ class GalleryUpscaleManager:
         output_root: Path,
         *,
         coordinator_factory: Callable[..., GalleryUpscaleCoordinator] = GalleryUpscaleCoordinator,
+        regen_coordinator_factory: Callable[..., RemoteExecutionCoordinator] = RemoteExecutionCoordinator,
     ) -> None:
         self.repository_path = repository_path
         self.output_root = output_root.expanduser()
         self.coordinator_factory = coordinator_factory
+        self.regen_coordinator_factory = regen_coordinator_factory
         self._remote_profile: RemoteProfile | None = None
         self._workflow_profile: WorkflowProfile | None = None
+        self._txt2img_workflows: list[WorkflowProfile] = []
         self._credentials = RemoteCredentials()
         self._jobs: dict[str, GalleryProcessJob] = {}
         self._lock = threading.RLock()
@@ -488,10 +608,14 @@ class GalleryUpscaleManager:
         remote_profile: RemoteProfile | None,
         workflow_profile: WorkflowProfile | None,
         credentials: RemoteCredentials | None,
+        txt2img_workflows: list[WorkflowProfile] | None = None,
     ) -> None:
         with self._condition:
             self._remote_profile = remote_profile.model_copy(deep=True) if remote_profile else None
             self._workflow_profile = workflow_profile.model_copy(deep=True) if workflow_profile else None
+            self._txt2img_workflows = [
+                item.model_copy(deep=True) for item in (txt2img_workflows or [])
+            ]
             self._credentials = (credentials or RemoteCredentials()).model_copy(deep=True)
             self._condition.notify_all()
 
@@ -501,11 +625,17 @@ class GalleryUpscaleManager:
             active_job = next((job for job in self._jobs.values() if self._is_active(job)), None)
             queued = [job for job in self._jobs.values() if job.state == "queued"]
             failed = [job for job in self._jobs.values() if job.state == "failed"]
+            regen_reason = self._regen_reason()
+            regen_workflow = choose_txt2img_workflow(self._txt2img_workflows, "anima_base_v1")
             return {
                 "available": not reason,
                 "reason": reason,
                 "scale": GALLERY_UPSCALE_SCALE,
                 "workflowName": self._workflow_profile.display_name if self._workflow_profile else "",
+                "regenAvailable": not regen_reason,
+                "regenReason": regen_reason,
+                "regenWorkflowName": regen_workflow.display_name if regen_workflow else "",
+                "regenMaxCount": GALLERY_REGEN_MAX_COUNT,
                 "activeJob": active_job.payload() if active_job else None,
                 "activeCount": 1 if active_job else 0,
                 "queuedCount": len(queued),
@@ -555,6 +685,59 @@ class GalleryUpscaleManager:
             self._condition.notify_all()
             return process_job.payload()
 
+    def submit_regenerate(
+        self,
+        source: Path,
+        relative_path: str,
+        asset: dict[str, Any],
+        count: int = 1,
+    ) -> dict[str, Any]:
+        with self._condition:
+            reason = self._regen_reason(str(asset.get("model") or ""))
+            if reason:
+                raise GalleryUpscaleError(reason)
+            prompt = str(asset.get("prompt") or "").strip()
+            if not prompt:
+                raise GalleryUpscaleError("这张图片没有保存提示词，无法再出图。外部导入的图片请先用主窗口生成。")
+            pending = [job for job in self._jobs.values() if not job.terminal]
+            if len(pending) >= self.MAX_PENDING_JOBS:
+                raise GalleryUpscaleError(f"任务队列已达到 {self.MAX_PENDING_JOBS} 项，请稍后再添加。")
+            count = max(1, min(int(count), GALLERY_REGEN_MAX_COUNT))
+            width = int(asset.get("width") or 0)
+            height = int(asset.get("height") or 0)
+            if width <= 0 or height <= 0:
+                raise GalleryUpscaleError("无法识别原图尺寸。")
+            model_id = str(asset.get("model") or "anima_base_v1")
+            workflow = choose_txt2img_workflow(self._txt2img_workflows, model_id)
+            if workflow is None:
+                raise GalleryUpscaleError("没有找到可用的基础文生图工作流。")
+            queue_position = max(
+                (job.queue_position for job in self._jobs.values() if job.state == "queued"),
+                default=0,
+            ) + 1
+            process_job = GalleryProcessJob(
+                id=str(uuid4()),
+                source_path=relative_path,
+                source_name=source.name,
+                source_width=width,
+                source_height=height,
+                target_width=width,
+                target_height=height,
+                workflow_name=workflow.display_name,
+                operation=GALLERY_REGEN_OPERATION,
+                batch_count=count,
+                project=str(asset.get("project") or source.parent.name or "画廊再出图"),
+                model=model_id,
+                prompt=prompt,
+                parameters=snapshot_regen_parameters(asset),
+                queue_position=queue_position,
+                message=f"等待再出图 · 队列第 {queue_position} 位",
+            )
+            self._jobs[process_job.id] = process_job
+            self._persist_locked(process_job)
+            self._condition.notify_all()
+            return process_job.payload()
+
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
             job = self._jobs.get(job_id)
@@ -590,17 +773,22 @@ class GalleryUpscaleManager:
 
     def retry(self, job_id: str) -> dict[str, Any]:
         with self._condition:
-            reason = self._unavailable_reason()
-            if reason:
-                raise GalleryUpscaleError(reason)
             job = self._jobs.get(job_id)
             if job is None:
                 raise GalleryUpscaleError("任务不存在或已经被清理。")
+            reason = (
+                self._regen_reason(job.model)
+                if job.operation == GALLERY_REGEN_OPERATION
+                else self._unavailable_reason()
+            )
+            if reason:
+                raise GalleryUpscaleError(reason)
             if job.state not in {"failed", "canceled"}:
                 raise GalleryUpscaleError("只有失败或已取消的任务可以重试。")
-            if any(
+            if job.operation != GALLERY_REGEN_OPERATION and any(
                 not other.terminal
                 and other.id != job.id
+                and other.operation != GALLERY_REGEN_OPERATION
                 and other.source_path.casefold() == job.source_path.casefold()
                 for other in self._jobs.values()
             ):
@@ -642,11 +830,9 @@ class GalleryUpscaleManager:
         with self._lock:
             return {job.source_path for job in self._jobs.values() if not job.terminal}
 
-    def _unavailable_reason(self) -> str:
+    def _connection_reason(self) -> str:
         if self._remote_profile is None:
             return "请先在主窗口配置并连接云显卡。"
-        if self._workflow_profile is None or not GalleryUpscaleRenderer.supports(self._workflow_profile):
-            return "没有找到可用的“20 分块放大”工作流。"
         if (
             self._remote_profile.auth_type == RemoteAuthType.PASSWORD
             and not self._credentials.password
@@ -654,6 +840,22 @@ class GalleryUpscaleManager:
             return "云主机密码不可用，请先回到主窗口连接一次。"
         if not self._remote_profile.known_host_fingerprint:
             return "请先在主窗口连接并确认云主机指纹。"
+        return ""
+
+    def _unavailable_reason(self) -> str:
+        connection = self._connection_reason()
+        if connection:
+            return connection
+        if self._workflow_profile is None or not GalleryUpscaleRenderer.supports(self._workflow_profile):
+            return "没有找到可用的“20 分块放大”工作流。"
+        return ""
+
+    def _regen_reason(self, model_profile_id: str = "") -> str:
+        connection = self._connection_reason()
+        if connection:
+            return connection
+        if choose_txt2img_workflow(self._txt2img_workflows, model_profile_id or "anima_base_v1") is None:
+            return "没有找到可用的基础文生图工作流。"
         return ""
 
     @staticmethod
@@ -709,19 +911,26 @@ class GalleryUpscaleManager:
                 job.updated_at = utc_now()
                 self._persist_locked(job)
 
+    def _job_ready_locked(self, job: GalleryProcessJob) -> bool:
+        if job.operation == GALLERY_REGEN_OPERATION:
+            return not self._regen_reason(job.model)
+        return not self._unavailable_reason()
+
+    def _next_runnable_locked(self) -> GalleryProcessJob | None:
+        queued = sorted(
+            (job for job in self._jobs.values() if job.state == "queued"),
+            key=lambda job: (job.queue_position, job.created_at),
+        )
+        return next((job for job in queued if self._job_ready_locked(job)), None)
+
     def _run_loop(self) -> None:
         while True:
             with self._condition:
                 while True:
                     if self._stopping:
                         return
-                    ready = not self._unavailable_reason()
-                    queued = sorted(
-                        (job for job in self._jobs.values() if job.state == "queued"),
-                        key=lambda job: (job.queue_position, job.created_at),
-                    )
-                    if ready and queued:
-                        process_job = queued[0]
+                    process_job = self._next_runnable_locked()
+                    if process_job:
                         process_job.state = "starting"
                         process_job.message = "正在准备任务"
                         process_job.progress = 0.01
@@ -731,12 +940,21 @@ class GalleryUpscaleManager:
                         self._persist_locked(process_job)
                         self._renumber_queue_locked()
                         remote = self._remote_profile.model_copy(deep=True)
-                        workflow = self._workflow_profile.model_copy(deep=True)
+                        workflow = (
+                            choose_txt2img_workflow(self._txt2img_workflows, process_job.model)
+                            if process_job.operation == GALLERY_REGEN_OPERATION
+                            else self._workflow_profile
+                        )
+                        workflow = workflow.model_copy(deep=True) if workflow else None
                         credentials = self._credentials.model_copy(deep=True)
                         output_root = self.output_root
+                        txt2img_workflows = [item.model_copy(deep=True) for item in self._txt2img_workflows]
                         break
                     self._condition.wait()
-            self._run(process_job, remote, workflow, credentials, output_root)
+            if process_job.operation == GALLERY_REGEN_OPERATION:
+                self._run_regen(process_job, remote, workflow, credentials, output_root, txt2img_workflows)
+            else:
+                self._run(process_job, remote, workflow, credentials, output_root)
 
     def _run(
         self,
@@ -829,6 +1047,126 @@ class GalleryUpscaleManager:
                 if current:
                     current.state = "failed"
                     current.message = "高清修复失败"
+                    current.error = str(exc)
+                    current.updated_at = utc_now()
+                    self._persist_locked(current)
+        finally:
+            repository.close()
+
+    def _run_regen(
+        self,
+        process_job: GalleryProcessJob,
+        remote: RemoteProfile,
+        workflow: WorkflowProfile | None,
+        credentials: RemoteCredentials,
+        output_root: Path,
+        txt2img_workflows: list[WorkflowProfile],
+    ) -> None:
+        if workflow is None:
+            workflow = choose_txt2img_workflow(txt2img_workflows, process_job.model)
+        if workflow is None:
+            with self._lock:
+                current = self._jobs.get(process_job.id)
+                if current:
+                    current.state = "failed"
+                    current.message = "再出图失败"
+                    current.error = "没有找到可用的基础文生图工作流。"
+                    current.updated_at = utc_now()
+                    self._persist_locked(current)
+            return
+        asset = {
+            "path": process_job.source_path,
+            "project": process_job.project,
+            "model": process_job.model,
+            "prompt": process_job.prompt,
+            "width": process_job.source_width,
+            "height": process_job.source_height,
+            "parameters": dict(process_job.parameters),
+        }
+        try:
+            job = build_gallery_regen_job(asset, workflow_id=workflow.id, count=process_job.batch_count)
+        except GalleryUpscaleError as exc:
+            with self._lock:
+                current = self._jobs.get(process_job.id)
+                if current:
+                    current.state = "failed"
+                    current.message = "再出图失败"
+                    current.error = str(exc)
+                    current.updated_at = utc_now()
+                    self._persist_locked(current)
+            return
+        repository = SQLiteRepository(self.repository_path)
+        repository.save_job(job)
+
+        def on_update(run: GenerationRun) -> None:
+            repository.save_generation_run(run)
+            with self._lock:
+                current = self._jobs.get(process_job.id)
+                if current is None:
+                    return
+                if run.state == GenerationRunState.COMPLETED:
+                    current.state = GenerationRunState.DOWNLOADING.value
+                    current.message = "正在将结果加入画廊"
+                    current.progress = 0.99
+                else:
+                    current.state = run.state.value
+                    current.message = run.status_message or run.state.value
+                    current.progress = run.progress
+                current.generation_run_id = run.id
+                current.remote_prompt_id = run.remote_prompt_id
+                current.updated_at = utc_now()
+                self._persist_locked(current)
+
+        class _TaggedRenderer(WorkflowRenderer):
+            def render(self, *args, **kwargs) -> WorkflowRenderResult:
+                result = super().render(*args, **kwargs)
+                metadata = dict(result.metadata)
+                metadata["operation"] = GALLERY_REGEN_OPERATION
+                metadata["source_image"] = process_job.source_path
+                return WorkflowRenderResult(
+                    workflow=result.workflow,
+                    resolved_seed=result.resolved_seed,
+                    checkpoint_name=result.checkpoint_name,
+                    metadata=metadata,
+                )
+
+        coordinator = self.regen_coordinator_factory(
+            organizer=ResultOrganizer(output_root),
+            renderer=_TaggedRenderer(),
+            on_update=on_update,
+        )
+        try:
+            result = coordinator.execute(
+                job,
+                remote,
+                workflow,
+                job.model_profile_id,
+                credentials,
+            )
+            repository.save_generation_run(result.run)
+            for artifact in result.artifacts:
+                repository.save_generation_artifact(artifact)
+            result_path = ""
+            if result.artifacts:
+                try:
+                    result_path = Path(result.artifacts[0].local_path).resolve().relative_to(output_root.resolve()).as_posix()
+                except ValueError:
+                    result_path = ""
+            with self._lock:
+                current = self._jobs.get(process_job.id)
+                if current:
+                    current.state = "completed"
+                    current.message = f"再出图完成，已加入 {len(result.artifacts)} 张"
+                    current.progress = 1.0
+                    current.result_path = result_path
+                    current.updated_at = utc_now()
+                    self._persist_locked(current)
+        except (RemoteExecutionError, Exception) as exc:
+            with self._lock:
+                current = self._jobs.get(process_job.id)
+                if current:
+                    current.state = "failed"
+                    current.message = "再出图失败"
                     current.error = str(exc)
                     current.updated_at = utc_now()
                     self._persist_locked(current)

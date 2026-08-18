@@ -102,3 +102,52 @@ def test_single_girl_still_gets_solo():
     assert "1girl" in tags
     assert "solo" in tags
     assert "1boy" not in tags
+
+
+def test_two_girls_and_one_boy_is_not_just_2girls():
+    job = _pipeline("两个女孩和一个男孩站在一起")
+    tags = _head_tags(job)
+    assert job.composition.people_count == 3
+    assert job.semantic_frame.final_attributes.get("people_mix") == "2f1m"
+    assert {"2girls", "1boy"} <= tags
+    assert "3people" not in tags
+    assert "solo" not in tags
+
+
+def test_two_boys_and_one_girl_split_tags():
+    job = _pipeline("一个女孩和两个男孩在房间里")
+    tags = _head_tags(job)
+    assert job.composition.people_count == 3
+    assert {"1girl", "2boys"} <= tags
+    assert "3people" not in tags
+
+
+def test_compact_two_female_one_male():
+    job = _pipeline("两女一男在床上")
+    tags = _head_tags(job)
+    assert job.composition.people_count == 3
+    assert {"2girls", "1boy"} <= tags
+
+
+def test_yuri_oral_is_not_forced_hetero():
+    job = _pipeline("一个女孩给另一个女孩口交")
+    tags = _head_tags(job)
+    assert job.composition.people_count == 2
+    assert "2girls" in tags
+    assert "1boy" not in tags
+    assert "yuri" in tags or "fellatio" in tags or "oral" in tags
+
+    slang = _pipeline("女女口交")
+    slang_tags = _head_tags(slang)
+    assert slang.composition.people_count == 2
+    assert "2girls" in slang_tags
+    assert "1boy" not in slang_tags
+
+
+def test_named_pair_without_gender_words_is_two_people():
+    job = _pipeline("艾莉丝和贝拉站在窗边")
+    assert job.composition.people_count == 2
+    tags = _head_tags(job)
+    assert "solo" not in tags
+    assert "1girl" not in tags
+    assert "2people" in tags or "2girls" in tags

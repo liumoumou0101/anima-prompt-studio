@@ -145,6 +145,35 @@ def test_alternative_recommendation_changes_ranked_fields_but_keeps_explicit_int
     assert result.alternative_fields
 
 
+def test_classic_composition_presets_are_available(recommender):
+    expected = {
+        "cowboy_shot", "front_fullbody", "low_angle_hero", "high_angle",
+        "back_view", "thirds_left", "thirds_right", "cinematic_wide", "two_person",
+    }
+    assert expected <= set(recommender.configs.composition_presets)
+
+
+def test_generic_portrait_alternative_uses_classic_preset(recommender):
+    job = recommend(recommender, "一个短发女孩看向镜头微笑")
+    best = (job.composition.shot, job.composition.camera_height, job.composition.angle, job.composition.aspect)
+    result = recommender.recommend(job, alternative_index=1)
+    alternative = (job.composition.shot, job.composition.camera_height, job.composition.angle, job.composition.aspect)
+    assert alternative != best
+    assert result.fallback_preset_id == "portrait_closeup"
+    assert job.composition.shot == "头像"
+    assert job.composition.aspect == "方形"
+    assert job.composition.gaze == "看镜头"
+
+
+def test_generic_portrait_can_cycle_to_a_second_classic_preset(recommender):
+    job = recommend(recommender, "一个短发女孩看向镜头微笑")
+    first = recommender.recommend(job, alternative_index=1)
+    second = recommender.recommend(job, alternative_index=2)
+    assert first.fallback_preset_id != second.fallback_preset_id
+    assert job.composition.shot == "全身"
+    assert job.composition.angle == "正面"
+
+
 def test_mushroom_alternative_changes_only_one_nonsemantic_field(recommender):
     job = recommend(recommender, "一个暗精灵蹲在地上采蘑菇")
     best = {field: getattr(job.composition, field) for field in recommender.VALID_VALUES}

@@ -80,7 +80,10 @@ class PromptEnhancer:
             items.append(EnhancementItem(id="weak_emotion", type="情绪", source_rule="weak_emotion", content="She has a calm, soft expression.", tags=["soft expression"]))
         hand_scope = self._hand_scope(chinese)
         if hand_scope:
-            items = [item for item in items if item.id not in {"hair_tuck", "weak_emotion"}]
+            items = [
+                item for item in items
+                if item.id not in {"hair_tuck", "touching_hair", "weak_emotion"}
+            ]
             items.append(hand_scope)
         # Preserve order but avoid duplicate rule ids triggered by overlapping scenes.
         unique: dict[str, EnhancementItem] = {}
@@ -90,27 +93,110 @@ class PromptEnhancer:
 
     @staticmethod
     def _hand_scope(chinese: str) -> EnhancementItem | None:
-        """Build one canonical sentence when both hands have independently scoped actions."""
-        if "左手" not in chinese or "右手" not in chinese:
+        """Bind left/right hands to distinct actions, objects, or an empty hang."""
+        sentence = canonical_split_hands_sentence(chinese)
+        if not sentence:
             return None
-        clauses: list[str] = []
-        for hand in ("右手", "左手"):
-            segment = next((part for part in re.split(r"[,，;；。]", chinese) if hand in part), "")
-            side = "right" if hand == "右手" else "left"
-            if any(trigger in segment for trigger in ("把头发拨到耳后", "拨到耳后", "将发丝别到耳后", "别到耳后")):
-                clauses.append(f"tucks a strand of hair behind her ear with her {side} hand")
-            elif any(trigger in segment for trigger in ("撩头发", "拨头发", "摸头发", "手放在头发上", "整理头发")):
-                clauses.append(f"touches her hair with her {side} hand")
-            if "拿书" in segment or "拿着书" in segment:
-                clauses.append(f"holds a book in her {side} hand")
-            if "拿花" in segment or "拿着花" in segment:
-                clauses.append(f"holds a flower in her {side} hand")
-        if len(clauses) < 2:
-            return None
-        if "窗外" in chinese:
-            clauses.append("looks out the window")
-        content = "She " + ", ".join(clauses[:-1]) + (", and " if len(clauses) > 1 else "") + clauses[-1] + "."
         return EnhancementItem(
             id="hand_scope", type="人物作用域", source_rule="left_right_hands",
-            content=content, tags=[], replaces_translation=True,
+            content=sentence, tags=[], replaces_translation=True,
         )
+
+
+_HAND_HANGING = ("垂下", "垂在", "自然垂", "放在身侧", "垂在身侧")
+_HAND_OBJECTS = (
+    (("合上的书", "闭合的书", "合上的一本"), "a closed book", "book"),
+    (("书",), "a book", "book"),
+    (("马克杯",), "a mug", "mug"),
+    (("茶壶", "水壶"), "a teapot", "teapot"),
+    (("杯子", "茶杯", "咖啡杯"), "a cup", "cup"),
+    (("合上的伞", "闭合的雨伞", "合上的雨伞", "收起的伞", "收起的雨伞"), "a closed umbrella", "umbrella"),
+    (("雨伞", "伞"), "an umbrella", "umbrella"),
+    (("手机",), "a phone", "phone"),
+    (("花",), "a flower", "flower"),
+)
+_HAND_ACTIONS = (
+    (("把头发拨到耳后", "拨到耳后", "将发丝别到耳后", "别到耳后"), "tucks a strand of hair behind her ear with her {side} hand"),
+    (("撩头发", "拨头发", "摸头发", "手放在头发上", "整理头发"), "touches her hair with her {side} hand"),
+    (("裙摆", "掀裙", "提裙", "提起裙", "把裙"), "lifts her skirt with her {side} hand"),
+    (("胸口", "胸前"), "rests her {side} hand on her chest"),
+    (("下巴", "托腮"), "supports her chin with her {side} hand"),
+    (("挥手", "招手"), "waves with her {side} hand"),
+)
+
+
+def _hand_segment(chinese: str, hand: str) -> str:
+    return next((part for part in re.split(r"[,，;；。]", chinese) if hand in part), "")
+
+
+def _object_in_segment(segment: str) -> tuple[str, str] | None:
+    for triggers, english, key in _HAND_OBJECTS:
+        if any(trigger in segment for trigger in triggers):
+            return english, key
+    return None
+
+
+def parse_hand_roles(chinese: str) -> dict[str, dict[str, object]] | None:
+    """Map 左手/右手 clauses to hanging, object, or action roles."""
+    if "左手" not in chinese or "右手" not in chinese:
+        return None
+    roles: dict[str, dict[str, object]] = {}
+    for hand, side in (("右手", "right"), ("左手", "left")):
+        segment = _hand_segment(chinese, hand)
+        if not segment:
+            return None
+        hanging = any(token in segment for token in _HAND_HANGING)
+        action = next(
+            (template.format(side=side) for triggers, template in _HAND_ACTIONS if any(token in segment for token in triggers)),
+            "",
+        )
+        found = _object_in_segment(segment)
+        object_en, object_key = found if found else ("", "")
+        if not action and not object_en and not hanging:
+            return None
+        roles[side] = {
+            "side": side,
+            "hanging": hanging and not action and not object_en,
+            "object_en": object_en,
+            "object_key": object_key,
+            "action_en": action,
+            "segment": segment,
+        }
+    return roles
+
+
+def canonical_split_hands_sentence(chinese: str) -> str | None:
+    """One shared sentence for split left/right roles. None if the source is not split."""
+    roles = parse_hand_roles(chinese)
+    if not roles:
+        return None
+    pour = _pour_sentence(chinese, roles)
+    if pour:
+        return pour
+    clauses: list[str] = []
+    for side in ("right", "left"):
+        role = roles[side]
+        if role["action_en"]:
+            clauses.append(str(role["action_en"]))
+        elif role["object_en"]:
+            clauses.append(f"holds {role['object_en']} in her {side} hand")
+        elif role["hanging"]:
+            clauses.append(f"her {side} hand hangs empty at her side")
+    if len(clauses) < 2:
+        return None
+    if "窗外" in chinese:
+        clauses.append("looks out the window")
+    return "She " + ", ".join(clauses[:-1]) + ", and " + clauses[-1] + "."
+
+
+def _pour_sentence(chinese: str, roles: dict[str, dict[str, object]]) -> str | None:
+    if "倒" not in chinese:
+        return None
+    teapot_side = next((side for side, role in roles.items() if role["object_key"] == "teapot"), "")
+    cup_side = next((side for side, role in roles.items() if role["object_key"] in {"cup", "mug"}), "")
+    if not teapot_side or not cup_side or teapot_side == cup_side:
+        return None
+    return (
+        f"She pours from the teapot in her {teapot_side} hand "
+        f"into the cup in her {cup_side} hand."
+    )

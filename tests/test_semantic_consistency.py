@@ -82,6 +82,33 @@ def test_left_right_hand_scope_replaces_broken_translation():
     assert "hair on her right hand" not in prose
 
 
+def test_right_hand_object_does_not_copy_onto_hanging_left_hand():
+    job = PromptJob(original_zh="一个女孩站着，右手拿着一本合上的书，左手自然垂在身侧，半身")
+    pipeline().translate(job)
+    prose = job.positive_prompt.partition("\n\n")[2].lower()
+    assert "closed book" in prose or "book" in prose
+    assert "right hand" in prose
+    assert "left hand hangs empty" in prose
+    assert prose.count("book") == 1
+
+
+def test_skirt_lift_keeps_right_action_and_empty_left_hand():
+    job = PromptJob(original_zh="一个女孩站着，右手把自己的裙摆提起来，左手自然垂下，全身")
+    pipeline().translate(job)
+    prose = job.positive_prompt.partition("\n\n")[2].lower()
+    assert "lifts her skirt with her right hand" in prose
+    assert "left hand hangs empty" in prose
+
+
+def test_pour_tea_keeps_teapot_and_cup_on_opposite_hands():
+    job = PromptJob(original_zh="一个女孩用右手提起白色茶壶，把茶倒进左手拿着的蓝色杯子里")
+    pipeline().translate(job)
+    prose = job.positive_prompt.partition("\n\n")[2].lower()
+    assert "teapot in her right hand" in prose
+    assert "cup in her left hand" in prose
+    assert "pours" in prose
+
+
 def test_single_right_hand_scope_corrects_plural_translation():
     service = TranslationService(type("Engine", (), {
         "name": "hand-drift",

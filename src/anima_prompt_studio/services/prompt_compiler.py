@@ -117,6 +117,10 @@ class PromptCompiler:
                 mix = "female"
             elif male_source:
                 mix = "male"
+        if mix == "2f1m":
+            return ["2girls", "1boy"]
+        if mix == "1f2m":
+            return ["1girl", "2boys"]
         if n == 1:
             if genders:
                 return [genders[0]]

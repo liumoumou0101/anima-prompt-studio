@@ -2,6 +2,7 @@
   {
     "id": "draft",
     "display_name": "草稿",
+    "notes": "预览用，完成度最低，经常是黑白线稿。",
     "base_quality_tags": [
       "safe"
     ]
@@ -18,19 +19,18 @@
   {
     "id": "portrait_detail",
     "display_name": "精致人物",
+    "notes": "加强五官和皮肤，保持彩色上色。不要用会把画面推成线稿的 delicate details。",
     "base_quality_tags": [
       "masterpiece",
       "best quality",
       "safe"
     ],
-    "rendering_style_tags": [
-      "anime illustration"
-    ],
     "detail_tags": [
-      "delicate details",
       "detailed face",
       "detailed eyes",
-      "detailed hair"
+      "detailed hair",
+      "detailed skin",
+      "catchlight"
     ]
   },
   {
@@ -188,24 +188,7 @@
       "atmospheric perspective"
     ]
   },
-  {
-    "id": "sharp_focus",
-    "display_name": "锐利清晰",
-    "base_quality_tags": [
-      "masterpiece",
-      "best quality",
-      "safe"
-    ],
-    "rendering_style_tags": [
-      "anime illustration"
-    ],
-    "detail_tags": [
-      "sharp focus",
-      "highly detailed",
-      "crisp lines",
-      "clean lineart"
-    ]
-  },
+
   {
     "id": "painterly",
     "display_name": "厚涂绘画",
@@ -349,6 +332,7 @@
   {
     "id": "uncensored_detail",
     "display_name": "无修正细节",
+    "notes": "成人向无修正和皮肤细节。不要写 anatomical detail，模型会理解成解剖图。",
     "base_quality_tags": [
       "masterpiece",
       "best quality"
@@ -359,13 +343,13 @@
     "detail_tags": [
       "uncensored",
       "detailed skin",
-      "anatomical detail"
+      "shiny skin"
     ]
   },
   {
     "id": "ultimate_general",
     "display_name": "极致质量·通用",
-    "notes": "不指定画风、构图、时间或内容，只叠加通用完成度；适合作为默认极致档。",
+    "notes": "彩色完成度提升，不改画风和构图。避免 highly detailed / clean lineart，那些会把 anima_base 推成线稿。",
     "base_quality_tags": [
       "masterpiece",
       "best quality",
@@ -373,16 +357,15 @@
       "absurdres"
     ],
     "detail_tags": [
-      "highly detailed",
-      "delicate details",
-      "refined details",
-      "clean rendering"
+      "beautiful lighting",
+      "detailed skin",
+      "refined colors"
     ]
   },
   {
     "id": "ultimate_character",
     "display_name": "极致质量·人物",
-    "notes": "加强人物的面部、头发、皮肤和整体解剖，不预设性别或成人身体特征。",
+    "notes": "加强面部、头发和皮肤。不写 anatomical detail，避免裸体时变成解剖图。",
     "base_quality_tags": [
       "masterpiece",
       "best quality",
@@ -390,12 +373,11 @@
       "absurdres"
     ],
     "detail_tags": [
-      "highly detailed",
       "detailed face",
       "detailed eyes",
       "detailed hair",
       "detailed skin",
-      "anatomical detail"
+      "catchlight"
     ]
   },
   {
@@ -476,9 +458,6 @@
       "absurdres"
     ],
     "detail_tags": [
-      "highly detailed",
-      "sharp focus",
-      "crisp lines",
       "detailed effects",
       "motion lines",
       "speed lines"
@@ -505,14 +484,13 @@
       "fabric folds",
       "clothing texture",
       "material rendering",
-      "intricate accessories",
       "detailed embroidery"
     ]
   },
   {
     "id": "ultimate_adult",
     "display_name": "极致质量·成人细节",
-    "notes": "为明确的成人内容提供无修正与通用身体细节，不预设性别、姿势或具体身体部位。",
+    "notes": "成人内容的无修正和皮肤细节。不写 anatomical detail，避免变成解剖图。",
     "base_quality_tags": [
       "masterpiece",
       "best quality",
@@ -521,11 +499,69 @@
       "explicit"
     ],
     "detail_tags": [
-      "highly detailed",
       "uncensored",
-      "anatomical detail",
       "detailed body",
-      "detailed skin"
+      "detailed skin",
+      "shiny skin"
+    ]
+  },
+  {
+    "id": "daylight_clear",
+    "display_name": "晴朗日光",
+    "notes": "和暗黑/夜景档相对：明亮日光、通透色彩。夜间场景会被守卫丢掉日光标签。",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "detail_tags": [
+      "vivid colors"
+    ],
+    "atmosphere_tags": [
+      "sunlight",
+      "bright lighting",
+      "clear sky"
+    ]
+  },
+  {
+    "id": "indoor_warm",
+    "display_name": "室内暖灯",
+    "notes": "普通室内暖光，不是霓虹也不是窗边逆光。明确的户外场景会被守卫丢掉室内灯标签。",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "atmosphere_tags": [
+      "warm lighting",
+      "indoor lighting",
+      "lamp light",
+      "cozy atmosphere"
+    ]
+  },
+  {
+    "id": "overcast_rain",
+    "display_name": "阴雨雾气",
+    "notes": "阴天、雨和薄雾。明确的晴天会被守卫丢掉雨雾标签。",
+    "base_quality_tags": [
+      "masterpiece",
+      "best quality",
+      "safe"
+    ],
+    "rendering_style_tags": [
+      "anime illustration"
+    ],
+    "atmosphere_tags": [
+      "overcast",
+      "rain",
+      "fog",
+      "mist"
     ]
   }
 ]

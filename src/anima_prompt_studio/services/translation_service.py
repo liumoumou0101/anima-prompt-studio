@@ -275,10 +275,8 @@ class TranslationService:
         has_left = "左手" in source
         explicit_both = any(token in source for token in ("双手", "两只手", "两手"))
 
-        # Separate left- and right-hand actions need the relation grammar in the
-        # enhancer; do not collapse either side here.
         if has_right and has_left:
-            return translated
+            return TranslationService._guard_split_hand_roles(source, translated)
 
         if explicit_both:
             # Correct a singular hand only when the source explicitly says both.
@@ -312,6 +310,54 @@ class TranslationService:
             subject = "She" if possessive == "her" else "He" if possessive == "his" else "The character"
             translated = translated.rstrip(". ") + f". {subject} uses {scoped_hand} for this action."
         return translated
+
+    @staticmethod
+    def _guard_split_hand_roles(source: str, translated: str) -> str:
+        """Stop Marian from copying one hand's object onto the other hand."""
+        from anima_prompt_studio.services.enhancer import parse_hand_roles
+
+        roles = parse_hand_roles(source)
+        if not roles:
+            return translated
+        for side, role in roles.items():
+            object_en = str(role["object_en"])
+            if not object_en:
+                continue
+            other = "left" if side == "right" else "right"
+            other_role = roles[other]
+            if other_role["object_key"] == role["object_key"]:
+                continue
+            noun = re.escape(object_en.split()[-1])
+            translated = re.sub(
+                rf"(?:and |, )?(?:a |an |the |her |his |their )?{noun}s? "
+                rf"(?:on|in|with) (?:her |his |their )?{other} hand",
+                "",
+                translated,
+                flags=re.I,
+            )
+            translated = re.sub(
+                rf"(?:her |his |their )?{other} hand (?:holds|holding|with|on) "
+                rf"(?:a |an |the |her |his |their )?{noun}s?",
+                f"her {other} hand hangs empty",
+                translated,
+                flags=re.I,
+            )
+        for side, role in roles.items():
+            if not role["hanging"]:
+                continue
+            translated = re.sub(
+                rf"((?:her|his|their)\s+{side}\s+(?:hand|arm))\s+"
+                rf"(?:fell|falls|fallen|falling)\s+(?:down|on her side|at her side|by her side)?",
+                rf"\1 hangs empty at her side",
+                translated,
+                flags=re.I,
+            )
+            if not re.search(rf"\b{side} hand hangs\b", translated, flags=re.I):
+                translated = translated.rstrip(". ") + f" Her {side} hand hangs empty at her side."
+        translated = re.sub(r"\s{2,}", " ", translated)
+        translated = re.sub(r"\s+,", ",", translated)
+        translated = re.sub(r",\s*,+", ",", translated)
+        return translated.strip(" ,.")
 
     @staticmethod
     def _guard_nsfw_and_composition_terms(source: str, translated: str) -> str:
@@ -455,10 +501,17 @@ class TranslationService:
                 translated = re.sub(r"\bcups\b", "mug", translated, count=1, flags=re.I)
             if "马克杯" in source and not re.search(r"\bmug\b", translated, flags=re.I):
                 translated = translated.rstrip(". ") + " Holding a mug."
-        if re.search(r"看书|一本书|拿着书|手里的书", source) and not re.search(
+        if re.search(r"看书|一本书|拿着书|手里的书|拿着一本", source) and not re.search(
             r"[两二三四五六七八九十\d][本册]书", source
         ):
             translated = re.sub(r"\btwo books\b|\bbooks\b", "a book", translated, flags=re.I)
+            if "双手" not in source and not (("左手" in source) and ("右手" in source) and source.count("书") >= 2):
+                translated = re.sub(
+                    r"\b(?:a |the )?book (?:on|in|with) her (?:left|right) hand and (?:a |the )?book\b",
+                    "a book",
+                    translated,
+                    flags=re.I,
+                )
         if any(token in source for token in (
             "闭合的雨伞", "闭合的伞", "收起的雨伞", "收起的伞", "合上的雨伞", "合上的伞",
         )):

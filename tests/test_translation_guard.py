@@ -143,3 +143,26 @@ def test_reading_one_book_does_not_become_two_books():
     )
     assert "books" not in result.lower()
     assert "book" in result.lower()
+
+
+def test_right_hand_book_is_not_copied_to_hanging_left_hand():
+    result = TranslationService._guard_visual_terms(
+        "一个女孩站着，右手拿着一本合上的书，左手自然垂在身侧，半身",
+        "A girl standing with a book on her right hand and a book on her left hand Upper body shot.",
+    )
+    lower = result.lower()
+    assert lower.count("book") == 1
+    assert "right hand" in lower
+    assert "left hand hangs empty" in lower
+
+
+def test_split_hands_keep_distinct_objects():
+    result = TranslationService._guard_visual_terms(
+        "一个女孩用右手提起白色茶壶，把茶倒进左手拿着的蓝色杯子里",
+        "A girl lifts a white teapot in her right hand and pours it into a blue cup in her left hand",
+    )
+    lower = result.lower()
+    assert "teapot" in lower and "right hand" in lower
+    assert "cup" in lower and "left hand" in lower
+    assert "teapot in her left" not in lower
+    assert "cup in her right" not in lower

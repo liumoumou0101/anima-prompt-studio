@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -195,7 +196,7 @@ def main() -> int:
             log(f"START {case['id']}")
             job = PromptJob(
                 original_zh=case["zh"],
-                project_name="动作验证NSFW",
+                project_name=os.environ.get("ANIMA_VERIFY_PROJECT", "动作验证NSFW"),
                 model_profile_id="anima_base_v1",
                 generation_preset_id="quality",
                 quality_profile_id="ultimate_general",
@@ -241,7 +242,7 @@ def main() -> int:
                     "slots": job.semantic_frame.visual_slots,
                     "prompt": job.positive_prompt,
                 })
-        out = Path("reports") / "action_scene_wave_nsfw.json"
+        out = Path("reports") / os.environ.get("ANIMA_VERIFY_REPORT", "action_scene_wave_nsfw.json")
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
         log(f"WROTE {out}")
