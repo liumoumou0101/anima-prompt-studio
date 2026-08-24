@@ -8746,6 +8746,72 @@
     "ensure_phrase": "Wearing boyshorts."
   },
   {
+    "id": "CLOTHING_LONG_SPAGHETTI_STRAP_DRESS",
+    "triggers": [
+      "吊带长裙",
+      "细肩带长裙",
+      "细吊带长裙"
+    ],
+    "canonical_en": "long spaghetti-strap dress",
+    "tags": [
+      "dress",
+      "long dress",
+      "spaghetti strap"
+    ],
+    "category": "clothing",
+    "priority": 91,
+    "ensure_en": [
+      "long spaghetti-strap dress",
+      "long spaghetti strap dress",
+      "long dress with spaghetti straps",
+      "long dress with spaghetti strap"
+    ],
+    "ensure_phrase": "Wearing a long spaghetti-strap dress.",
+    "translation_replacements": [
+      [
+        "\\b(?:a\\s+)?long\\s+garters?\\b",
+        "a long spaghetti-strap dress"
+      ],
+      [
+        "\\b(?:a\\s+)?long\\s+suspender\\s+dress\\b",
+        "a long spaghetti-strap dress"
+      ]
+    ]
+  },
+  {
+    "id": "CLOTHING_SPAGHETTI_STRAP_DRESS",
+    "triggers": [
+      "吊带裙",
+      "吊带连衣裙",
+      "细肩带连衣裙",
+      "细吊带连衣裙"
+    ],
+    "canonical_en": "spaghetti-strap dress",
+    "tags": [
+      "dress",
+      "spaghetti strap"
+    ],
+    "category": "clothing",
+    "priority": 90,
+    "ensure_en": [
+      "spaghetti-strap dress",
+      "spaghetti strap dress",
+      "dress with spaghetti straps",
+      "dress with spaghetti strap"
+    ],
+    "ensure_phrase": "Wearing a spaghetti-strap dress.",
+    "translation_replacements": [
+      [
+        "\\b(?:a\\s+)?garters?\\s+dress\\b",
+        "a spaghetti-strap dress"
+      ],
+      [
+        "\\b(?:a\\s+)?suspender\\s+dress\\b",
+        "a spaghetti-strap dress"
+      ]
+    ]
+  },
+  {
     "id": "CLOTHING_CAMISOLE",
     "triggers": [
       "吊带背心",

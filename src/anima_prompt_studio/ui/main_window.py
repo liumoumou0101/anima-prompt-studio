@@ -90,6 +90,13 @@ class NoWheelDoubleSpinBox(QDoubleSpinBox):
         event.ignore()
 
 
+class NoWheelComboBox(QComboBox):
+    """Lets the surrounding page scroll without silently changing a selection."""
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 - Qt virtual method
+        event.ignore()
+
+
 class HistoryDialog(QDialog):
     def __init__(self, repository: SQLiteRepository, parent=None) -> None:
         super().__init__(parent)
@@ -276,19 +283,19 @@ class MainWindow(QMainWindow):
         self.project_name.setMaximumWidth(260)
         primary_header.addWidget(self.project_name)
         primary_header.addWidget(QLabel("模型"))
-        self.model_combo = QComboBox()
+        self.model_combo = NoWheelComboBox()
         for profile in self.configs.model_profiles.values():
             self.model_combo.addItem(profile.display_name, profile.id)
         self.model_combo.currentIndexChanged.connect(self.on_model_changed)
         primary_header.addWidget(self.model_combo, 1)
         primary_header.addWidget(QLabel("生成预设"))
-        self.generation_combo = QComboBox()
+        self.generation_combo = NoWheelComboBox()
         for preset in self.configs.generation_presets["anima_turbo_v1"].values():
             self.generation_combo.addItem(preset.display_name, preset.id)
         self.generation_combo.currentIndexChanged.connect(self.on_generation_preset_changed)
         primary_header.addWidget(self.generation_combo, 1)
         primary_header.addWidget(QLabel("质量预设"))
-        self.quality_combo = QComboBox()
+        self.quality_combo = NoWheelComboBox()
         for profile in self.configs.quality_profiles.values():
             self.quality_combo.addItem(profile.display_name, profile.id)
             if profile.notes:
@@ -414,13 +421,13 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(group)
         connection = QGridLayout()
         connection.addWidget(QLabel("云平台"), 0, 0)
-        self.remote_provider_combo = QComboBox(); self.remote_provider_combo.setMinimumWidth(220)
+        self.remote_provider_combo = NoWheelComboBox(); self.remote_provider_combo.setMinimumWidth(220)
         for preset in PROVIDER_PRESETS:
             self.remote_provider_combo.addItem(preset.display_name, preset.id)
         self.remote_provider_combo.currentIndexChanged.connect(self._apply_remote_provider_preset)
         connection.addWidget(self.remote_provider_combo, 0, 1)
         connection.addWidget(QLabel("已保存"), 0, 2)
-        self.remote_profile_combo = QComboBox(); self.remote_profile_combo.setMinimumWidth(170)
+        self.remote_profile_combo = NoWheelComboBox(); self.remote_profile_combo.setMinimumWidth(170)
         self.remote_profile_combo.currentIndexChanged.connect(self._load_remote_form_from_selection)
         connection.addWidget(self.remote_profile_combo, 0, 3, 1, 2)
         new_button = QPushButton("新连接"); new_button.clicked.connect(self._clear_remote_form)
@@ -490,7 +497,7 @@ class MainWindow(QMainWindow):
         self.remote_user_edit = QLineEdit("root"); self.remote_user_edit.setMaximumWidth(120)
         advanced.addWidget(self.remote_user_edit, 0, 5)
         advanced.addWidget(QLabel("认证"), 0, 6)
-        self.remote_auth_combo = QComboBox()
+        self.remote_auth_combo = NoWheelComboBox()
         self.remote_auth_combo.addItem("私钥", RemoteAuthType.PRIVATE_KEY.value)
         self.remote_auth_combo.addItem("密码", RemoteAuthType.PASSWORD.value)
         self.remote_auth_combo.addItem("SSH Agent", RemoteAuthType.AGENT.value)
@@ -530,7 +537,7 @@ class MainWindow(QMainWindow):
 
         layout = QHBoxLayout()
         layout.addWidget(QLabel("云端工作流"))
-        self.workflow_profile_combo = QComboBox(); self.workflow_profile_combo.setMinimumWidth(190)
+        self.workflow_profile_combo = NoWheelComboBox(); self.workflow_profile_combo.setMinimumWidth(190)
         self.workflow_profile_combo.currentIndexChanged.connect(self._workflow_selection_changed)
         layout.addWidget(self.workflow_profile_combo)
         workflow_import = QPushButton("导入其他工作流…")
@@ -582,9 +589,9 @@ class MainWindow(QMainWindow):
         self.gaze = self._combo(["无", "看镜头", "看人物", "看物体", "看向画外"])
         self.aspect = self._combo(["方形", "竖图", "横图"])
         self.position = self._combo(["无", "左", "中", "右"])
-        self.composition_mode = QComboBox()
+        self.composition_mode = NoWheelComboBox()
         self.composition_mode.addItem("智能推荐", "smart"); self.composition_mode.addItem("混合模式", "mixed"); self.composition_mode.addItem("手动模式", "manual")
-        self.subject_mode = QComboBox()
+        self.subject_mode = NoWheelComboBox()
         self.subject_mode.addItem("自动识别", SubjectMode.AUTO.value)
         self.subject_mode.addItem("人物", SubjectMode.CHARACTER.value)
         self.subject_mode.addItem("纯场景", SubjectMode.SCENE.value)
@@ -592,7 +599,7 @@ class MainWindow(QMainWindow):
         self.subject_mode.currentIndexChanged.connect(self.on_subject_mode_changed)
         self.composition_mode.currentIndexChanged.connect(self.on_composition_mode_changed)
         grid.addWidget(QLabel("模式"), 0, 0); grid.addWidget(self.composition_mode, 0, 1, 1, 2)
-        self.composition_preset = QComboBox()
+        self.composition_preset = NoWheelComboBox()
         self.composition_preset.addItem("智能推荐", "smart")
         for preset in self.configs.composition_presets.values():
             self.composition_preset.addItem(preset.display_name, preset.id)
@@ -617,7 +624,7 @@ class MainWindow(QMainWindow):
         self.composition_state_boxes: dict[str, QComboBox] = {}
         self.composition_reason_labels: dict[str, QLabel] = {}
         for row, (field_name, widget) in enumerate(self.composition_controls.items(), 4):
-            state = QComboBox(); state.addItem("自动", CompositionFieldState.AUTO.value); state.addItem("手动", CompositionFieldState.USER_SELECTED.value); state.addItem("锁定", CompositionFieldState.LOCKED.value)
+            state = NoWheelComboBox(); state.addItem("自动", CompositionFieldState.AUTO.value); state.addItem("手动", CompositionFieldState.USER_SELECTED.value); state.addItem("锁定", CompositionFieldState.LOCKED.value)
             reason = QLabel(); reason.setWordWrap(True); reason.setStyleSheet("color: #777; font-size: 11px")
             self.composition_state_boxes[field_name] = state; self.composition_reason_labels[field_name] = reason
             grid.addWidget(QLabel(labels[field_name]), row, 0); grid.addWidget(widget, row, 1); grid.addWidget(state, row, 2); grid.addWidget(reason, row, 3)
@@ -745,7 +752,7 @@ class MainWindow(QMainWindow):
         self.parameter_state_boxes: dict[str, QComboBox] = {}
         labels = {"width":"宽", "height":"高", "steps":"步数", "cfg":"CFG", "sampler":"采样器", "scheduler":"调度器"}
         for row, (field_name, widget) in enumerate(self.parameter_controls.items()):
-            state = QComboBox()
+            state = NoWheelComboBox()
             state.addItem("自动", GenerationFieldState.AUTO.value)
             state.addItem("手动", GenerationFieldState.USER_SELECTED.value)
             state.addItem("锁定", GenerationFieldState.LOCKED.value)
@@ -795,7 +802,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _combo(values: list[str]) -> QComboBox:
-        box = QComboBox(); box.addItems(values); return box
+        box = NoWheelComboBox(); box.addItems(values); return box
 
     @staticmethod
     def _slot_values(slot: CharacterSlot) -> list[str]:

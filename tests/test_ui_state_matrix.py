@@ -248,6 +248,49 @@ def test_mouse_wheel_does_not_change_cfg_or_mark_it_manual(window):
     assert window.parameter_state_boxes["cfg"].currentData() == GenerationFieldState.AUTO.value
 
 
+def test_mouse_wheel_does_not_change_workflow_or_other_primary_selections(window):
+    first = WorkflowProfile(
+        id="wheel-first",
+        display_name="01 第一个工作流",
+        api_workflow={},
+        bindings={},
+        workflow_kind="txt2img_basic",
+    )
+    selected = WorkflowProfile(
+        id="wheel-selected",
+        display_name="02 当前工作流",
+        api_workflow={},
+        bindings={},
+        workflow_kind="txt2img_basic",
+    )
+    window.repository.save_workflow_profile(first)
+    window.repository.save_workflow_profile(selected)
+    window._refresh_remote_controls(selected_workflow_id=selected.id)
+    before = {
+        "workflow": window.workflow_profile_combo.currentData(),
+        "model": window.model_combo.currentData(),
+        "generation": window.generation_combo.currentData(),
+        "quality": window.quality_combo.currentData(),
+    }
+
+    for combo in (
+        window.workflow_profile_combo,
+        window.model_combo,
+        window.generation_combo,
+        window.quality_combo,
+    ):
+        event = QWheelEvent(
+            QPointF(5, 5), QPointF(5, 5), QPoint(), QPoint(0, 120),
+            Qt.NoButton, Qt.NoModifier, Qt.ScrollUpdate, False,
+        )
+        QApplication.sendEvent(combo, event)
+
+    assert window.workflow_profile_combo.currentData() == before["workflow"] == selected.id
+    assert window.model_combo.currentData() == before["model"]
+    assert window.generation_combo.currentData() == before["generation"]
+    assert window.quality_combo.currentData() == before["quality"]
+
+
 def test_locked_composition_survives_recommend_and_model_switch(window):
     window.job = PromptJob(original_zh="天使从天而降", normalized_zh="天使从天而降")
     window.job.composition.shot = "胸像"

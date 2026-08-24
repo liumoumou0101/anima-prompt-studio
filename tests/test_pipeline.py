@@ -1,3 +1,5 @@
+import re
+
 from anima_prompt_studio.domain.models import CharacterSlot, ItemState, PromptJob
 from anima_prompt_studio.services.pipeline import PromptPipeline
 
@@ -43,6 +45,46 @@ def test_model_switch_keeps_input_and_changes_params():
     pipeline.switch_model(job, "anima_turbo_v1")
     assert job.generation_params.steps == 10
     assert job.negative_prompt == ""
+
+
+def test_pipeline_repairs_marian_long_garter_drift_and_adds_dress_tags():
+    class GarterDriftEngine:
+        name = "garter-drift"
+
+        def zh_to_en(self, _text):
+            return "A young girl in a long garter."
+
+        def en_to_zh(self, _text):
+            return "一个穿长吊带的年轻女孩。"
+
+    from anima_prompt_studio.services.translation_service import TranslationService
+
+    pipeline = PromptPipeline(translation=TranslationService(GarterDriftEngine()))
+    job = PromptJob(original_zh="一个身穿吊带长裙的年轻女孩")
+    pipeline.compiler.apply_model_defaults(job)
+    pipeline.translate(job)
+
+    assert "long spaghetti-strap dress" in job.translated_en.lower()
+    assert not re.search(r"\bgarters?\b", job.translated_en.lower())
+    tags = {item.tag for item in job.matched_tags}
+    assert {"dress", "long dress", "spaghetti strap"} <= tags
+    assert "long spaghetti-strap dress" in job.positive_prompt.lower()
+
+
+def test_builtin_pipeline_understands_spaghetti_strap_dress_variants():
+    cases = [
+        ("一个身穿吊带长裙的女孩", {"dress", "long dress", "spaghetti strap"}),
+        ("一个身穿细肩带长裙的女孩", {"dress", "long dress", "spaghetti strap"}),
+        ("一个身穿吊带连衣裙的女孩", {"dress", "spaghetti strap"}),
+        ("一个身穿吊带裙的女孩", {"dress", "spaghetti strap"}),
+    ]
+    for source, expected_tags in cases:
+        pipeline = PromptPipeline()
+        job = PromptJob(original_zh=source)
+        pipeline.compiler.apply_model_defaults(job)
+        pipeline.translate(job)
+        assert "spaghetti-strap dress" in job.translated_en.lower()
+        assert expected_tags <= {item.tag for item in job.matched_tags}
 
 
 def test_score_tag_keeps_required_underscore():
