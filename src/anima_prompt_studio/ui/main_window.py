@@ -46,6 +46,7 @@ from anima_prompt_studio.services.remote.workflow_compatibility import infer_wor
 from anima_prompt_studio.ui.ai_engine_dialog import AIEngineDialog
 from anima_prompt_studio.ui.ai_extract_dialog import AIExtractDialog
 from anima_prompt_studio.ui.character_recognition_dialog import CharacterRecognitionDialog
+from anima_prompt_studio.ui.direct_prompt_dialog import DirectPromptDialog
 from anima_prompt_studio.services.novel_scene_compiler import NovelSceneCompiler
 from anima_prompt_studio.ui.image_gallery import ImageGalleryWidget
 from anima_prompt_studio.ui.interaction_guide_dialog import InteractionGuideDialog
@@ -253,6 +254,11 @@ class MainWindow(QMainWindow):
         open_gallery_root = QAction("打开图片保存根目录", self)
         open_gallery_root.triggered.connect(self.open_gallery_root)
         gallery.addAction(open_gallery_root)
+        direct_menu = self.menuBar().addMenu("提示词直出")
+        direct_action = QAction("粘贴正向/反向提示词并生图…", self)
+        direct_action.setShortcut("Ctrl+Shift+P")
+        direct_action.triggered.connect(self.open_direct_prompt)
+        direct_menu.addAction(direct_action)
         tags_menu = self.menuBar().addMenu("标签")
         browse_tags = QAction("浏览内置标签（灵感库）…", self)
         browse_tags.setShortcut("Ctrl+T")
@@ -2215,8 +2221,56 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._show_error("无法开始远程生成", exc)
 
-    def _prepare_generation_request(self) -> QueuedGeneration | None:
-        self._sync_for_generation()
+    def open_direct_prompt(self) -> None:
+        try:
+            # Capture only the current generation controls. The pasted prompts
+            # themselves deliberately bypass compile_current_state().
+            self._sync_ui_to_job()
+            params = self.job.generation_params
+            model = self.configs.get_model(self.job.model_profile_id)
+            workflow = self.workflow_profile_combo.currentText().strip() or "尚未选择"
+            summary = (
+                f"当前将使用：{model.display_name} · {workflow} · "
+                f"{params.width}×{params.height} · Steps {params.steps} · CFG {params.cfg} · "
+                f"Seed {params.seed} · 批量 {params.batch_size}"
+            )
+            dialog = DirectPromptDialog(
+                draft=self.repository.get_setting("direct_prompt_draft", {}),
+                current_positive=self.positive.toPlainText(),
+                current_negative=self.negative.toPlainText(),
+                generation_summary=summary,
+                parent=self,
+            )
+            if dialog.exec() != QDialog.Accepted:
+                return
+            payload = dialog.result_payload()
+            self.repository.set_setting("direct_prompt_draft", payload)
+            request = self._prepare_generation_request(self._build_direct_prompt_job(payload))
+            if request is not None:
+                self._enqueue_or_start_generation(request)
+        except Exception as exc:
+            self._show_error("无法使用外部提示词生成", exc)
+
+    def _build_direct_prompt_job(self, payload: dict[str, str]) -> PromptJob:
+        return PromptJob(
+            project_name=payload.get("project_name", "").strip() or "外部提示词直出",
+            positive_prompt=payload.get("positive_prompt", ""),
+            negative_prompt=payload.get("negative_prompt", ""),
+            compiled_prompt_state=ItemState.LOCKED,
+            prompt_origin="user_edited",
+            model_profile_id=self.job.model_profile_id,
+            generation_preset_id=self.job.generation_preset_id,
+            quality_profile_id=self.job.quality_profile_id,
+            generation_params=self.job.generation_params.model_copy(deep=True),
+            lora_selection=[item.model_copy(deep=True) for item in self.job.lora_selection],
+            workflow_template_id=self.job.workflow_template_id,
+            notes="外部正向/反向提示词直出；未经过本地翻译和提示词编译器。",
+        )
+
+    def _prepare_generation_request(self, generation_job: PromptJob | None = None) -> QueuedGeneration | None:
+        if generation_job is None:
+            self._sync_for_generation()
+            generation_job = self.job
         profile = self._selected_remote_profile()
         workflow = self._selected_workflow_profile()
         if not profile.known_host_fingerprint:
@@ -2226,16 +2280,16 @@ class MainWindow(QMainWindow):
                 "这个复杂工作流已经识别并保留在列表中，但执行适配安排在下一版本。"
                 "V2 请使用标有“V2 可直接生成”的工作流。"
             )
-        model_profile = self.configs.get_model(self.job.model_profile_id)
+        model_profile = self.configs.get_model(generation_job.model_profile_id)
         output_root = Path(self.repository.get_setting(
             "generation_output_root",
             str(Path.home() / "Pictures" / "AnimaPromptStudio"),
         ))
-        if not self.job.positive_prompt.strip():
+        if not generation_job.positive_prompt.strip():
             raise ValueError("当前正向提示词为空，请先翻译并编译。")
         if len(self._generation_queue) >= MAX_GENERATION_QUEUE:
             raise ValueError(f"文生图队列已达到 {MAX_GENERATION_QUEUE} 项，请等当前任务完成后再添加。")
-        params = self.job.generation_params
+        params = generation_job.generation_params
         busy = self._active_generation_worker is not None or bool(self._generation_queue)
         if not busy:
             if workflow.workflow_kind == HIRES_FIX_WORKFLOW_KIND:
@@ -2265,8 +2319,8 @@ class MainWindow(QMainWindow):
         credentials = self._credentials_for_generation(profile)
         if credentials is None:
             return None
-        self.repository.save_job(self.job)
-        snapshot = self.job.model_copy(deep=True)
+        self.repository.save_job(generation_job)
+        snapshot = generation_job.model_copy(deep=True)
         preview = (snapshot.original_zh or snapshot.positive_prompt).replace("\n", " ").strip()
         return QueuedGeneration(
             job=snapshot,

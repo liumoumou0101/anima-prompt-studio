@@ -26,6 +26,7 @@ from anima_prompt_studio.services.remote.workflow_renderer import WorkflowRender
 from anima_prompt_studio.services.remote.credential_store import CredentialStore, MemoryCredentialBackend
 from anima_prompt_studio.ui.ai_engine_dialog import AIEngineDialog
 from anima_prompt_studio.ui.ai_extract_dialog import AIExtractDialog
+from anima_prompt_studio.ui.direct_prompt_dialog import DirectPromptDialog
 from anima_prompt_studio.ui.main_window import MainWindow
 from anima_prompt_studio.ui.interaction_guide_dialog import InteractionGuideDialog
 from anima_prompt_studio.ui.remote_dialogs import RemoteProfileManagerDialog, build_auto_workflow_profile
@@ -123,7 +124,7 @@ def test_interaction_writing_guide_is_available_in_frontend(window):
 
 def test_ai_assist_is_a_top_level_menu_and_does_not_replace_local_compile(window):
     titles = [action.text().replace("&", "") for action in window.menuBar().actions()]
-    assert titles == ["文件", "设置", "画廊", "标签", "小说助手", "帮助"]
+    assert titles == ["文件", "设置", "画廊", "提示词直出", "标签", "小说助手", "帮助"]
     assert window.translate_button.text() == "翻译并编译"
     assert not hasattr(window, "prompt_engine_combo")
     assert "AI API" not in [
@@ -1088,7 +1089,70 @@ def test_main_actions_have_visual_hierarchy_and_gallery_menu(window):
     assert window.remote_test_button.property("buttonRole") == "primary"
     assert window.remote_generate_button.property("buttonRole") == "success"
     assert window.remote_cancel_button.property("buttonRole") == "danger"
-    assert [action.text() for action in window.menuBar().actions()][:3] == ["文件", "设置", "画廊"]
+    assert [action.text() for action in window.menuBar().actions()][:4] == ["文件", "设置", "画廊", "提示词直出"]
+
+
+def test_direct_prompt_dialog_preserves_pasted_prompt_text(app):
+    dialog = DirectPromptDialog(draft={"project_name": "复现测试"})
+    positive = "  masterpiece, @artist\ncharacter tag  "
+    negative = "low quality\nwatermark\n"
+    dialog.positive.setPlainText(positive)
+    dialog.negative.setPlainText(negative)
+    payload = dialog.result_payload()
+    assert payload["positive_prompt"] == positive
+    assert payload["negative_prompt"] == negative
+    dialog.close()
+
+
+def test_direct_prompt_job_uses_current_generation_settings_without_compiling(window):
+    window.job.model_profile_id = "anima_turbo_v1"
+    window.job.generation_params.width = 1024
+    window.job.generation_params.height = 1536
+    window.job.generation_params.seed = 12345
+    window.job.lora_selection = [LoRASelection(logical_id="style", weight=.7)]
+    direct = window._build_direct_prompt_job({
+        "project_name": "UP 提示词复现",
+        "positive_prompt": "  exact positive\nsecond line  ",
+        "negative_prompt": "exact negative\n",
+    })
+    assert direct.id != window.job.id
+    assert direct.original_zh == ""
+    assert direct.positive_prompt == "  exact positive\nsecond line  "
+    assert direct.negative_prompt == "exact negative\n"
+    assert direct.compiled_prompt_state == ItemState.LOCKED
+    assert direct.prompt_origin == "user_edited"
+    assert (direct.generation_params.width, direct.generation_params.height, direct.generation_params.seed) == (1024, 1536, 12345)
+    assert direct.lora_selection[0].logical_id == "style"
+
+
+def test_direct_prompt_generation_request_bypasses_main_prompt_sync(window, monkeypatch):
+    workflow = WorkflowProfile(
+        id="direct-basic", display_name="直出测试工作流", api_workflow={}, bindings={},
+        workflow_kind="txt2img_basic",
+    )
+    window.repository.save_workflow_profile(workflow)
+    window.remote_host_edit.setText("gpu.example.invalid")
+    window._refresh_remote_controls(selected_workflow_id=workflow.id)
+    direct = window._build_direct_prompt_job({
+        "project_name": "直出",
+        "positive_prompt": "external positive prompt",
+        "negative_prompt": "external negative prompt",
+    })
+
+    def unexpected():
+        raise AssertionError("direct prompt generation must not sync or compile the main prompt")
+
+    monkeypatch.setattr(window, "_sync_for_generation", unexpected)
+    monkeypatch.setattr(window, "_selected_remote_profile", lambda: RemoteProfile(
+        ssh_host="gpu.example.invalid", ssh_user="root", known_host_fingerprint="SHA256:test",
+    ))
+    monkeypatch.setattr(window, "_request_remote_credentials", lambda _profile: RemoteCredentials(password="test"))
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+    request = window._prepare_generation_request(direct)
+    assert request is not None
+    assert request.job.positive_prompt == "external positive prompt"
+    assert request.job.negative_prompt == "external negative prompt"
+    assert window.job.positive_prompt != "external positive prompt"
 
 
 def test_tag_uncheck_persists_as_exclusion(window):
