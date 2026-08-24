@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from anima_prompt_studio.domain.models import (
-    CharacterSlot, GenerationFieldState, MatchedTag, PromptJob, SubjectMode,
+    CharacterSlot, GenerationFieldState, MatchedTag, ModelProfile, PromptJob, SubjectMode,
 )
 from .config_service import ConfigService
 from .negation import phrase_has_unnegated_zh
@@ -36,7 +36,16 @@ class PromptCompiler:
     def effective_quality_tags(self, job: PromptJob) -> list[str]:
         profile = self.configs.get_model(job.model_profile_id)
         quality = self.configs.get_quality(job.quality_profile_id)
-        return self.quality_guard.filter(job, profile.positive_prefix + quality.all_tags())
+        tags = self.quality_guard.filter(job, profile.positive_prefix + quality.all_tags())
+        if profile.family == "anima":
+            official_order = {"masterpiece": 0, "best quality": 1, "score_7": 2, "safe": 3}
+            tags = [
+                value for _, value in sorted(
+                    enumerate(tags),
+                    key=lambda item: (official_order.get(item[1], 100), item[0]),
+                )
+            ]
+        return tags
 
     @staticmethod
     def _unique(values: list[str], excluded: set[str] | None = None) -> list[str]:
@@ -304,6 +313,13 @@ class PromptCompiler:
 
     def compile(self, job: PromptJob) -> PromptJob:
         profile = self.configs.get_model(job.model_profile_id)
+        if profile.family != "anima":
+            raise NotImplementedError(
+                f"{profile.family} 模型族尚未实现专用提示词编译器；不会套用 ANIMA 规则。"
+            )
+        return self._compile_anima(job, profile)
+
+    def _compile_anima(self, job: PromptJob, profile: ModelProfile) -> PromptJob:
         quality = self.configs.get_quality(job.quality_profile_id)
         suppressed = {tag for concept in job.resolved_concepts for tag in concept.suppresses_tags}
         suppressed.update(tag for item in job.enhancements if item.enabled for tag in item.suppress_tags)
@@ -314,8 +330,16 @@ class PromptCompiler:
             (x for x in job.matched_tags if x.state.value != "excluded" and x.tag not in excluded),
             key=lambda x: CATEGORY_ORDER.get(x.category, 100),
         )
+        has_multi_scope = (
+            job.composition.people_count > 1
+            and any(x.id == "multi_scope" and x.enabled for x in job.enhancements)
+        )
+        scoped_character_gaze = has_multi_scope and any(
+            re.search(r"\b(?:looking|looks?|watching)\b", slot.action_text, re.I)
+            for slot in job.character_slots[:job.composition.people_count]
+        )
         mixed_character_gaze = job.composition.people_count > 1 and self._has_mixed_character_gaze(job)
-        if mixed_character_gaze:
+        if mixed_character_gaze or scoped_character_gaze:
             matched = [item for item in matched if self._exclusive_group(item.tag) != "gaze"]
         locked_slot_categories = {
             category
@@ -329,16 +353,19 @@ class PromptCompiler:
                 if item.category not in locked_slot_categories
                 and self._attribute_category(item.tag) not in locked_slot_categories
             ]
-        if job.composition.people_count > 1 and any(x.id == "multi_scope" and x.enabled for x in job.enhancements):
+        if has_multi_scope:
             matched = [x for x in matched if (x.category not in {"hair", "hair_length", "eyes", "clothing"}
                        and self._attribute_category(x.tag) not in {"hair", "hair_length", "eyes", "clothing"}
                        and x.tag.lower() not in {
                            "blue pupils", "red pupils", "golden pupils", "book", "flower", "apple", "umbrella",
+                           "holding book", "holding flower", "holding apple", "holding umbrella",
                            "sitting", "standing", "lying", "waving",
                        })]
         quality_tags = self.effective_quality_tags(job)
         scene_mode = job.effective_subject_mode() == SubjectMode.SCENE
         tags = [] if scene_mode else list(self._people_tags(job))
+        # Official ANIMA order puts artist tags before general visual tags.
+        tags += [a if a.startswith("@") else f"@{a}" for a in job.artist_selection]
         source_text = job.authoritative_text()
         if job.uses_english_authority():
             positive_crowd = re.search(r"\b(?:crowd|group of people|background people)\b", source_text, re.I)
@@ -364,9 +391,8 @@ class PromptCompiler:
         composition_category = {"shot":"shot", "camera_height":"camera", "angle":"angle", "gaze":"gaze", "subject_position":"position"}
         tags += [COMPOSITION_MAP[key].get(getattr(job.composition, key), "") for key in COMPOSITION_MAP
                  if composition_category[key] not in explicit_natural
-                 and not (mixed_character_gaze and key == "gaze")
+                 and not ((mixed_character_gaze or scoped_character_gaze) and key == "gaze")
                  and (not scene_mode or key == "shot")]
-        tags += [a if a.startswith("@") else f"@{a}" for a in job.artist_selection]
         tags += [trigger for lora in job.lora_selection for trigger in lora.trigger_words]
         tags = self._enforce_composition_exclusivity(
             tags, job, suppressed_groups={"gaze"} if mixed_character_gaze else None,

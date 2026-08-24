@@ -1,3 +1,5 @@
+import re
+
 from anima_prompt_studio.services.translation_service import TranslationService
 
 
@@ -166,3 +168,41 @@ def test_split_hands_keep_distinct_objects():
     assert "cup" in lower and "left hand" in lower
     assert "teapot in her left" not in lower
     assert "cup in her right" not in lower
+
+
+def test_long_spaghetti_strap_dress_is_not_translated_as_garter():
+    result = TranslationService._guard_visual_terms(
+        "一个身穿吊带长裙的年轻女孩",
+        "A young girl in a long garter.",
+    )
+    lower = result.lower()
+    assert "long spaghetti-strap dress" in lower
+    assert not re.search(r"\bgarters?\b", lower)
+
+
+def test_real_marian_strap_dress_variants_are_replaced_not_duplicated():
+    cases = [
+        (
+            "一个身穿细肩带长裙的年轻女孩",
+            "A young girl in a long skirt with a strap on her shoulder.",
+            "long spaghetti-strap dress",
+        ),
+        (
+            "一个身穿吊带裙的年轻女孩",
+            "A young girl in a hanging dress.",
+            "spaghetti-strap dress",
+        ),
+    ]
+    for source, translated, expected in cases:
+        result = TranslationService._guard_visual_terms(source, translated).lower()
+        assert expected in result
+        assert "hanging dress" not in result
+        assert "skirt with a strap" not in result
+
+
+def test_real_garter_belt_and_stockings_are_not_changed_by_dress_guard():
+    result = TranslationService._guard_visual_terms(
+        "女孩穿着吊带袜和吊袜带",
+        "A girl wearing thighhighs and a garter belt.",
+    )
+    assert "garter belt" in result.lower()

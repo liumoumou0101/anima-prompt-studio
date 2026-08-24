@@ -200,7 +200,7 @@ class TranslationService:
             translated = self._guard_artist_intent(text, translated)
             return self._sanitize(translated)
         except Exception as exc:
-            raise RuntimeError(f"本地中译英失败：{exc}") from exc
+            raise RuntimeError(f"{self.engine_name} 中译英失败：{exc}") from exc
 
     @staticmethod
     def _guard_visual_terms(source: str, translated: str) -> str:
@@ -259,8 +259,40 @@ class TranslationService:
                 r"(?:,?\s*and\s+|,?\s*)(?:she\s+)?(?:doesn't|does not|didn't|did not) have (?:a |any )?(?:foot|feet)",
                 ", with her feet off the ground", translated, flags=re.I,
             )
+        translated = TranslationService._guard_spaghetti_strap_dress(source, translated)
         translated = TranslationService._guard_hand_scope(source, translated)
         translated = TranslationService._guard_nsfw_and_composition_terms(source, translated)
+        return translated
+
+    @staticmethod
+    def _guard_spaghetti_strap_dress(source: str, translated: str) -> str:
+        """Keep 吊带裙 as a strap dress instead of OPUS's hosiery ``garter``."""
+        long_dress_terms = ("吊带长裙", "细肩带长裙", "细吊带长裙")
+        dress_terms = ("吊带裙", "吊带连衣裙", "细肩带连衣裙", "细吊带连衣裙")
+        is_long_dress = any(term in source for term in long_dress_terms)
+        is_strap_dress = is_long_dress or any(term in source for term in dress_terms)
+        if not is_strap_dress:
+            return translated
+
+        canonical = "long spaghetti-strap dress" if is_long_dress else "spaghetti-strap dress"
+        # Apply only when the Chinese source names the complete dress concept;
+        # standalone 吊带袜/吊袜带 must keep their legitimate garter meaning.
+        bad_patterns = (
+            r"\b(?:a\s+)?long\s+garters?\b" if is_long_dress else r"\b(?:a\s+)?garters?\s+dress\b",
+            r"\b(?:a\s+)?(?:long\s+)?suspender\s+dress\b",
+            r"\b(?:a\s+)?long\s+skirt\s+with\s+(?:a\s+)?straps?\s+on\s+(?:her|his|the)\s+shoulders?\b",
+            r"\b(?:a\s+)?hanging\s+dress\b",
+        )
+        for pattern in bad_patterns:
+            translated = re.sub(pattern, f"a {canonical}", translated, flags=re.I)
+
+        has_strap_dress = bool(re.search(
+            r"\bspaghetti[- ]straps?\b.{0,24}\bdress\b|\bdress\b.{0,24}\bspaghetti[- ]straps?\b",
+            translated,
+            flags=re.I,
+        ))
+        if not has_strap_dress:
+            translated = translated.rstrip(". ") + f". Wearing a {canonical}."
         return translated
 
     @staticmethod
@@ -646,4 +678,4 @@ class TranslationService:
         try:
             return self.engine.en_to_zh(text)
         except Exception as exc:
-            raise RuntimeError(f"本地英译中失败：{exc}") from exc
+            raise RuntimeError(f"{self.engine_name} 英译中失败：{exc}") from exc

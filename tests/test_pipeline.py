@@ -1,3 +1,5 @@
+import re
+
 from anima_prompt_studio.domain.models import CharacterSlot, ItemState, PromptJob
 from anima_prompt_studio.services.pipeline import PromptPipeline
 
@@ -43,6 +45,46 @@ def test_model_switch_keeps_input_and_changes_params():
     pipeline.switch_model(job, "anima_turbo_v1")
     assert job.generation_params.steps == 10
     assert job.negative_prompt == ""
+
+
+def test_pipeline_repairs_marian_long_garter_drift_and_adds_dress_tags():
+    class GarterDriftEngine:
+        name = "garter-drift"
+
+        def zh_to_en(self, _text):
+            return "A young girl in a long garter."
+
+        def en_to_zh(self, _text):
+            return "一个穿长吊带的年轻女孩。"
+
+    from anima_prompt_studio.services.translation_service import TranslationService
+
+    pipeline = PromptPipeline(translation=TranslationService(GarterDriftEngine()))
+    job = PromptJob(original_zh="一个身穿吊带长裙的年轻女孩")
+    pipeline.compiler.apply_model_defaults(job)
+    pipeline.translate(job)
+
+    assert "long spaghetti-strap dress" in job.translated_en.lower()
+    assert not re.search(r"\bgarters?\b", job.translated_en.lower())
+    tags = {item.tag for item in job.matched_tags}
+    assert {"dress", "long dress", "spaghetti strap"} <= tags
+    assert "long spaghetti-strap dress" in job.positive_prompt.lower()
+
+
+def test_builtin_pipeline_understands_spaghetti_strap_dress_variants():
+    cases = [
+        ("一个身穿吊带长裙的女孩", {"dress", "long dress", "spaghetti strap"}),
+        ("一个身穿细肩带长裙的女孩", {"dress", "long dress", "spaghetti strap"}),
+        ("一个身穿吊带连衣裙的女孩", {"dress", "spaghetti strap"}),
+        ("一个身穿吊带裙的女孩", {"dress", "spaghetti strap"}),
+    ]
+    for source, expected_tags in cases:
+        pipeline = PromptPipeline()
+        job = PromptJob(original_zh=source)
+        pipeline.compiler.apply_model_defaults(job)
+        pipeline.translate(job)
+        assert "spaghetti-strap dress" in job.translated_en.lower()
+        assert expected_tags <= {item.tag for item in job.matched_tags}
 
 
 def test_score_tag_keeps_required_underscore():
@@ -92,6 +134,50 @@ def test_one_and_another_are_split_into_scoped_slots_with_mixed_gaze():
     assert not {"looking at viewer", "looking forward", "looking away"} & tag_section
     assert "On the left, white hair, looking at viewer." in job.positive_prompt
     assert "On the right, black hair, looking forward." in job.positive_prompt
+
+
+def test_expanded_two_person_phrases_keep_each_subjects_attributes_and_objects():
+    pipeline = PromptPipeline()
+    job = PromptJob(
+        original_zh="两个女孩，左边白色长发蓝瞳拿着一本书，右边黑色短发红瞳拿着一朵花，两人看向彼此"
+    )
+    pipeline.compiler.apply_model_defaults(job)
+    pipeline.translate(job)
+
+    assert "On the left, white hair, blue eyes, long hair, holding a book, looking at each other." in job.positive_prompt
+    assert "On the right, black hair, red eyes, short hair, holding a flower, looking at each other." in job.positive_prompt
+    assert "On the left, black hair" not in job.positive_prompt
+    assert "On the right, white hair" not in job.positive_prompt
+    tag_section = set(job.positive_prompt.partition("\n\n")[0].split(", "))
+    assert "looking at viewer" not in tag_section
+    assert "holding book" not in tag_section
+
+
+def test_multi_person_translation_drift_is_visible_while_final_prompt_stays_scoped():
+    class DriftingEngine:
+        name = "drifting"
+
+        def zh_to_en(self, _text):
+            return (
+                "Two girls: the left one has black long hair and red eyes and is holding a book; "
+                "the right one has black short hair and red eyes and is holding a flower."
+            )
+
+        def en_to_zh(self, _text):
+            return "两个女孩，左边黑色长发红瞳拿书，右边黑色短发红瞳拿花。"
+
+    from anima_prompt_studio.services.translation_service import TranslationService
+
+    pipeline = PromptPipeline(translation=TranslationService(DriftingEngine()))
+    job = PromptJob(
+        original_zh="两个女孩，左边白色长发蓝瞳拿着一本书，右边黑色短发红瞳拿着一朵花"
+    )
+    pipeline.translate(job)
+
+    assert "On the left, white hair, blue eyes, long hair, holding a book." in job.positive_prompt
+    warnings = [item.message for item in job.semantic_warnings if item.concept == "多人作用域"]
+    assert warnings and "white hair" in warnings[0] and "blue eyes" in warnings[0]
+    assert "最终 ANIMA Prompt 已优先采用中文分区事实" in warnings[0]
 
 
 def test_task_package_only_exports_active_character_slots():

@@ -134,6 +134,10 @@ class SQLiteRepository:
         row = self.connection.execute("SELECT value_json FROM settings WHERE key=?", (key,)).fetchone()
         return json.loads(row[0]) if row else default
 
+    def delete_setting(self, key: str) -> None:
+        with self.connection:
+            self.connection.execute("DELETE FROM settings WHERE key=?", (key,))
+
     def save_remote_profile(self, profile: RemoteProfile) -> None:
         with self.connection:
             self.connection.execute(
@@ -154,6 +158,10 @@ class SQLiteRepository:
             for row in self.connection.execute("SELECT payload_json FROM remote_profiles ORDER BY display_name")
         ]
         return [profile for profile in profiles if profile.enabled] if enabled_only else profiles
+
+    def delete_remote_profile(self, profile_id: str) -> None:
+        with self.connection:
+            self.connection.execute("DELETE FROM remote_profiles WHERE id=?", (profile_id,))
 
     def save_workflow_profile(self, profile: WorkflowProfile) -> None:
         with self.connection:

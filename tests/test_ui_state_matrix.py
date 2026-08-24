@@ -21,11 +21,14 @@ from anima_prompt_studio.domain.models import (
     MatchedTag, PromptJob, SubjectMode,
 )
 from anima_prompt_studio.repositories import SQLiteRepository
+from anima_prompt_studio.services.ai_prompt_service import AIEngineConfig
 from anima_prompt_studio.services.remote.workflow_renderer import WorkflowRenderer
 from anima_prompt_studio.services.remote.credential_store import CredentialStore, MemoryCredentialBackend
+from anima_prompt_studio.ui.ai_engine_dialog import AIEngineDialog
+from anima_prompt_studio.ui.ai_extract_dialog import AIExtractDialog
 from anima_prompt_studio.ui.main_window import MainWindow
 from anima_prompt_studio.ui.interaction_guide_dialog import InteractionGuideDialog
-from anima_prompt_studio.ui.remote_dialogs import build_auto_workflow_profile
+from anima_prompt_studio.ui.remote_dialogs import RemoteProfileManagerDialog, build_auto_workflow_profile
 
 
 @pytest.fixture(scope="module")
@@ -118,6 +121,93 @@ def test_interaction_writing_guide_is_available_in_frontend(window):
     assert "LoRA" in page_text
 
 
+def test_ai_assist_is_a_top_level_menu_and_does_not_replace_local_compile(window):
+    titles = [action.text().replace("&", "") for action in window.menuBar().actions()]
+    assert titles == ["文件", "设置", "画廊", "标签", "小说助手", "帮助"]
+    assert window.translate_button.text() == "翻译并编译"
+    assert not hasattr(window, "prompt_engine_combo")
+    assert "AI API" not in [
+        window.center_tabs.tabText(index) for index in range(window.center_tabs.count())
+    ]
+
+
+def test_saved_ai_engine_does_not_replace_local_translation(app, tmp_path):
+    repository = SQLiteRepository(tmp_path / "ai-engine-ui.db")
+    repository.set_setting("prompt_engine_id", "ai_api")
+    repository.set_setting("ai_engine_config", AIEngineConfig(
+        provider_id="opencode_go", model="mimo-v2.5",
+    ).model_dump(mode="json"))
+    store = CredentialStore(MemoryCredentialBackend())
+    store.save_ai_api_key("secret", "opencode_go")
+    widget = MainWindow(repository, store)
+    try:
+        assert "AI" not in widget.pipeline.translation.engine_name
+        assert widget.translate_button.text() == "翻译并编译"
+        assert widget._stored_ai_engine_config().model == "mimo-v2.5"
+        assert widget._ai_api_key() == "secret"
+    finally:
+        widget.close()
+
+
+def test_extracted_brief_can_replace_or_compile_through_local_pipeline(window, monkeypatch):
+    window.chinese.setPlainText("原来的短句")
+    compiled = {}
+    monkeypatch.setattr(window, "translate_and_compile", lambda: compiled.setdefault("called", True))
+    window._apply_extracted_brief("白发少女站在雨夜街道上，右手撑伞。", "replace")
+    assert window.chinese.toPlainText().startswith("白发少女")
+    window._apply_extracted_brief("场景：霓虹灯。", "append")
+    assert "右手撑伞" in window.chinese.toPlainText()
+    assert "霓虹灯" in window.chinese.toPlainText()
+    window._apply_extracted_brief("全身三分之四平视。", "compile")
+    assert compiled["called"] is True
+    assert window.chinese.toPlainText() == "全身三分之四平视。"
+
+
+def test_extract_dialog_loads_current_input(window):
+    dialog = AIExtractDialog(
+        config=AIEngineConfig(model="mimo-v2.5"),
+        api_key="secret",
+        credential_store=window.credential_store,
+        current_zh="当前输入区的长描述",
+        parent=window,
+    )
+    try:
+        assert dialog.source.toPlainText() == "当前输入区的长描述"
+        assert dialog.windowTitle() == "小说画面提取助手"
+    finally:
+        dialog.close()
+
+
+def test_opencode_go_dialog_exposes_model_and_protocol_without_an_extra_workflow_page(app):
+    dialog = AIEngineDialog(
+        AIEngineConfig(provider_id="opencode_go", model="minimax-m3"),
+        "secret",
+        True,
+    )
+    try:
+        assert dialog.base_url.isReadOnly()
+        assert dialog.model.currentText() == "minimax-m3"
+        assert dialog.resolved_protocol.text() == "/messages"
+        assert dialog.thinking.text().startswith("使用思考")
+        assert not dialog.thinking.isChecked()
+        dialog.model.setCurrentText("grok-4.5")
+        assert dialog.resolved_protocol.text() == "/responses"
+    finally:
+        dialog.close()
+
+
+def test_opencode_go_dialog_shows_cost_labels_but_returns_raw_model_id(app):
+    dialog = AIEngineDialog(AIEngineConfig(model="ox-alpha-free"), "secret", True)
+    try:
+        assert dialog.model.currentText().startswith("★ 限时免费")
+        assert dialog.engine_config().model == "ox-alpha-free"
+        dialog.set_model_id("kimi-k3")
+        assert dialog.model.currentText().startswith("⚠ 较贵 / 高消耗")
+        assert dialog.engine_config().model == "kimi-k3"
+    finally:
+        dialog.close()
+
+
 def test_composition_value_change_becomes_user_selected(window):
     window.shot.setCurrentText("全身")
     assert window.job.composition.shot == "全身"
@@ -156,6 +246,49 @@ def test_mouse_wheel_does_not_change_cfg_or_mark_it_manual(window):
     assert window.cfg.value() == 1.0
     assert window.job.generation_params.cfg == 1.0
     assert window.parameter_state_boxes["cfg"].currentData() == GenerationFieldState.AUTO.value
+
+
+def test_mouse_wheel_does_not_change_workflow_or_other_primary_selections(window):
+    first = WorkflowProfile(
+        id="wheel-first",
+        display_name="01 第一个工作流",
+        api_workflow={},
+        bindings={},
+        workflow_kind="txt2img_basic",
+    )
+    selected = WorkflowProfile(
+        id="wheel-selected",
+        display_name="02 当前工作流",
+        api_workflow={},
+        bindings={},
+        workflow_kind="txt2img_basic",
+    )
+    window.repository.save_workflow_profile(first)
+    window.repository.save_workflow_profile(selected)
+    window._refresh_remote_controls(selected_workflow_id=selected.id)
+    before = {
+        "workflow": window.workflow_profile_combo.currentData(),
+        "model": window.model_combo.currentData(),
+        "generation": window.generation_combo.currentData(),
+        "quality": window.quality_combo.currentData(),
+    }
+
+    for combo in (
+        window.workflow_profile_combo,
+        window.model_combo,
+        window.generation_combo,
+        window.quality_combo,
+    ):
+        event = QWheelEvent(
+            QPointF(5, 5), QPointF(5, 5), QPoint(), QPoint(0, 120),
+            Qt.NoButton, Qt.NoModifier, Qt.ScrollUpdate, False,
+        )
+        QApplication.sendEvent(combo, event)
+
+    assert window.workflow_profile_combo.currentData() == before["workflow"] == selected.id
+    assert window.model_combo.currentData() == before["model"]
+    assert window.generation_combo.currentData() == before["generation"]
+    assert window.quality_combo.currentData() == before["quality"]
 
 
 def test_locked_composition_survives_recommend_and_model_switch(window):
@@ -509,6 +642,46 @@ def test_changing_direct_ssh_endpoint_clears_saved_host_fingerprint(window):
     assert changed.known_host_fingerprint == ""
 
 
+def test_remote_profile_manager_duplicates_toggles_and_deletes_cloud_images(app, tmp_path):
+    repository = SQLiteRepository(tmp_path / "remote-manager.db")
+    store = CredentialStore(MemoryCredentialBackend())
+    original = RemoteProfile(
+        display_name="东京 4090",
+        ssh_host="old.example.com",
+        ssh_port=22022,
+        ssh_user="root",
+        known_host_fingerprint="SHA256:old-image",
+        startup_mode="command",
+        startup_command="start-comfyui",
+        model_aliases={"anima_turbo_v1": "anima.safetensors"},
+    )
+    repository.save_remote_profile(original)
+    store.save_password(original.id, "root@old.example.com", "old-password")
+    dialog = RemoteProfileManagerDialog(repository, store, original.id)
+    try:
+        dialog.duplicate_selected()
+        duplicate = repository.get_remote_profile(dialog.selected_profile_id)
+        assert duplicate.id != original.id
+        assert duplicate.display_name.endswith("（新镜像）")
+        assert duplicate.known_host_fingerprint == ""
+        assert duplicate.startup_mode == "command"
+        assert duplicate.startup_command == "start-comfyui"
+        assert duplicate.model_aliases == original.model_aliases
+        assert store.read_password(duplicate.id) == ""
+
+        dialog.toggle_selected()
+        assert repository.get_remote_profile(duplicate.id).enabled is False
+        store.save_password(duplicate.id, "root@new.example.com", "new-password")
+        dialog.delete_selected(confirm=False)
+        with pytest.raises(KeyError):
+            repository.get_remote_profile(duplicate.id)
+        assert store.read_password(duplicate.id) == ""
+        assert repository.get_remote_profile(original.id).ssh_host == "old.example.com"
+    finally:
+        dialog.close()
+        repository.close()
+
+
 def test_cloud_provider_list_defaults_to_compshare_and_can_switch(window):
     window._clear_remote_form()
     assert window.remote_provider_combo.currentData() == "compshare_container"
@@ -773,6 +946,22 @@ def test_final_compiled_prompt_is_editable_and_used_for_generation(window, monke
     window.generate_remote()
     assert launched
     assert "hand-edited phrase" in launched[0].job.positive_prompt
+
+
+def test_generation_sync_never_runs_translation_or_full_recompile(window, monkeypatch):
+    window.job.translated_en = "A girl standing by a window."
+    window.pipeline.compiler.compile(window.job)
+    window._load_job_into_ui()
+
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("generation preflight must not translate or fully recompile")
+
+    monkeypatch.setattr(window.pipeline, "recompile", unexpected)
+    monkeypatch.setattr(window.pipeline.translation, "en_to_zh", unexpected)
+    window._sync_for_generation()
+
+    assert window.job.positive_prompt
+    assert window.job.translated_en == "A girl standing by a window."
 
 
 def test_locked_compiled_prompt_survives_translate_and_can_be_restored(window):

@@ -27,6 +27,7 @@ from anima_prompt_studio.domain.models import (
     LoRAProfile, LoRASelection, PromptJob, SubjectMode,
 )
 from anima_prompt_studio.repositories import SQLiteRepository
+from anima_prompt_studio.services.ai_prompt_service import AIEngineConfig, OPENCODE_GO_BASE_URL
 from anima_prompt_studio.services.config_service import ConfigService
 from anima_prompt_studio.services.export_service import ExportService
 from anima_prompt_studio.services.gallery_server import GalleryServer
@@ -42,11 +43,15 @@ from anima_prompt_studio.services.remote.provider_presets import (
 from anima_prompt_studio.services.remote.credential_store import CredentialStore, CredentialStoreError
 from anima_prompt_studio.services.remote.workflow_discovery import parse_ssh_command
 from anima_prompt_studio.services.remote.workflow_compatibility import infer_workflow_model_profiles
+from anima_prompt_studio.ui.ai_engine_dialog import AIEngineDialog
+from anima_prompt_studio.ui.ai_extract_dialog import AIExtractDialog
+from anima_prompt_studio.services.novel_scene_compiler import NovelSceneCompiler
 from anima_prompt_studio.ui.image_gallery import ImageGalleryWidget
 from anima_prompt_studio.ui.interaction_guide_dialog import InteractionGuideDialog
 from anima_prompt_studio.ui.library_dialog import EntityLibraryDialog
 from anima_prompt_studio.ui.remote_dialogs import (
     RemoteProfileDialog,
+    RemoteProfileManagerDialog,
     WorkflowProfileDialog,
     build_auto_workflow_profile,
     classify_workflow,
@@ -80,6 +85,13 @@ class NoWheelSpinBox(QSpinBox):
 
 class NoWheelDoubleSpinBox(QDoubleSpinBox):
     """Prevents page scrolling from silently editing a numeric parameter."""
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 - Qt virtual method
+        event.ignore()
+
+
+class NoWheelComboBox(QComboBox):
+    """Lets the surrounding page scroll without silently changing a selection."""
 
     def wheelEvent(self, event) -> None:  # noqa: N802 - Qt virtual method
         event.ignore()
@@ -180,7 +192,26 @@ class MainWindow(QMainWindow):
             except Exception:
                 log.exception("已配置的本地翻译模型加载失败")
                 if resources.models_available():
-                    self.pipeline.translation = TranslationService(LazyLocalMarianEngine(resources.model_path("zh_en"), resources.model_path("en_zh")))
+                    self.pipeline.translation = TranslationService(
+                        LazyLocalMarianEngine(resources.model_path("zh_en"), resources.model_path("en_zh"))
+                    )
+
+    def _stored_ai_engine_config(self) -> AIEngineConfig:
+        payload = self.repository.get_setting("ai_engine_config")
+        if payload:
+            return AIEngineConfig.model_validate(payload)
+        old_base = self.repository.get_setting("ai_api_base_url", OPENCODE_GO_BASE_URL)
+        provider = "opencode_go" if "opencode.ai/zen/go" in old_base else "openai_compatible"
+        return AIEngineConfig(
+            provider_id=provider,
+            base_url=old_base,
+            model=self.repository.get_setting("ai_api_model", "mimo-v2.5") or "mimo-v2.5",
+            timeout_seconds=int(self.repository.get_setting("ai_api_timeout", 60)),
+        )
+
+    def _ai_api_key(self) -> str:
+        config = self._stored_ai_engine_config()
+        return self.credential_store.read_ai_api_key(config.provider_id) or self.credential_store.read_ai_api_key("default")
 
     def _create_menu(self) -> None:
         file_menu = self.menuBar().addMenu("文件")
@@ -201,6 +232,9 @@ class MainWindow(QMainWindow):
         new_remote_action = QAction("新增云主机…", self)
         new_remote_action.triggered.connect(lambda: self.configure_remote_profile(True))
         settings.addAction(new_remote_action)
+        manage_remote_action = QAction("管理云主机连接…", self)
+        manage_remote_action.triggered.connect(self.manage_remote_profiles)
+        settings.addAction(manage_remote_action)
         edit_remote_action = QAction("编辑当前云主机…", self)
         edit_remote_action.triggered.connect(lambda: self.configure_remote_profile(False))
         settings.addAction(edit_remote_action)
@@ -223,6 +257,14 @@ class MainWindow(QMainWindow):
         browse_tags.setShortcut("Ctrl+T")
         browse_tags.triggered.connect(self.open_tag_browser)
         tags_menu.addAction(browse_tags)
+        ai_menu = self.menuBar().addMenu("小说助手")
+        extract_action = QAction("提取小说画面…", self)
+        extract_action.setShortcut("Ctrl+Shift+E")
+        extract_action.triggered.connect(self.open_ai_extract)
+        ai_menu.addAction(extract_action)
+        ai_config = QAction("配置 AI API…", self)
+        ai_config.triggered.connect(self.configure_ai_engine)
+        ai_menu.addAction(ai_config)
         help_menu = self.menuBar().addMenu("帮助")
         self.interaction_guide_action = QAction("复杂动作与场景互动写法…", self)
         self.interaction_guide_action.setShortcut("F1")
@@ -241,19 +283,19 @@ class MainWindow(QMainWindow):
         self.project_name.setMaximumWidth(260)
         primary_header.addWidget(self.project_name)
         primary_header.addWidget(QLabel("模型"))
-        self.model_combo = QComboBox()
+        self.model_combo = NoWheelComboBox()
         for profile in self.configs.model_profiles.values():
             self.model_combo.addItem(profile.display_name, profile.id)
         self.model_combo.currentIndexChanged.connect(self.on_model_changed)
         primary_header.addWidget(self.model_combo, 1)
         primary_header.addWidget(QLabel("生成预设"))
-        self.generation_combo = QComboBox()
+        self.generation_combo = NoWheelComboBox()
         for preset in self.configs.generation_presets["anima_turbo_v1"].values():
             self.generation_combo.addItem(preset.display_name, preset.id)
         self.generation_combo.currentIndexChanged.connect(self.on_generation_preset_changed)
         primary_header.addWidget(self.generation_combo, 1)
         primary_header.addWidget(QLabel("质量预设"))
-        self.quality_combo = QComboBox()
+        self.quality_combo = NoWheelComboBox()
         for profile in self.configs.quality_profiles.values():
             self.quality_combo.addItem(profile.display_name, profile.id)
             if profile.notes:
@@ -379,17 +421,19 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(group)
         connection = QGridLayout()
         connection.addWidget(QLabel("云平台"), 0, 0)
-        self.remote_provider_combo = QComboBox(); self.remote_provider_combo.setMinimumWidth(220)
+        self.remote_provider_combo = NoWheelComboBox(); self.remote_provider_combo.setMinimumWidth(220)
         for preset in PROVIDER_PRESETS:
             self.remote_provider_combo.addItem(preset.display_name, preset.id)
         self.remote_provider_combo.currentIndexChanged.connect(self._apply_remote_provider_preset)
         connection.addWidget(self.remote_provider_combo, 0, 1)
         connection.addWidget(QLabel("已保存"), 0, 2)
-        self.remote_profile_combo = QComboBox(); self.remote_profile_combo.setMinimumWidth(170)
+        self.remote_profile_combo = NoWheelComboBox(); self.remote_profile_combo.setMinimumWidth(170)
         self.remote_profile_combo.currentIndexChanged.connect(self._load_remote_form_from_selection)
         connection.addWidget(self.remote_profile_combo, 0, 3, 1, 2)
         new_button = QPushButton("新连接"); new_button.clicked.connect(self._clear_remote_form)
         connection.addWidget(new_button, 0, 5)
+        manage_button = QPushButton("管理连接…"); manage_button.clicked.connect(self.manage_remote_profiles)
+        connection.addWidget(manage_button, 0, 6)
         self.remote_name_edit = QLineEdit(); self.remote_name_edit.setPlaceholderText("例如：东京 4090")
 
         connection.setColumnStretch(1, 1); connection.setColumnStretch(3, 1)
@@ -453,7 +497,7 @@ class MainWindow(QMainWindow):
         self.remote_user_edit = QLineEdit("root"); self.remote_user_edit.setMaximumWidth(120)
         advanced.addWidget(self.remote_user_edit, 0, 5)
         advanced.addWidget(QLabel("认证"), 0, 6)
-        self.remote_auth_combo = QComboBox()
+        self.remote_auth_combo = NoWheelComboBox()
         self.remote_auth_combo.addItem("私钥", RemoteAuthType.PRIVATE_KEY.value)
         self.remote_auth_combo.addItem("密码", RemoteAuthType.PASSWORD.value)
         self.remote_auth_combo.addItem("SSH Agent", RemoteAuthType.AGENT.value)
@@ -493,7 +537,7 @@ class MainWindow(QMainWindow):
 
         layout = QHBoxLayout()
         layout.addWidget(QLabel("云端工作流"))
-        self.workflow_profile_combo = QComboBox(); self.workflow_profile_combo.setMinimumWidth(190)
+        self.workflow_profile_combo = NoWheelComboBox(); self.workflow_profile_combo.setMinimumWidth(190)
         self.workflow_profile_combo.currentIndexChanged.connect(self._workflow_selection_changed)
         layout.addWidget(self.workflow_profile_combo)
         workflow_import = QPushButton("导入其他工作流…")
@@ -545,9 +589,9 @@ class MainWindow(QMainWindow):
         self.gaze = self._combo(["无", "看镜头", "看人物", "看物体", "看向画外"])
         self.aspect = self._combo(["方形", "竖图", "横图"])
         self.position = self._combo(["无", "左", "中", "右"])
-        self.composition_mode = QComboBox()
+        self.composition_mode = NoWheelComboBox()
         self.composition_mode.addItem("智能推荐", "smart"); self.composition_mode.addItem("混合模式", "mixed"); self.composition_mode.addItem("手动模式", "manual")
-        self.subject_mode = QComboBox()
+        self.subject_mode = NoWheelComboBox()
         self.subject_mode.addItem("自动识别", SubjectMode.AUTO.value)
         self.subject_mode.addItem("人物", SubjectMode.CHARACTER.value)
         self.subject_mode.addItem("纯场景", SubjectMode.SCENE.value)
@@ -555,7 +599,7 @@ class MainWindow(QMainWindow):
         self.subject_mode.currentIndexChanged.connect(self.on_subject_mode_changed)
         self.composition_mode.currentIndexChanged.connect(self.on_composition_mode_changed)
         grid.addWidget(QLabel("模式"), 0, 0); grid.addWidget(self.composition_mode, 0, 1, 1, 2)
-        self.composition_preset = QComboBox()
+        self.composition_preset = NoWheelComboBox()
         self.composition_preset.addItem("智能推荐", "smart")
         for preset in self.configs.composition_presets.values():
             self.composition_preset.addItem(preset.display_name, preset.id)
@@ -580,7 +624,7 @@ class MainWindow(QMainWindow):
         self.composition_state_boxes: dict[str, QComboBox] = {}
         self.composition_reason_labels: dict[str, QLabel] = {}
         for row, (field_name, widget) in enumerate(self.composition_controls.items(), 4):
-            state = QComboBox(); state.addItem("自动", CompositionFieldState.AUTO.value); state.addItem("手动", CompositionFieldState.USER_SELECTED.value); state.addItem("锁定", CompositionFieldState.LOCKED.value)
+            state = NoWheelComboBox(); state.addItem("自动", CompositionFieldState.AUTO.value); state.addItem("手动", CompositionFieldState.USER_SELECTED.value); state.addItem("锁定", CompositionFieldState.LOCKED.value)
             reason = QLabel(); reason.setWordWrap(True); reason.setStyleSheet("color: #777; font-size: 11px")
             self.composition_state_boxes[field_name] = state; self.composition_reason_labels[field_name] = reason
             grid.addWidget(QLabel(labels[field_name]), row, 0); grid.addWidget(widget, row, 1); grid.addWidget(state, row, 2); grid.addWidget(reason, row, 3)
@@ -622,7 +666,9 @@ class MainWindow(QMainWindow):
         translation = QWidget(); tl = QVBoxLayout(translation)
         tl.addWidget(QLabel("英文翻译（可编辑；编辑后点“按英文重新编译”）"))
         self.english = QTextEdit(); tl.addWidget(self.english, 2)
-        edit_button = QPushButton("按英文重新回译并编译"); edit_button.clicked.connect(self.compile_edited_english); tl.addWidget(edit_button)
+        self.compile_english_button = QPushButton("按英文重新回译并编译")
+        self.compile_english_button.clicked.connect(self.compile_edited_english)
+        tl.addWidget(self.compile_english_button)
         tl.addWidget(QLabel("回译中文（仅供检查）"))
         self.back_chinese = QTextEdit(); self.back_chinese.setReadOnly(True); tl.addWidget(self.back_chinese, 2)
         tl.addWidget(QLabel("关键差异检查"))
@@ -706,7 +752,7 @@ class MainWindow(QMainWindow):
         self.parameter_state_boxes: dict[str, QComboBox] = {}
         labels = {"width":"宽", "height":"高", "steps":"步数", "cfg":"CFG", "sampler":"采样器", "scheduler":"调度器"}
         for row, (field_name, widget) in enumerate(self.parameter_controls.items()):
-            state = QComboBox()
+            state = NoWheelComboBox()
             state.addItem("自动", GenerationFieldState.AUTO.value)
             state.addItem("手动", GenerationFieldState.USER_SELECTED.value)
             state.addItem("锁定", GenerationFieldState.LOCKED.value)
@@ -756,7 +802,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _combo(values: list[str]) -> QComboBox:
-        box = QComboBox(); box.addItems(values); return box
+        box = NoWheelComboBox(); box.addItems(values); return box
 
     @staticmethod
     def _slot_values(slot: CharacterSlot) -> list[str]:
@@ -946,7 +992,7 @@ class MainWindow(QMainWindow):
             item.setForeground({"green": QColor("#288a48"), "yellow": QColor("#b07800"), "red": QColor("#c0392b")}[warning.level.value])
             self.warning_list.addItem(item)
         self.tag_table.setRowCount(len(j.matched_tags))
-        source_names = {"direct":"直接匹配","synonym":"同义词匹配","character_card":"角色卡","artist":"画师库","parameter":"参数补充","derived":"规则推导","user_added":"用户添加"}
+        source_names = {"direct":"直接匹配","synonym":"同义词匹配","character_card":"角色卡","artist":"画师库","parameter":"参数补充","derived":"规则推导","user_added":"用户添加","ai_generated":"AI 生成"}
         for row, tag in enumerate(j.matched_tags):
             check = QTableWidgetItem(); check.setFlags(check.flags() | Qt.ItemIsUserCheckable); check.setCheckState(Qt.Unchecked if tag.tag in j.excluded_tags else Qt.Checked)
             check.setData(Qt.UserRole, tag.tag); self.tag_table.setItem(row, 0, check)
@@ -1034,6 +1080,11 @@ class MainWindow(QMainWindow):
             self.job.positive_prompt = positive
             self.job.negative_prompt = negative
 
+    def _sync_for_generation(self) -> None:
+        """Capture the current UI state without running MT on the GUI thread."""
+        self._sync_ui_to_job()
+        self.pipeline.compile_current_state(self.job)
+
     def on_compiled_prompt_edited(self) -> None:
         if self._updating:
             return
@@ -1041,6 +1092,7 @@ class MainWindow(QMainWindow):
             self.job.compiled_prompt_state = ItemState.USER_EDITED
         self.job.positive_prompt = self.positive.toPlainText()
         self.job.negative_prompt = self.negative.toPlainText()
+        self.job.prompt_origin = "user_edited"
         self._update_compiled_prompt_hint()
 
     def on_compiled_prompt_lock_changed(self) -> None:
@@ -1059,6 +1111,7 @@ class MainWindow(QMainWindow):
     def restore_compiled_prompt_from_compiler(self) -> None:
         self.lock_compiled_prompt.setChecked(False)
         self.job.compiled_prompt_state = ItemState.AUTO
+        self.job.prompt_origin = "deterministic"
         self.recompile_from_ui()
 
     def _update_compiled_prompt_hint(self) -> None:
@@ -1069,7 +1122,7 @@ class MainWindow(QMainWindow):
         if state == ItemState.LOCKED:
             self.compiled_prompt_hint.setText("最终提示词已锁定。翻译、改构图或改参数都不会覆盖这一栏。")
         elif state == ItemState.USER_EDITED:
-            self.compiled_prompt_hint.setText("已手动修改。点「生成」会用这里的文本；点「翻译并编译」或「恢复自动编译」才会重写。")
+            self.compiled_prompt_hint.setText("已手动修改。点「生成」会用这里的文本；重新处理或恢复自动编译才会重写。")
         else:
             self.compiled_prompt_hint.setText(
                 "可直接改最终英文再生成。「锁定英文」只锁中间翻译，不会锁这一栏。"
@@ -1132,7 +1185,7 @@ class MainWindow(QMainWindow):
         if state == CompositionFieldState.AUTO:
             self.pipeline.recommend_composition(self.job)
         else:
-            self.pipeline.compiler.compile(self.job)
+            self.pipeline._compile_preserving_authored_prompt(self.job)
         self._refresh_results()
 
     def on_composition_mode_changed(self) -> None:
@@ -1344,6 +1397,66 @@ class MainWindow(QMainWindow):
             self.repository.set_setting("zh_en_model_path", zh_en); self.repository.set_setting("en_zh_model_path", en_zh)
             self.statusBar().showMessage("本地 Marian 翻译模型已加载。", 5000)
         except Exception as exc: self._show_error("模型加载失败", exc)
+
+    def configure_ai_engine(self) -> None:
+        try:
+            dialog = AIEngineDialog(
+                self._stored_ai_engine_config(),
+                self._ai_api_key(),
+                self.credential_store.available,
+                self,
+            )
+            if dialog.exec() != QDialog.Accepted:
+                return
+            self._save_ai_engine(dialog.engine_config(), dialog.api_key.text().strip(), dialog.remember_key.isChecked())
+            self.statusBar().showMessage("小说画面提取助手已配置。请从菜单「小说助手 → 提取小说画面」使用。", 7000)
+        except Exception as exc:
+            self._show_error("小说画面提取助手配置失败", exc)
+
+    def _save_ai_engine(self, config: AIEngineConfig, key: str, remember: bool) -> None:
+        self.repository.set_setting("ai_engine_config", config.model_dump(mode="json"))
+        if remember:
+            self.credential_store.save_ai_api_key(key, config.provider_id)
+        else:
+            self.credential_store.delete_ai_api_key(config.provider_id)
+            self.credential_store.delete_ai_api_key("default")
+
+    def open_ai_extract(self) -> None:
+        dialog = AIExtractDialog(
+            config=self._stored_ai_engine_config(),
+            api_key=self._ai_api_key(),
+            credential_store=self.credential_store,
+            current_zh=self.chinese.toPlainText(),
+            parent=self,
+        )
+        dialog.config_saved.connect(self._save_ai_engine)
+        dialog.applied.connect(self._apply_extracted_brief)
+        dialog.direct_compile_requested.connect(self._compile_extracted_scene)
+        dialog.exec()
+
+    def _compile_extracted_scene(self, result) -> None:
+        try:
+            NovelSceneCompiler().compile(self.job, result, self.pipeline.compiler)
+            self._load_job_into_ui()
+            self.statusBar().showMessage(
+                "小说画面计划已独立编译；未经过旧 Marian 多人翻译链路。", 8000
+            )
+        except Exception as exc:
+            self._show_error("小说画面计划编译失败", exc)
+
+    def _apply_extracted_brief(self, brief: str, mode: str) -> None:
+        if mode == "append":
+            existing = self.chinese.toPlainText().strip()
+            text = f"{existing}\n{brief}".strip() if existing else brief
+        else:
+            text = brief
+        self.chinese.setPlainText(text)
+        self.job.original_zh = text
+        self.chinese.setFocus()
+        if mode == "compile":
+            self.translate_and_compile()
+            return
+        self.statusBar().showMessage("已写入中文输入区。确认后点「翻译并编译」，仍走本地翻译和编译。", 8000)
 
     def open_tag_browser(self) -> None:
         dialog = TagBrowserDialog(self)
@@ -1675,6 +1788,30 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("云主机配置已保存。", 4000)
         except Exception as exc:
             self._show_error("保存云主机配置失败", exc)
+
+    def manage_remote_profiles(self) -> None:
+        current_profile_id = str(
+            self.remote_profile_combo.currentData()
+            or self.repository.get_setting("last_remote_profile_id", "")
+            or ""
+        )
+        dialog = RemoteProfileManagerDialog(
+            self.repository,
+            self.credential_store,
+            current_profile_id,
+            self,
+        )
+        dialog.exec()
+        selected_id = dialog.selected_profile_id
+        if selected_id:
+            try:
+                selected = self.repository.get_remote_profile(selected_id)
+            except KeyError:
+                selected_id = ""
+            else:
+                if selected.enabled:
+                    self.repository.set_setting("last_remote_profile_id", selected_id)
+        self._refresh_remote_controls(selected_remote_id=selected_id)
 
     def import_workflow_profile(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "选择 ComfyUI API 工作流", "", "JSON (*.json)")
@@ -2023,8 +2160,7 @@ class MainWindow(QMainWindow):
             self._show_error("无法开始远程生成", exc)
 
     def _prepare_generation_request(self) -> QueuedGeneration | None:
-        self._sync_and_recompile()
-        self._refresh_results()
+        self._sync_for_generation()
         profile = self._selected_remote_profile()
         workflow = self._selected_workflow_profile()
         if not profile.known_host_fingerprint:
@@ -2196,8 +2332,8 @@ class MainWindow(QMainWindow):
             self.repository.save_generation_artifact(artifact)
         self._last_output_dir = run.output_dir
         remaining = len(self._generation_queue)
+        displayed = self.image_gallery.show_completed_run(run, artifacts)
         if remaining:
-            self.image_gallery.refresh(run.id)
             self.remote_open_button.setEnabled(self.image_gallery.has_images)
             self.remote_status.setText(self._generation_status_text(f"完成 · 已下载 {len(artifacts)} 张图片"))
             self.statusBar().showMessage(
@@ -2205,7 +2341,11 @@ class MainWindow(QMainWindow):
                 8000,
             )
             return
-        self.show_image_gallery(run.id)
+        if displayed:
+            self.center_tabs.setCurrentWidget(self.image_gallery)
+            self.remote_open_button.setEnabled(self.image_gallery.has_images)
+        else:
+            self.show_image_gallery(run.id)
         self.remote_status.setText(f"完成 · 已下载 {len(artifacts)} 张图片")
         self.statusBar().showMessage(f"远程生图完成：{run.output_dir}", 10000)
 

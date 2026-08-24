@@ -1,5 +1,5 @@
 {
-  "id": "anima_turbo_v1", "display_name": "ANIMA Turbo", "variant": "turbo",
+  "id": "anima_turbo_v1", "display_name": "ANIMA Turbo", "family": "anima", "variant": "turbo",
   "checkpoint_logical_name": "anima_turbo_v1", "default_steps": 10, "default_cfg": 1.0,
   "default_sampler": "euler", "default_scheduler": "normal", "negative_prompt_mode": "disabled",
   "positive_prefix": ["score_7"], "negative_prompt": [], "default_width": 896, "default_height": 1152,

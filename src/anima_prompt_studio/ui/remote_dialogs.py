@@ -4,20 +4,26 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -31,6 +37,8 @@ from anima_prompt_studio.domain.execution_models import (
     WorkflowBinding,
     WorkflowProfile,
 )
+from anima_prompt_studio.repositories import SQLiteRepository
+from anima_prompt_studio.services.remote.credential_store import CredentialStore, CredentialStoreError
 from anima_prompt_studio.services.remote.workflow_compatibility import infer_workflow_model_profiles
 from anima_prompt_studio.services.remote.provider_presets import (
     DEFAULT_PROVIDER_PRESET_ID,
@@ -348,6 +356,8 @@ class RemoteProfileDialog(QDialog):
         self.setWindowTitle("云主机配置")
         self.resize(620, 560)
         self._id = profile.id if profile else ""
+        self._startup_mode = profile.startup_mode if profile else "manual"
+        self._startup_command = profile.startup_command if profile else ""
         layout = QVBoxLayout(self)
         form = QFormLayout()
         self.provider_preset = QComboBox()
@@ -444,11 +454,196 @@ class RemoteProfileDialog(QDialog):
             comfy_host=self.comfy_host.text().strip() or "127.0.0.1",
             comfy_port=self.comfy_port.value(),
             model_aliases={str(key): str(value) for key, value in aliases.items()},
+            startup_mode=self._startup_mode,
+            startup_command=self._startup_command,
             enabled=self.enabled.isChecked(),
         )
         if self._id:
             values["id"] = self._id
         return RemoteProfile(**values)
+
+
+class RemoteProfileManagerDialog(QDialog):
+    """Manage reusable SSH targets independently from the generation form."""
+
+    def __init__(
+        self,
+        repository: SQLiteRepository,
+        credential_store: CredentialStore,
+        selected_profile_id: str = "",
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.repository = repository
+        self.credential_store = credential_store
+        self.selected_profile_id = selected_profile_id
+        self.setWindowTitle("管理云主机连接")
+        self.resize(860, 460)
+
+        layout = QVBoxLayout(self)
+        hint = QLabel(
+            "每个云显卡镜像可以保存为一个连接。复制连接会保留 ComfyUI 和模型映射，"
+            "但会清除 SSH 主机指纹且不会复制密码。"
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("background: #eef4ff; color: #234a83; padding: 8px; border-radius: 5px")
+        layout.addWidget(hint)
+
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(["状态", "连接名称", "云平台", "SSH 地址", "用户", "ComfyUI"])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.doubleClicked.connect(self.edit_selected)
+        self.table.itemSelectionChanged.connect(self._selection_changed)
+        layout.addWidget(self.table, 1)
+
+        actions = QHBoxLayout()
+        for label, slot in (
+            ("新增", self.add_profile),
+            ("编辑", self.edit_selected),
+            ("复制为新镜像", self.duplicate_selected),
+            ("启用 / 停用", self.toggle_selected),
+            ("删除", self.delete_selected),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(slot)
+            actions.addWidget(button)
+        actions.addStretch()
+        use_button = QPushButton("使用选中连接")
+        use_button.setProperty("buttonRole", "primary")
+        use_button.clicked.connect(self.use_selected)
+        actions.addWidget(use_button)
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(self.accept)
+        actions.addWidget(close_button)
+        layout.addLayout(actions)
+        self.refresh_profiles(selected_profile_id)
+
+    def refresh_profiles(self, selected_profile_id: str = "") -> None:
+        wanted = selected_profile_id or self.selected_profile_id
+        profiles = self.repository.list_remote_profiles()
+        self.table.setRowCount(len(profiles))
+        selected_row = -1
+        for row, profile in enumerate(profiles):
+            values = (
+                "启用" if profile.enabled else "停用",
+                profile.display_name,
+                get_provider_preset(profile.provider_preset_id).display_name,
+                f"{profile.ssh_host}:{profile.ssh_port}",
+                profile.ssh_user,
+                f"{profile.comfy_host}:{profile.comfy_port}",
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setData(Qt.UserRole, profile.id)
+                if not profile.enabled:
+                    item.setForeground(Qt.GlobalColor.gray)
+                self.table.setItem(row, column, item)
+            if profile.id == wanted:
+                selected_row = row
+        if selected_row < 0 and profiles:
+            selected_row = 0
+        if selected_row >= 0:
+            self.table.selectRow(selected_row)
+            self.selected_profile_id = str(self.table.item(selected_row, 0).data(Qt.UserRole))
+        else:
+            self.selected_profile_id = ""
+
+    def _selection_changed(self) -> None:
+        profile_id = self._selected_profile_id()
+        if profile_id:
+            self.selected_profile_id = profile_id
+
+    def _selected_profile_id(self) -> str:
+        row = self.table.currentRow()
+        if row < 0 or not self.table.item(row, 0):
+            return ""
+        return str(self.table.item(row, 0).data(Qt.UserRole) or "")
+
+    def _selected_profile(self) -> RemoteProfile | None:
+        profile_id = self._selected_profile_id()
+        return self.repository.get_remote_profile(profile_id) if profile_id else None
+
+    def add_profile(self) -> None:
+        dialog = RemoteProfileDialog(parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        profile = dialog.result_profile()
+        self.repository.save_remote_profile(profile)
+        self.refresh_profiles(profile.id)
+
+    def edit_selected(self) -> None:
+        profile = self._selected_profile()
+        if not profile:
+            return
+        dialog = RemoteProfileDialog(profile, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        updated = dialog.result_profile()
+        self.repository.save_remote_profile(updated)
+        self.refresh_profiles(updated.id)
+
+    def duplicate_selected(self) -> None:
+        profile = self._selected_profile()
+        if not profile:
+            return
+        duplicate = profile.model_copy(
+            update={
+                "id": str(uuid4()),
+                "display_name": f"{profile.display_name}（新镜像）",
+                "known_host_fingerprint": "",
+                "enabled": True,
+            },
+            deep=True,
+        )
+        self.repository.save_remote_profile(duplicate)
+        self.repository.set_setting(f"remember_remote_password:{duplicate.id}", False)
+        self.refresh_profiles(duplicate.id)
+
+    def toggle_selected(self) -> None:
+        profile = self._selected_profile()
+        if not profile:
+            return
+        updated = profile.model_copy(update={"enabled": not profile.enabled})
+        self.repository.save_remote_profile(updated)
+        self.refresh_profiles(updated.id)
+
+    def delete_selected(self, *, confirm: bool = True) -> None:
+        profile = self._selected_profile()
+        if not profile:
+            return
+        if confirm and QMessageBox.question(
+            self,
+            "删除云主机连接",
+            f"确定删除“{profile.display_name}”吗？生成历史不会被删除。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        ) != QMessageBox.Yes:
+            return
+        self.repository.delete_remote_profile(profile.id)
+        self.repository.delete_setting(f"remember_remote_password:{profile.id}")
+        if self.repository.get_setting("last_remote_profile_id", "") == profile.id:
+            self.repository.set_setting("last_remote_profile_id", "")
+        try:
+            self.credential_store.delete_password(profile.id)
+        except CredentialStoreError as exc:
+            QMessageBox.warning(self, "凭据清理失败", str(exc))
+        self.selected_profile_id = ""
+        self.refresh_profiles()
+
+    def use_selected(self) -> None:
+        profile = self._selected_profile()
+        if not profile:
+            return
+        if not profile.enabled:
+            profile = profile.model_copy(update={"enabled": True})
+            self.repository.save_remote_profile(profile)
+        self.selected_profile_id = profile.id
+        self.accept()
 
 
 class WorkflowProfileDialog(QDialog):

@@ -162,6 +162,18 @@ class PromptPipeline:
             SemanticWarning(level=WarningLevel.YELLOW, concept="英文清洁性", message=message)
             for message in cleanliness
         )
+        job.semantic_warnings.extend(
+            SemanticWarning(
+                level=WarningLevel.YELLOW,
+                concept="多人作用域",
+                message=message + "；最终 ANIMA Prompt 已优先采用中文分区事实。",
+            )
+            for message in self.multi_scope.translation_scope_failures(
+                job.translated_en,
+                job.character_slots[:job.composition.people_count],
+            )
+            if any(item.id == "multi_scope" and item.enabled for item in job.enhancements)
+        )
         complexity_warning = self.prompt_complexity.analyze(source_zh)
         if complexity_warning:
             job.semantic_warnings.append(complexity_warning)
@@ -208,7 +220,7 @@ class PromptPipeline:
 
     def recommend_composition(self, job: PromptJob, alternative_index: int = 0) -> PromptJob:
         self.composition_recommender.recommend(job, alternative_index=alternative_index)
-        return self.compiler.compile(job)
+        return self._compile_preserving_authored_prompt(job)
 
     @staticmethod
     def _infer_people_count(job: PromptJob, entities=()) -> None:
@@ -246,12 +258,12 @@ class PromptPipeline:
         job.model_profile_id = model_profile_id
         self.compiler.apply_model_defaults(job, reset_user_selected_fields=MODEL_DEPENDENT_FIELDS)
         self.composition_recommender.apply_aspect_dimensions(job)
-        return self.compiler.compile(job)
+        return self._compile_preserving_authored_prompt(job)
 
     def apply_generation_preset(self, job: PromptJob, preset_id: str) -> PromptJob:
         self.compiler.apply_generation_preset(job, preset_id)
         self.composition_recommender.apply_aspect_dimensions(job)
-        return self.compiler.compile(job)
+        return self._compile_preserving_authored_prompt(job)
 
     def apply_composition_preset(self, job: PromptJob, preset_id: str) -> PromptJob:
         preset = self.configs.get_composition_preset(preset_id)
@@ -266,4 +278,18 @@ class PromptPipeline:
             decision.score = 1000
         job.composition.mode = "mixed"
         self.composition_recommender.apply_aspect_dimensions(job)
-        return self.compiler.compile(job)
+        return self._compile_preserving_authored_prompt(job)
+
+    def compile_current_state(self, job: PromptJob) -> PromptJob:
+        """Compile UI-owned state without translation or semantic re-analysis."""
+        return self._compile_preserving_authored_prompt(job)
+
+    def _compile_preserving_authored_prompt(self, job: PromptJob) -> PromptJob:
+        preserve = job.compiled_prompt_state in {ItemState.USER_EDITED, ItemState.LOCKED}
+        positive, negative, origin = job.positive_prompt, job.negative_prompt, job.prompt_origin
+        self.compiler.compile(job)
+        if preserve:
+            job.positive_prompt = positive
+            job.negative_prompt = negative
+            job.prompt_origin = origin
+        return job
