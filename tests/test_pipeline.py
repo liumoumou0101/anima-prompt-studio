@@ -252,7 +252,7 @@ def test_task_package_only_exports_active_character_slots():
 def test_task_package_has_schema_and_source():
     _, job = make_job()
     package = job.task_package()
-    assert package["schema_version"] == "1.4"
+    assert package["schema_version"] == "1.5"
     assert package["composition"]["shot"]
     assert package["source"]["original_zh"] == job.original_zh
     assert "canonical_prose" in package and "subject_mode" in package and "excluded_concepts" in package

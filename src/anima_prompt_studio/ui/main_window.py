@@ -45,6 +45,7 @@ from anima_prompt_studio.services.remote.workflow_discovery import parse_ssh_com
 from anima_prompt_studio.services.remote.workflow_compatibility import infer_workflow_model_profiles
 from anima_prompt_studio.ui.ai_engine_dialog import AIEngineDialog
 from anima_prompt_studio.ui.ai_extract_dialog import AIExtractDialog
+from anima_prompt_studio.ui.character_recognition_dialog import CharacterRecognitionDialog
 from anima_prompt_studio.services.novel_scene_compiler import NovelSceneCompiler
 from anima_prompt_studio.ui.image_gallery import ImageGalleryWidget
 from anima_prompt_studio.ui.interaction_guide_dialog import InteractionGuideDialog
@@ -656,7 +657,10 @@ class MainWindow(QMainWindow):
         sl.addWidget(self.slot_table)
         card_buttons = QHBoxLayout()
         manage_cards = QPushButton("打开角色卡库"); manage_cards.clicked.connect(lambda: self.open_entity_library(CharacterCard))
-        card_buttons.addWidget(manage_cards); card_buttons.addStretch(); sl.addLayout(card_buttons)
+        recognize_characters = QPushButton("识别中文角色名…")
+        recognize_characters.setToolTip("首次用 AI 查找候选并经本地标签库验证；保存后同名输入将离线识别。")
+        recognize_characters.clicked.connect(self.open_character_recognition)
+        card_buttons.addWidget(manage_cards); card_buttons.addWidget(recognize_characters); card_buttons.addStretch(); sl.addLayout(card_buttons)
         layout.addWidget(slots, 2)
         return panel
 
@@ -850,7 +854,12 @@ class MainWindow(QMainWindow):
             slots: list[CharacterSlot] = []
             for row in range(self.slot_table.rowCount()):
                 values = [(self.slot_table.item(row, col).text().strip() if self.slot_table.item(row, col) else "") for col in range(7)]
-                slots.append(CharacterSlot(position=values[0], display_name=values[1], gender_tag=values[2],
+                existing = existing_slots[row] if row < len(existing_slots) else None
+                same_character = existing is not None and existing.display_name == values[1]
+                slots.append(CharacterSlot(
+                    id=existing.id if existing is not None else CharacterSlot().id,
+                    character_id=existing.character_id if same_character else None,
+                    position=values[0], display_name=values[1], gender_tag=values[2],
                     identity_tags=self._split(values[3]), appearance_tags=self._split(values[4]), clothing_tags=self._split(values[5]),
                     action_text=values[6], locked=True))
             self.job.character_slots = slots + existing_slots[len(slots):]
@@ -1027,6 +1036,8 @@ class MainWindow(QMainWindow):
             self._sync_ui_to_job()
             lora_profiles = self.repository.list_entities(LoRAProfile)
             self.pipeline.set_lora_profiles(lora_profiles)
+            character_cards = self.repository.list_entities(CharacterCard)
+            self.pipeline.set_character_cards(character_cards)
             known_entities = []
             for profile in lora_profiles:
                 known_entities.extend((value, "lora") for value in {
@@ -1037,7 +1048,7 @@ class MainWindow(QMainWindow):
             positive, negative = self.job.positive_prompt, self.job.negative_prompt
             if not preserve:
                 self.job.compiled_prompt_state = ItemState.AUTO
-            self.pipeline.translate(self.job, known_entities)
+            self.pipeline.translate(self.job, known_entities, character_cards)
             if preserve:
                 self.job.positive_prompt = positive
                 self.job.negative_prompt = negative
@@ -1465,6 +1476,40 @@ class MainWindow(QMainWindow):
     def open_interaction_guide(self) -> None:
         InteractionGuideDialog(self).exec()
 
+    def open_character_recognition(self) -> None:
+        dialog = CharacterRecognitionDialog(
+            source_text=self.chinese.toPlainText(),
+            database=self.pipeline.matcher.database,
+            config=self._stored_ai_engine_config(),
+            api_key=self._ai_api_key(),
+            credential_store=self.credential_store,
+            parent=self,
+        )
+        dialog.config_saved.connect(self._save_ai_engine)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        existing_cards = {card.id: card for card in self.repository.list_entities(CharacterCard)}
+        for card in dialog.selected_cards:
+            existing = existing_cards.get(card.id)
+            if existing is not None:
+                card.display_name = existing.display_name or card.display_name
+                card.aliases = list(dict.fromkeys([*existing.aliases, *card.aliases]))
+                card.identity_tags = existing.identity_tags
+                card.default_appearance_tags = existing.default_appearance_tags
+                card.default_clothing_tags = existing.default_clothing_tags
+                card.optional_tags = existing.optional_tags
+                card.lora_profile_ids = existing.lora_profile_ids
+                card.copyright_tag = card.copyright_tag or existing.copyright_tag
+                if card.gender_tag == "1other" and existing.gender_tag:
+                    card.gender_tag = existing.gender_tag
+                if existing.notes and existing.notes != card.notes:
+                    card.notes = "\n".join(dict.fromkeys([existing.notes, card.notes]))
+            self.repository.save_entity(card)
+        self.statusBar().showMessage(
+            f"已保存 {len(dialog.selected_cards)} 个中文名映射；以后将离线识别。", 7000,
+        )
+        self.translate_and_compile()
+
     def open_entity_library(self, initial: type) -> None:
         dialog = EntityLibraryDialog(self.repository, initial, self)
         if dialog.exec() != QDialog.Accepted or not dialog.selected_entity: return
@@ -1476,6 +1521,17 @@ class MainWindow(QMainWindow):
             values[1] = entity.display_name; values[2] = entity.gender_tag
             values[3] = ", ".join(entity.identity_tags); values[4] = ", ".join(entity.default_appearance_tags); values[5] = ", ".join(entity.default_clothing_tags)
             for col, value in enumerate(values): self.slot_table.setItem(row, col, QTableWidgetItem(value))
+            while len(self.job.character_slots) <= row:
+                self.job.character_slots.append(CharacterSlot())
+            slot = self.job.character_slots[row]
+            slot.character_id = entity.id
+            slot.display_name = entity.display_name
+            slot.gender_tag = entity.gender_tag
+            slot.identity_tags = list(entity.identity_tags)
+            slot.appearance_tags = list(entity.default_appearance_tags)
+            slot.clothing_tags = list(entity.default_clothing_tags)
+            slot.locked = True
+            self.pipeline.set_character_cards(self.repository.list_entities(CharacterCard))
         elif isinstance(entity, ArtistProfile):
             existing = self._split(self.artists.text()); tag = entity.output_tag.lstrip("@")
             if tag not in existing: existing.append(tag)

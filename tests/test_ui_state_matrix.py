@@ -17,7 +17,7 @@ from anima_prompt_studio.domain.execution_models import (
     WorkflowProfile,
 )
 from anima_prompt_studio.domain.models import (
-    CharacterSlot, CompositionFieldState, EnhancementItem, GenerationFieldState, ItemState, LoRASelection,
+    CharacterCard, CharacterSlot, CompositionFieldState, EnhancementItem, GenerationFieldState, ItemState, LoRASelection,
     MatchedTag, PromptJob, SubjectMode,
 )
 from anima_prompt_studio.repositories import SQLiteRepository
@@ -515,6 +515,17 @@ def test_ui_roundtrip_preserves_text_derived_entity_sources(window):
     window._refresh_results(); window._sync_ui_to_job()
     assert window.job.artist_selection_sources == {"@rurudo": "text_derived"}
     assert window.job.lora_selection[0].source == "text_derived"
+
+
+def test_ui_roundtrip_preserves_applied_character_card_id(window):
+    card = CharacterCard(
+        id="keqing", display_name="刻晴", aliases=["Keqing"], gender_tag="1girl",
+        anima_character_tag="keqing_(genshin_impact)", copyright_tag="genshin_impact",
+    )
+    window.job.character_slots = [CharacterSlot(character_id=card.id, display_name=card.display_name)]
+    window._load_job_into_ui()
+    window._sync_ui_to_job()
+    assert window.job.character_slots[0].character_id == "keqing"
 
 
 def test_people_count_ui_change_immediately_recompiles_prompt_and_export_state(window):

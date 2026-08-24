@@ -60,6 +60,7 @@ class LibraryPanel(QWidget):
             self._line("default_clothing_tags", "默认服装", "逗号分隔")
             self._line("optional_tags", "可选标签", "逗号分隔")
             self._line("anima_character_tag", "ANIMA 角色标签")
+            self._line("copyright_tag", "作品/系列标签")
         elif self.model_type is ArtistProfile:
             self._line("canonical_tag", "标准标签")
             self._line("output_tag", "输出标签", "@artist name")
@@ -112,7 +113,8 @@ class LibraryPanel(QWidget):
         if self.model_type is CharacterCard:
             return CharacterCard(**common, gender_tag=self._value("gender_tag"), identity_tags=split_values(self._value("identity_tags")),
                 default_appearance_tags=split_values(self._value("default_appearance_tags")), default_clothing_tags=split_values(self._value("default_clothing_tags")),
-                optional_tags=split_values(self._value("optional_tags")), anima_character_tag=self._value("anima_character_tag") or None)
+                optional_tags=split_values(self._value("optional_tags")), anima_character_tag=self._value("anima_character_tag") or None,
+                copyright_tag=self._value("copyright_tag") or None)
         if self.model_type is ArtistProfile:
             canonical = self._value("canonical_tag") or display_name
             return ArtistProfile(**common, canonical_tag=canonical, output_tag=self._value("output_tag") or f"@{canonical}",
