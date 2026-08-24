@@ -183,6 +183,34 @@
     ]
   },
   {
+    "tag": "curtsey",
+    "category": "pose",
+    "zh": [
+      "提裙礼",
+      "屈膝礼",
+      "屈膝行礼",
+      "行屈膝礼"
+    ],
+    "en": [
+      "curtsey",
+      "curtsy",
+      "curtsying",
+      "curtsies"
+    ]
+  },
+  {
+    "tag": "skirt hold",
+    "category": "pose",
+    "zh": [
+      "提裙礼"
+    ],
+    "en": [
+      "holding both sides of her skirt",
+      "holding the sides of her skirt",
+      "skirt hold"
+    ]
+  },
+  {
     "tag": "floating",
     "category": "pose",
     "zh": [
