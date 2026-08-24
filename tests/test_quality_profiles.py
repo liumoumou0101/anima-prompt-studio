@@ -35,6 +35,20 @@ def _compiled_tags(profile_id: str, source: str) -> set[str]:
     return set(job.positive_prompt.partition("\n\n")[0].split(", "))
 
 
+def test_anima_base_uses_official_quality_and_artist_tag_order():
+    configs = ConfigService()
+    compiler = PromptCompiler(configs)
+    job = PromptJob(
+        model_profile_id="anima_base_v1",
+        translated_en="A white-haired girl.",
+        artist_selection=["example_artist"],
+    )
+    compiler.compile(job)
+    tags = job.positive_prompt.partition("\n\n")[0].split(", ")
+    assert tags[:4] == ["masterpiece", "best quality", "score_7", "safe"]
+    assert tags.index("@example_artist") < tags.index("centered")
+
+
 def test_ultimate_quality_profiles_are_complete_and_uncensored_by_default():
     profiles = ConfigService().quality_profiles
     assert set(ULTIMATE_PROFILE_IDS) <= set(profiles)

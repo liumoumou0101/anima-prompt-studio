@@ -72,7 +72,55 @@ class MultiScopeService:
                 appearance_tags=features,
                 action_text=", ".join(actions),
             ))
+        if slots and any(phrase in chinese for phrase in (
+            "两人看向彼此", "两人看着彼此", "互相看着", "互相看向", "看向彼此", "看着彼此",
+        )):
+            for slot in slots:
+                actions = [item for item in slot.action_text.split(", ") if item]
+                if "looking at each other" not in actions:
+                    actions.append("looking at each other")
+                slot.action_text = ", ".join(actions)
         return slots
+
+    @staticmethod
+    def translation_scope_failures(english: str, slots: list[CharacterSlot]) -> list[str]:
+        """Detect AI translations that move scoped facts between characters."""
+        text = re.sub(r"\s+", " ", english).strip().casefold()
+        markers: list[tuple[int, str, int]] = []
+        for position in ("left", "center", "right"):
+            match = re.search(rf"\b(?:on the |the )?{position}(?: one| girl| person)?\b", text)
+            if match:
+                markers.append((match.start(), position, match.end()))
+        markers.sort()
+        segments: dict[str, str] = {}
+        for index, (start, position, _end) in enumerate(markers):
+            finish = markers[index + 1][0] if index + 1 < len(markers) else len(text)
+            segments[position] = text[start:finish]
+
+        failures: list[str] = []
+        for slot in slots:
+            position = slot.position.casefold()
+            segment = segments.get(position, "")
+            if not segment:
+                failures.append(f"AI 翻译缺少 {position} 人物的独立描述")
+                continue
+            expected = list(slot.appearance_tags)
+            expected.extend(
+                action for action in slot.action_text.split(", ")
+                if action and action != "looking at each other"
+            )
+            missing = [value for value in expected if not MultiScopeService._english_term_present(value, segment)]
+            if missing:
+                failures.append(f"AI 翻译中 {position} 人物缺少或串位：{', '.join(missing)}")
+        return failures
+
+    @staticmethod
+    def _english_term_present(term: str, text: str) -> bool:
+        variants = {term.casefold()}
+        if term.endswith(" hair"):
+            colour = term.removesuffix(" hair")
+            variants.update({f"{colour}-haired", f"{colour} haired"})
+        return any(value in text for value in variants)
 
     def _describe(self, position: str, text: str) -> str:
         gender, features, actions = self._details(text)

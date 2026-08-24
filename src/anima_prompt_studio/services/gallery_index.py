@@ -39,39 +39,10 @@ def load_gallery_batches(
         paths = _existing_image_paths(
             Path(artifact.local_path) for artifact in repository.list_generation_artifacts(run.id)
         )
-        if not paths:
+        batch = gallery_batch_from_run(run, paths)
+        if batch is None:
             continue
-        snapshot = run.request_json.get("prompt_job", {})
-        params = snapshot.get("generation_params", {}) if isinstance(snapshot, dict) else {}
-        params = dict(params) if isinstance(params, dict) else {}
-        if isinstance(snapshot, dict):
-            for key, aliases in (
-                ("negative_prompt", ("negative_prompt",)),
-                ("generation_preset_id", ("generation_preset_id", "generation_preset")),
-                ("quality_profile_id", ("quality_profile_id", "quality_profile")),
-                ("original_zh", ("original_zh",)),
-                ("translated_en", ("translated_en",)),
-            ):
-                if params.get(key):
-                    continue
-                value = next((snapshot.get(alias) for alias in aliases if snapshot.get(alias)), None)
-                if value not in (None, ""):
-                    params[key] = value
-            source = snapshot.get("source")
-            if isinstance(source, dict):
-                params.setdefault("original_zh", source.get("original_zh") or "")
-                params.setdefault("translated_en", source.get("translated_en") or "")
-        params = _with_rendered_dimensions(params, run.request_json.get("render_metadata"))
-        batches[run.id] = GalleryBatch(
-            run_id=run.id,
-            output_dir=Path(run.output_dir) if run.output_dir else paths[0].parent,
-            created_at=run.completed_at or run.created_at,
-            project_name=str(snapshot.get("project_name") or "未命名项目"),
-            model_profile_id=str(snapshot.get("model_profile_id") or ""),
-            positive_prompt=str(snapshot.get("positive_prompt") or ""),
-            parameters=params if isinstance(params, dict) else {},
-            image_paths=paths,
-        )
+        batches[run.id] = batch
 
     root = output_root.expanduser()
     if root.is_dir():
@@ -125,6 +96,49 @@ def load_gallery_batches(
             )
 
     return sorted(batches.values(), key=lambda batch: batch.created_at, reverse=True)[:limit]
+
+
+def gallery_batch_from_run(run, image_paths) -> GalleryBatch | None:
+    """Build one gallery batch from an already-known completed run.
+
+    This intentionally performs no output-root scan.  The generation UI can use
+    it to display freshly downloaded artifacts without walking the entire image
+    library on the GUI thread.
+    """
+    paths = _existing_image_paths(image_paths)
+    if not paths:
+        return None
+    snapshot = run.request_json.get("prompt_job", {})
+    params = snapshot.get("generation_params", {}) if isinstance(snapshot, dict) else {}
+    params = dict(params) if isinstance(params, dict) else {}
+    if isinstance(snapshot, dict):
+        for key, aliases in (
+            ("negative_prompt", ("negative_prompt",)),
+            ("generation_preset_id", ("generation_preset_id", "generation_preset")),
+            ("quality_profile_id", ("quality_profile_id", "quality_profile")),
+            ("original_zh", ("original_zh",)),
+            ("translated_en", ("translated_en",)),
+        ):
+            if params.get(key):
+                continue
+            value = next((snapshot.get(alias) for alias in aliases if snapshot.get(alias)), None)
+            if value not in (None, ""):
+                params[key] = value
+        source = snapshot.get("source")
+        if isinstance(source, dict):
+            params.setdefault("original_zh", source.get("original_zh") or "")
+            params.setdefault("translated_en", source.get("translated_en") or "")
+    params = _with_rendered_dimensions(params, run.request_json.get("render_metadata"))
+    return GalleryBatch(
+        run_id=run.id,
+        output_dir=Path(run.output_dir) if run.output_dir else paths[0].parent,
+        created_at=run.completed_at or run.created_at,
+        project_name=str(snapshot.get("project_name") or "未命名项目"),
+        model_profile_id=str(snapshot.get("model_profile_id") or ""),
+        positive_prompt=str(snapshot.get("positive_prompt") or ""),
+        parameters=params,
+        image_paths=paths,
+    )
 
 
 def _batch_from_manifest(manifest_path: Path, output_root: Path) -> GalleryBatch | None:

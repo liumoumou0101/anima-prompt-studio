@@ -41,5 +41,5 @@ def test_json_export(tmp_path):
     assert data["schema_version"] == "1.4"
     assert data["generation_preset"] == "quality"
     assert data["quality_profile"] == "portrait_detail"
-    assert data["composition"]["mode"] == "mixed"
+    assert data["composition"]["mode"] == "smart"
     assert data["positive_prompt"] == "safe"

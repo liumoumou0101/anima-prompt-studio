@@ -85,7 +85,7 @@ class SemanticFrame(BaseModel):
 class MatchedTag(BaseModel):
     tag: str
     category: str = "general"
-    source_type: Literal["direct", "synonym", "character_card", "artist", "parameter", "derived", "user_added"] = "direct"
+    source_type: Literal["direct", "synonym", "character_card", "artist", "parameter", "derived", "user_added", "ai_generated"] = "direct"
     source_text: str = ""
     confidence: float = Field(default=1.0, ge=0, le=1)
     state: ItemState = ItemState.AUTO
@@ -198,7 +198,9 @@ class GenerationParams(BaseModel):
 class ModelProfile(BaseModel):
     id: str
     display_name: str
-    family: str = "anima"
+    # Deliberately explicit: each family gets its own compiler rules.  New
+    # families must not silently inherit ANIMA's tag order or quality syntax.
+    family: Literal["anima", "illustrious", "pony"] = "anima"
     variant: str
     version: str = "1.0"
     checkpoint_logical_name: str
@@ -359,6 +361,7 @@ class PromptJob(BaseModel):
     positive_prompt: str = ""
     negative_prompt: str = ""
     compiled_prompt_state: ItemState = ItemState.AUTO
+    prompt_origin: Literal["deterministic", "ai_generated", "user_edited"] = "deterministic"
     generation_params: GenerationParams = Field(default_factory=GenerationParams)
     workflow_template_id: str | None = None
     user_rating: int | None = None
@@ -374,6 +377,7 @@ class PromptJob(BaseModel):
             "model_profile": self.model_profile_id,
             "positive_prompt": self.positive_prompt,
             "negative_prompt": self.negative_prompt,
+            "prompt_origin": self.prompt_origin,
             "generation_preset": self.generation_preset_id,
             "quality_profile": self.quality_profile_id,
             **self.generation_params.model_dump(exclude={"locked_fields", "field_states"}),

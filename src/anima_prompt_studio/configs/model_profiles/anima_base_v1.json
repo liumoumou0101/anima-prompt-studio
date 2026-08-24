@@ -1,5 +1,5 @@
 {
-  "id": "anima_base_v1", "display_name": "ANIMA Base", "variant": "base",
+  "id": "anima_base_v1", "display_name": "ANIMA Base", "family": "anima", "variant": "base",
   "checkpoint_logical_name": "anima_base_v1", "default_steps": 35, "default_cfg": 4.5,
   "default_sampler": "er_sde", "default_scheduler": "normal", "negative_prompt_mode": "enabled",
   "positive_prefix": ["score_7"],

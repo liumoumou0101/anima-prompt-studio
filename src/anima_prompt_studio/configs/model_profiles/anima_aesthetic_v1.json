@@ -1,5 +1,5 @@
 {
-  "id": "anima_aesthetic_v1", "display_name": "ANIMA Aesthetic", "variant": "aesthetic",
+  "id": "anima_aesthetic_v1", "display_name": "ANIMA Aesthetic", "family": "anima", "variant": "aesthetic",
   "checkpoint_logical_name": "anima_aesthetic_v1", "default_steps": 35, "default_cfg": 4.5,
   "default_sampler": "euler", "default_scheduler": "normal", "negative_prompt_mode": "enabled",
   "positive_prefix": [],

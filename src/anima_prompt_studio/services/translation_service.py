@@ -200,7 +200,7 @@ class TranslationService:
             translated = self._guard_artist_intent(text, translated)
             return self._sanitize(translated)
         except Exception as exc:
-            raise RuntimeError(f"本地中译英失败：{exc}") from exc
+            raise RuntimeError(f"{self.engine_name} 中译英失败：{exc}") from exc
 
     @staticmethod
     def _guard_visual_terms(source: str, translated: str) -> str:
@@ -646,4 +646,4 @@ class TranslationService:
         try:
             return self.engine.en_to_zh(text)
         except Exception as exc:
-            raise RuntimeError(f"本地英译中失败：{exc}") from exc
+            raise RuntimeError(f"{self.engine_name} 英译中失败：{exc}") from exc

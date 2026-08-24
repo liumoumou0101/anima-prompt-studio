@@ -1,13 +1,15 @@
 {
   "features": [
-    ["非常长发", "very long hair"], ["白发", "white hair"], ["黑发", "black hair"],
+    ["非常长发", "very long hair"],
+    ["白色长发", "white hair"], ["白色短发", "white hair"], ["白色头发", "white hair"], ["白发", "white hair"],
+    ["黑色长发", "black hair"], ["黑色短发", "black hair"], ["黑色头发", "black hair"], ["黑发", "black hair"],
     ["金发", "blonde hair"], ["蓝发", "blue hair"], ["红发", "red hair"],
     ["蓝瞳", "blue eyes"], ["红瞳", "red eyes"], ["金瞳", "golden eyes"],
     ["绿瞳", "green eyes"], ["紫瞳", "purple eyes"], ["短发", "short hair"], ["长发", "long hair"]
   ],
   "actions": [
-    ["拿着书", "holding a book"], ["拿书", "holding a book"], ["读书", "reading a book"],
-    ["拿着花", "holding a flower"], ["拿花", "holding a flower"],
+    ["拿着一本书", "holding a book"], ["拿着书", "holding a book"], ["拿书", "holding a book"], ["读书", "reading a book"],
+    ["拿着一朵花", "holding a flower"], ["拿着花", "holding a flower"], ["拿花", "holding a flower"],
     ["拿苹果", "holding an apple"], ["拿雨伞", "holding an umbrella"],
     ["坐着", "sitting"], ["站着", "standing"], ["躺着", "lying"],
     ["看向镜头", "looking at viewer"], ["看镜头", "looking at viewer"],

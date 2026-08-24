@@ -94,6 +94,50 @@ def test_one_and_another_are_split_into_scoped_slots_with_mixed_gaze():
     assert "On the right, black hair, looking forward." in job.positive_prompt
 
 
+def test_expanded_two_person_phrases_keep_each_subjects_attributes_and_objects():
+    pipeline = PromptPipeline()
+    job = PromptJob(
+        original_zh="两个女孩，左边白色长发蓝瞳拿着一本书，右边黑色短发红瞳拿着一朵花，两人看向彼此"
+    )
+    pipeline.compiler.apply_model_defaults(job)
+    pipeline.translate(job)
+
+    assert "On the left, white hair, blue eyes, long hair, holding a book, looking at each other." in job.positive_prompt
+    assert "On the right, black hair, red eyes, short hair, holding a flower, looking at each other." in job.positive_prompt
+    assert "On the left, black hair" not in job.positive_prompt
+    assert "On the right, white hair" not in job.positive_prompt
+    tag_section = set(job.positive_prompt.partition("\n\n")[0].split(", "))
+    assert "looking at viewer" not in tag_section
+    assert "holding book" not in tag_section
+
+
+def test_multi_person_translation_drift_is_visible_while_final_prompt_stays_scoped():
+    class DriftingEngine:
+        name = "drifting"
+
+        def zh_to_en(self, _text):
+            return (
+                "Two girls: the left one has black long hair and red eyes and is holding a book; "
+                "the right one has black short hair and red eyes and is holding a flower."
+            )
+
+        def en_to_zh(self, _text):
+            return "两个女孩，左边黑色长发红瞳拿书，右边黑色短发红瞳拿花。"
+
+    from anima_prompt_studio.services.translation_service import TranslationService
+
+    pipeline = PromptPipeline(translation=TranslationService(DriftingEngine()))
+    job = PromptJob(
+        original_zh="两个女孩，左边白色长发蓝瞳拿着一本书，右边黑色短发红瞳拿着一朵花"
+    )
+    pipeline.translate(job)
+
+    assert "On the left, white hair, blue eyes, long hair, holding a book." in job.positive_prompt
+    warnings = [item.message for item in job.semantic_warnings if item.concept == "多人作用域"]
+    assert warnings and "white hair" in warnings[0] and "blue eyes" in warnings[0]
+    assert "最终 ANIMA Prompt 已优先采用中文分区事实" in warnings[0]
+
+
 def test_task_package_only_exports_active_character_slots():
     job = PromptJob(character_slots=[
         CharacterSlot(display_name="A"), CharacterSlot(display_name="B"), CharacterSlot(display_name="C"),

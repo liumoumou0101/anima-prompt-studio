@@ -10,9 +10,10 @@ class CredentialStoreError(RuntimeError):
 
 
 class CredentialStore:
-    """Store SSH passwords in Windows Credential Manager, never in SQLite."""
+    """Store SSH passwords and AI API keys in the OS credential store, never SQLite."""
 
     TARGET_PREFIX = "AnimaPromptStudio/SSH/"
+    AI_TARGET_PREFIX = "AnimaPromptStudio/AI/"
 
     def __init__(self, backend=None) -> None:
         self.backend = backend if backend is not None else (
@@ -38,6 +39,22 @@ class CredentialStore:
     def delete_password(self, profile_id: str) -> None:
         if self.backend and profile_id:
             self.backend.delete(self.TARGET_PREFIX + profile_id)
+
+    def read_ai_api_key(self, profile_id: str = "default") -> str:
+        if not self.backend or not profile_id:
+            return ""
+        return self.backend.read(self.AI_TARGET_PREFIX + profile_id)
+
+    def save_ai_api_key(self, api_key: str, profile_id: str = "default") -> None:
+        if not self.backend:
+            raise CredentialStoreError("当前系统不支持安全保存 API Key。")
+        if not profile_id or not api_key:
+            return
+        self.backend.write(self.AI_TARGET_PREFIX + profile_id, "AI API", api_key)
+
+    def delete_ai_api_key(self, profile_id: str = "default") -> None:
+        if self.backend and profile_id:
+            self.backend.delete(self.AI_TARGET_PREFIX + profile_id)
 
 
 class MemoryCredentialBackend:

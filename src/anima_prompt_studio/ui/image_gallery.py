@@ -22,7 +22,11 @@ from PySide6.QtWidgets import (
 )
 
 from anima_prompt_studio.repositories import SQLiteRepository
-from anima_prompt_studio.services.gallery_index import GalleryBatch, load_gallery_batches
+from anima_prompt_studio.services.gallery_index import (
+    GalleryBatch,
+    gallery_batch_from_run,
+    load_gallery_batches,
+)
 
 
 class PreviewLabel(QLabel):
@@ -132,6 +136,21 @@ class ImageGalleryWidget(QWidget):
     def refresh(self, select_run_id: str = "") -> None:
         current_run_id = select_run_id or self.batch_combo.currentData() or ""
         self.batches = load_gallery_batches(self.repository, self.output_root())
+        self._populate_batches(current_run_id)
+
+    def show_completed_run(self, run, artifacts) -> bool:
+        """Show freshly downloaded artifacts without rescanning output_root."""
+        batch = gallery_batch_from_run(
+            run,
+            (Path(artifact.local_path) for artifact in artifacts),
+        )
+        if batch is None:
+            return False
+        self.batches = [batch] + [item for item in self.batches if item.run_id != batch.run_id]
+        self._populate_batches(batch.run_id)
+        return True
+
+    def _populate_batches(self, current_run_id: str) -> None:
         self.batch_combo.blockSignals(True)
         self.batch_combo.clear()
         for batch in self.batches:

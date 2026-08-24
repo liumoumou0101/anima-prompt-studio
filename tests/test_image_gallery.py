@@ -127,13 +127,18 @@ def test_gallery_recovers_batches_from_manifest_without_database_rows(app, tmp_p
     repository.close()
 
 
-def test_generation_completion_opens_latest_image_in_main_window(app, tmp_path):
+def test_generation_completion_opens_latest_image_in_main_window(app, tmp_path, monkeypatch):
     repository = SQLiteRepository(tmp_path / "main.db")
     window = MainWindow(repository)
     image_path = tmp_path / "latest.png"
     _write_image(image_path)
     run = _completed_run(tmp_path, "latest-run")
     artifact = _artifact(run, image_path, "latest-artifact")
+    monkeypatch.setattr(
+        window.image_gallery,
+        "refresh",
+        lambda *_args, **_kwargs: pytest.fail("fresh downloads must not rescan the gallery root"),
+    )
 
     window._remote_generation_succeeded(run, [artifact])
 
