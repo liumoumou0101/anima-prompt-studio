@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anima-prompt-studio-v3"
+version = "0.0.0"
+description = "V3 local-first ANIMA prompt workbench"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "anima-prompt-studio>=2.0,<3",
+  "fastapi>=0.116,<1",
+  "pydantic>=2.7,<3",
+  "uvicorn>=0.35,<1",
+]
+
+[project.scripts]
+anima-v3-build-data = "anima_prompt_studio_v3.tools.build_reference_data:main"
+anima-v3-data-pack = "anima_prompt_studio_v3.tools.manage_data_pack:main"
+anima-v3-benchmark = "anima_prompt_studio_v3.tools.run_static_benchmark:main"
+anima-v3-api = "anima_prompt_studio_v3.tools.run_api:main"
+anima-v3-desktop = "anima_prompt_studio_v3.tools.run_desktop:main"
+
+[project.optional-dependencies]
+data = [
+  "pandas>=2.2,<4",
+  "pyarrow>=17,<24",
+]
+dev = [
+  "httpx2>=2.12,<3",
+  "pytest>=8",
+  "pytest-cov>=5",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+anima_prompt_studio_v3 = ["configs/model_profiles/*.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "../src"]
+testpaths = ["tests"]
+addopts = "-q"

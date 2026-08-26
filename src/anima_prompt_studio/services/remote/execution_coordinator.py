@@ -65,13 +65,27 @@ class RemoteExecutionCoordinator:
         workflow_profile: WorkflowProfile,
         checkpoint_logical_name: str,
         credentials: RemoteCredentials | None = None,
+        *,
+        run: GenerationRun | None = None,
     ) -> ExecutionResult:
-        run = GenerationRun(
-            prompt_job_id=job.id,
-            remote_profile_id=remote_profile.id,
-            workflow_profile_id=workflow_profile.id,
-            request_json={"prompt_job": job.model_dump(mode="json")},
-        )
+        if run is None:
+            run = GenerationRun(
+                prompt_job_id=job.id,
+                remote_profile_id=remote_profile.id,
+                workflow_profile_id=workflow_profile.id,
+                request_json={"prompt_job": job.model_dump(mode="json")},
+            )
+        else:
+            if run.state != GenerationRunState.DRAFT:
+                raise ValueError("只能使用 draft 状态的预创建任务开始执行。")
+            if (
+                run.prompt_job_id != job.id
+                or run.remote_profile_id != remote_profile.id
+                or run.workflow_profile_id != workflow_profile.id
+            ):
+                raise ValueError("预创建任务与本次生成快照不一致。")
+            run.request_json = dict(run.request_json)
+            run.request_json["prompt_job"] = job.model_dump(mode="json")
         return self._run(job, run, remote_profile, workflow_profile, checkpoint_logical_name, credentials, resume=False)
 
     def resume(

@@ -112,6 +112,9 @@ def gallery_batch_from_run(run, image_paths) -> GalleryBatch | None:
     params = snapshot.get("generation_params", {}) if isinstance(snapshot, dict) else {}
     params = dict(params) if isinstance(params, dict) else {}
     if isinstance(snapshot, dict):
+        integration_metadata = snapshot.get("integration_metadata")
+        if isinstance(integration_metadata, dict):
+            params["integration_metadata"] = integration_metadata
         for key, aliases in (
             ("negative_prompt", ("negative_prompt",)),
             ("generation_preset_id", ("generation_preset_id", "generation_preset")),

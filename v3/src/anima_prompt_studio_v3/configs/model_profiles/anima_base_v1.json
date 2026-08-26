@@ -1,0 +1,11 @@
+{
+  "id": "anima_base_v1",
+  "display_name": "ANIMA Base",
+  "family": "anima",
+  "variant": "base",
+  "positive_prefix": ["score_7"],
+  "negative_prompt": ["worst quality", "low quality", "score_1", "score_2", "score_3", "artist name", "blurry", "jpeg artifacts", "chromatic aberration"],
+  "negative_prompt_mode": "enabled",
+  "tag_separator": ", ",
+  "renderer_version": "anima-renderer-v1"
+}

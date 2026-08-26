@@ -1,0 +1,120 @@
+{
+  "version": "v3-static-v1",
+  "cases": [
+    {
+      "id": "alias_chinese_exclusion",
+      "profile_ids": ["anima_base_v1", "anima_aesthetic_v1", "anima_turbo_v1"],
+      "intent": {
+        "source_text": "女仆装、双马尾，不要金发",
+        "source_language": "zh",
+        "translated_text": null,
+        "graph": {
+          "elements": [
+            {
+              "id": "e_maid",
+              "source_span": null,
+              "original_text": "女仆装",
+              "canonical_tag": "maid_uniform",
+              "entity_id": null,
+              "type": "clothing",
+              "cardinality": null,
+              "state": "required",
+              "confidence": 1.0,
+              "provenance": {"kind": "user", "detail": null},
+              "notes": []
+            },
+            {
+              "id": "e_twintails",
+              "source_span": null,
+              "original_text": "双马尾",
+              "canonical_tag": null,
+              "entity_id": null,
+              "type": "appearance",
+              "cardinality": null,
+              "state": "required",
+              "confidence": 1.0,
+              "provenance": {"kind": "user", "detail": null},
+              "notes": []
+            },
+            {
+              "id": "e_blonde",
+              "source_span": null,
+              "original_text": "不要金发",
+              "canonical_tag": "blonde_hair",
+              "entity_id": null,
+              "type": "appearance",
+              "cardinality": null,
+              "state": "excluded",
+              "confidence": 1.0,
+              "provenance": {"kind": "user", "detail": null},
+              "notes": []
+            }
+          ],
+          "edges": []
+        },
+        "warnings": []
+      },
+      "expectations": {
+        "required_tags": ["maid", "twintails"],
+        "excluded_tags": ["blonde_hair"],
+        "required_lanes": ["literal", "conservative", "artist"]
+      }
+    },
+    {
+      "id": "explicit_wearing_relation",
+      "profile_ids": ["anima_base_v1"],
+      "intent": {
+        "source_text": "Hakurei Reimu wearing a maid outfit",
+        "source_language": "en",
+        "translated_text": null,
+        "graph": {
+          "elements": [
+            {
+              "id": "e_reimu",
+              "source_span": null,
+              "original_text": "Hakurei Reimu",
+              "canonical_tag": "hakurei_reimu",
+              "entity_id": null,
+              "type": "character",
+              "cardinality": null,
+              "state": "required",
+              "confidence": 1.0,
+              "provenance": {"kind": "user", "detail": null},
+              "notes": []
+            },
+            {
+              "id": "e_maid_relation",
+              "source_span": null,
+              "original_text": "maid outfit",
+              "canonical_tag": "maid",
+              "entity_id": null,
+              "type": "clothing",
+              "cardinality": null,
+              "state": "required",
+              "confidence": 1.0,
+              "provenance": {"kind": "user", "detail": null},
+              "notes": []
+            }
+          ],
+          "edges": [
+            {
+              "id": "c_reimu_wearing_maid",
+              "source_element_id": "e_reimu",
+              "target_element_id": "e_maid_relation",
+              "kind": "relation",
+              "relation": "wearing",
+              "custom_relation": null,
+              "reason": "Reimu wears the maid outfit"
+            }
+          ]
+        },
+        "warnings": []
+      },
+      "expectations": {
+        "required_tags": ["hakurei_reimu", "maid"],
+        "excluded_tags": [],
+        "required_lanes": ["literal", "hybrid"]
+      }
+    }
+  ]
+}

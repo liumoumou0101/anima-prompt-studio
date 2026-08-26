@@ -1,0 +1,109 @@
+name: build-v3-windows-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "V3 release version without the v prefix"
+        required: true
+        default: "3.0.0-alpha.1"
+        type: string
+      data_pack_url:
+        description: "HTTPS URL of the unpacked-data-pack ZIP"
+        required: true
+        type: string
+      data_pack_sha256:
+        description: "Expected SHA-256 of the data-pack ZIP"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  windows-v3-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: v3/web/package-lock.json
+
+      - name: Install application and build tools
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[remote]"
+          python -m pip install -e ".\v3"
+          python -m pip install "pyinstaller>=6.10,<7"
+
+      - name: Download and verify data pack
+        id: data_pack
+        shell: pwsh
+        env:
+          DATA_PACK_URL: ${{ inputs.data_pack_url }}
+          DATA_PACK_SHA256: ${{ inputs.data_pack_sha256 }}
+        run: |
+          if (-not $env:DATA_PACK_URL.StartsWith("https://", [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "data_pack_url must use HTTPS."
+          }
+          $archive = Join-Path $env:RUNNER_TEMP "anima-v3-data-pack.zip"
+          $expanded = Join-Path $env:RUNNER_TEMP "anima-v3-data-pack"
+          Invoke-WebRequest -Uri $env:DATA_PACK_URL -OutFile $archive
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+          if ($actual -ne $env:DATA_PACK_SHA256.Trim().ToUpperInvariant()) {
+            throw "Data-pack SHA-256 mismatch: $actual"
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $expanded
+          $manifests = @(Get-ChildItem -LiteralPath $expanded -Filter "data-pack.json" -File -Recurse)
+          if ($manifests.Count -ne 1) { throw "Expected exactly one data-pack.json in the archive." }
+          "path=$($manifests[0].Directory.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Run V3 tests
+        shell: pwsh
+        run: python -m pytest -q v3/tests
+
+      - name: Build portable and installer packages
+        shell: pwsh
+        run: |
+          .\packaging\build_windows_v3.ps1 `
+            -Python python `
+            -Version "${{ inputs.version }}" `
+            -DataPackSource "${{ steps.data_pack.outputs.path }}"
+
+      - name: Install, launch, and uninstall Setup package
+        shell: pwsh
+        run: |
+          $setup = Resolve-Path -LiteralPath "release\ANIMA-Prompt-Studio-V3-Setup-v${{ inputs.version }}.exe"
+          $installDir = Join-Path $env:RUNNER_TEMP "anima-v3-installed"
+          $userData = Join-Path $env:RUNNER_TEMP "anima-v3-installed-smoke"
+          & $setup /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$installDir"
+          if ($LASTEXITCODE -ne 0) { throw "V3 installer returned $LASTEXITCODE" }
+          & (Join-Path $installDir "AnimaPromptStudioV3.exe") `
+            --data-root (Join-Path $userData "data") `
+            --workspace-db (Join-Path $userData "workspaces.db") `
+            --without-v2 --no-browser --exit-after-startup
+          if ($LASTEXITCODE -ne 0) { throw "Installed V3 executable returned $LASTEXITCODE" }
+          & (Join-Path $installDir "unins000.exe") /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+          if ($LASTEXITCODE -ne 0) { throw "V3 uninstaller returned $LASTEXITCODE" }
+
+      - name: Upload verified Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: anima-prompt-studio-v3-windows-${{ inputs.version }}
+          path: |
+            release/ANIMA-Prompt-Studio-V3-Portable-v${{ inputs.version }}.zip
+            release/ANIMA-Prompt-Studio-V3-Setup-v${{ inputs.version }}.exe
+          if-no-files-found: error

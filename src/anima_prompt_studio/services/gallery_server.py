@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import logging
 import mimetypes
 import os
@@ -14,7 +13,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QImageReader
 
 from anima_prompt_studio.repositories import SQLiteRepository
@@ -29,6 +27,7 @@ from anima_prompt_studio.services.gallery_assets import (
     restore_images_from_trash,
 )
 from anima_prompt_studio.services.gallery_index import load_gallery_batches
+from anima_prompt_studio.services.gallery_thumbnail import GalleryThumbnailCache
 from anima_prompt_studio.services.gallery_upscale import GalleryUpscaleError, GalleryUpscaleManager
 
 log = logging.getLogger(__name__)
@@ -50,9 +49,9 @@ class GalleryServer:
         self.static_root = static_root or Path(__file__).resolve().parents[1] / "web_gallery" / "dist"
         self.port = port
         self.thumbnail_root = repository.db_path.parent / "gallery_thumbnails"
+        self._thumbnail_cache = GalleryThumbnailCache(self.thumbnail_root)
         self._server: _GalleryHTTPServer | None = None
         self._thread: threading.Thread | None = None
-        self._thumbnail_lock = threading.Lock()
         self._session_token = secrets.token_urlsafe(24)
         self.upscale_manager = upscale_manager or GalleryUpscaleManager(
             repository.db_path,
@@ -235,32 +234,7 @@ class GalleryServer:
         source = self.trash_image_path(relative_path) if trash else self.image_path(relative_path)
         if source is None:
             return None
-        size = max(160, min(size, 1440))
-        try:
-            stat = source.stat()
-        except OSError:
-            return None
-        digest = hashlib.sha256(
-            f"{source.resolve()}|{stat.st_mtime_ns}|{stat.st_size}|{size}".encode("utf-8")
-        ).hexdigest()
-        target = self.thumbnail_root / digest[:2] / f"{digest}.webp"
-        if target.is_file():
-            return target
-        with self._thumbnail_lock:
-            if target.is_file():
-                return target
-            reader = QImageReader(str(source))
-            reader.setAutoTransform(True)
-            image = reader.read()
-            if image.isNull():
-                return source
-            scaled = image.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            temporary = target.with_suffix(".tmp")
-            if not scaled.save(str(temporary), "WEBP", 82):
-                return source
-            temporary.replace(target)
-        return target
+        return self._thumbnail_cache.thumbnail(source, size)
 
     def set_state(self, relative_paths: list[str], state: str) -> dict[str, Any]:
         root = self._output_root.resolve()

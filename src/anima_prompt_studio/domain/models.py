@@ -379,6 +379,9 @@ class PromptJob(BaseModel):
     workflow_template_id: str | None = None
     user_rating: int | None = None
     notes: str = ""
+    # Backward-compatible bridge metadata for newer frontends/adapters. V2
+    # services treat this as opaque and persist it with execution snapshots.
+    integration_metadata: dict[str, Any] = Field(default_factory=dict)
 
     def touch(self) -> None:
         self.updated_at = utc_now()
@@ -418,6 +421,7 @@ class PromptJob(BaseModel):
                 "back_translated_zh": self.back_translated_zh,
             },
             "workflow_template_id": self.workflow_template_id,
+            "integration_metadata": self.integration_metadata,
         }
 
     def effective_subject_mode(self) -> SubjectMode:

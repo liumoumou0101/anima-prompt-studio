@@ -1,0 +1,12 @@
+{
+  "tag_to_groups": {
+    "maid": ["tag_group:attire"],
+    "frilled_apron": ["tag_group:attire"]
+  },
+  "group_to_tags": {
+    "tag_group:attire": ["maid", "frilled_apron", "not_in_filtered_snapshot"]
+  },
+  "group_cn_names": {
+    "tag_group:attire": "服装"
+  }
+}
