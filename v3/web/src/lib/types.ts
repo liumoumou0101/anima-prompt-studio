@@ -108,6 +108,74 @@ export interface CandidateArtist {
   removable: boolean;
 }
 
+export interface ArtistSuggestion {
+  name: string;
+  render_name: string;
+  post_count: number;
+  raw_score: number;
+  display_score: number;
+  cooc_count: number;
+  sources: string[];
+  hit_count: number;
+  algorithm_version: string;
+  data_pack_id: string;
+}
+
+export interface ArtistComparisonInfo {
+  id: string;
+  artist: string;
+  rendered_artist: string;
+  position: number;
+  total: number;
+  seed: number;
+}
+
+export interface ArtistComparisonSubmission {
+  comparison_id: string;
+  project_name: string;
+  seed: number;
+  requested_count: number;
+  submitted: Array<{artist: string; run: GenerationRunRecord}>;
+  failed: Array<{artist: string; error: string}>;
+}
+
+export interface TagSuggestion {
+  id: number;
+  name: string;
+  render_name: string;
+  cn_name: string | null;
+  category: number;
+  category_name: TagCategory;
+  post_count: number;
+  nsfw: boolean | null;
+  deprecated: boolean;
+  raw_score: number;
+  display_score: number;
+  cooc_count: number;
+  sources: string[];
+  algorithm_version: string;
+  data_pack_id: string;
+}
+
+export interface SceneDraftItem {
+  id: string;
+  text: string;
+  canonical_tag: string | null;
+  source: "source_exact" | "translation_exact" | "user_selected" | "unresolved";
+  reason: string;
+  source_start: number | null;
+  source_end: number | null;
+}
+
+export interface SceneDraft {
+  source_text: string;
+  translated_text: string;
+  confirmed: SceneDraftItem[];
+  suggestions: SceneDraftItem[];
+  unresolved: SceneDraftItem[];
+  risk_notes: string[];
+}
+
 export interface CandidateWarning {
   code: string;
   message: string;
@@ -138,6 +206,9 @@ export interface WorkbenchResponse {
   intent: IntentDocument;
   candidates: PromptCandidate[];
   validation: {valid: boolean; error_count: number};
+  artist_suggestions?: ArtistSuggestion[];
+  tag_suggestions?: TagSuggestion[];
+  scene_draft?: SceneDraft;
   data_pack_id: string;
 }
 
@@ -170,7 +241,7 @@ export interface IntentParseResponse {
     scene_type: string;
     truncated_source: boolean;
   };
-  parser: {name: string; source: "v2_ai_extract"};
+  parser: {name: string; source: "v2_ai_extract" | "v2_local_translation"};
 }
 
 export interface WorkspaceDraft {
@@ -179,6 +250,7 @@ export interface WorkspaceDraft {
   model_profile: string;
   input_mode?: "concepts" | "natural";
   natural_text?: string;
+  selected_tags?: string[];
 }
 
 export interface WorkspaceRecord {
@@ -212,6 +284,7 @@ export interface GenerationRunRecord {
   artifact_count: number;
   available_actions: GenerationRunAction[];
   error: {code: string; message: string} | null;
+  artist_comparison?: ArtistComparisonInfo | null;
 }
 
 export interface GenerationRunListResponse {
@@ -259,6 +332,7 @@ export interface GalleryAsset {
   source: "generated" | "external";
   state: string;
   candidate: {id: string; lane: string; versions: Record<string, string>};
+  artist_comparison?: ArtistComparisonInfo | null;
   content_url: string;
   thumbnail_url: string;
 }

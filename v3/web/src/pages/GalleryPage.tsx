@@ -147,7 +147,7 @@ export function GalleryPage({enabled = false}: {enabled?: boolean}) {
             <div className="gallery-image-wrap"><img src={asset.thumbnail_url} alt={asset.name} loading="lazy" /></div>
             <div className="gallery-card-copy">
               <strong>{asset.project}</strong><span>{asset.name}</span>
-              <small>{asset.model_profile || "未知模型"}{asset.candidate.lane ? ` · ${asset.candidate.lane.toUpperCase()}` : ""}</small>
+              <small>{asset.artist_comparison ? `画师 ${asset.artist_comparison.rendered_artist} · Seed ${asset.artist_comparison.seed}` : `${asset.model_profile || "未知模型"}${asset.candidate.lane ? ` · ${asset.candidate.lane.toUpperCase()}` : ""}`}</small>
             </div>
           </button>)}
         </div> : <EmptyState title="没有匹配的图片" detail="清除搜索或筛选条件后再试一次。" />}
@@ -170,6 +170,7 @@ export function GalleryPage({enabled = false}: {enabled?: boolean}) {
               <div><dt>模型</dt><dd>{active.model_profile || "未知"}</dd></div>
               <div><dt>尺寸</dt><dd>{active.width && active.height ? `${active.width} × ${active.height}` : "未记录"}</dd></div>
               <div><dt>批次</dt><dd>{active.batch_title}</dd></div>
+              {active.artist_comparison && <><div><dt>画师对照</dt><dd>{active.artist_comparison.rendered_artist}（{active.artist_comparison.position}/{active.artist_comparison.total}）</dd></div><div><dt>固定 Seed</dt><dd>{active.artist_comparison.seed}</dd></div></>}
               <div><dt>生成时间</dt><dd>{new Date(active.created_at).toLocaleString()}</dd></div>
               {active.candidate.versions.data_pack && <div><dt>数据包</dt><dd>{active.candidate.versions.data_pack}</dd></div>}
             </dl>

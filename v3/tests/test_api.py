@@ -18,6 +18,7 @@ from anima_prompt_studio_v3.adapters.v2 import (
     build_v2_local_translation_adapter,
 )
 from anima_prompt_studio_v3.api import LocalApiServer, SessionManager, create_api_runtime
+from anima_prompt_studio_v3.api.app import _LocalIndexMatch, _confirmed_source_matches
 from anima_prompt_studio_v3.data import (
     DataPackSnapshot,
     ReferenceBuildInputs,
@@ -192,6 +193,65 @@ def test_missing_data_pack_degrades_bootstrap_and_blocks_queries(tmp_path: Path)
     assert search.json()["error"]["code"] == "data_pack_missing"
 
 
+def test_v3_settings_reuses_v2_remote_profile_store_without_exposing_credentials(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    v2_database = tmp_path / "v2.db"
+    repository = SQLiteRepository(v2_database)
+    try:
+        from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
+
+        repository.save_remote_profile(RemoteProfile(
+            id="existing",
+            display_name="旧云主机",
+            ssh_host="old.example",
+            ssh_user="root",
+            auth_type=RemoteAuthType.PRIVATE_KEY,
+            private_key_path="C:/keys/old",
+            known_host_fingerprint="SHA256:old",
+        ))
+    finally:
+        repository.close()
+    runtime = create_api_runtime(reference_db, v2_database=v2_database)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchanged = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    write_auth = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
+
+    listed = client.get("/api/v3/settings/remote-profiles", headers=write_auth)
+    assert listed.status_code == 200
+    assert listed.json()["items"][0]["host_fingerprint_confirmed"] is True
+    assert "known_host_fingerprint" not in listed.json()["items"][0]
+
+    updated = client.put(
+        "/api/v3/settings/remote-profiles/existing",
+        json={
+            "display_name": "新云主机",
+            "ssh_host": "new.example",
+            "ssh_port": 2222,
+            "ssh_user": "root",
+            "auth_type": "private_key",
+            "private_key_path": "C:/keys/old",
+            "enabled": True,
+            "remember_password": True,
+        },
+        headers=write_auth,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["host_fingerprint_confirmed"] is False
+    repository = SQLiteRepository(v2_database)
+    try:
+        profile = repository.get_remote_profile("existing")
+        assert profile.ssh_host == "new.example"
+        assert profile.known_host_fingerprint == ""
+    finally:
+        repository.close()
+
+
 def test_session_manager_revoke_invalidates_token() -> None:
     manager = SessionManager()
     exchange = manager.exchange(manager.issue_bootstrap_token())
@@ -276,10 +336,13 @@ def test_workbench_candidate_endpoint_runs_validated_lanes(reference_db: Path) -
 
     assert response.status_code == 200
     payload = response.json()
-    assert [item["lane"] for item in payload["candidates"]] == ["literal", "conservative", "artist"]
+    assert [item["lane"] for item in payload["candidates"]] == ["literal"]
+    assert payload["tag_suggestions"]
     assert payload["candidates"][0]["positive_prompt"] == "score_7, maid, twintails"
     assert payload["candidates"][0]["negative_prompt"].endswith("blonde hair")
     assert payload["validation"]["valid"] is True
+    assert [item["name"] for item in payload["artist_suggestions"]] == ["sample_artist_a"]
+    assert all(not item["artists"] for item in payload["candidates"])
     assert payload["data_pack_id"] == "anima-v3-api-test-r1"
 
 
@@ -368,6 +431,202 @@ def test_natural_language_parse_endpoint_returns_v3_intent_and_reports_availabil
     assert unavailable.json()["error"]["code"] == "intent_parser_unavailable"
 
 
+def test_local_natural_candidate_endpoint_uses_only_local_translation(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.post(
+        "/api/v3/local-natural/candidates",
+        json={"source_text": "女仆，双马尾", "model_profile": "anima_aesthetic_v1"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["local_translation"]["local_only"] is True
+    assert payload["candidates"][0]["positive_prompt"] == "maid, twintails"
+    assert {item["canonical_tag"] for item in payload["intent"]["graph"]["elements"]} == {
+        "maid",
+        "twintails",
+    }
+    assert {item["canonical_tag"] for item in payload["scene_draft"]["confirmed"]} == {
+        "maid",
+        "twintails",
+    }
+
+
+def test_local_source_resolution_confirms_only_the_unique_primary_tag_for_ambiguous_cn_term() -> None:
+    matches = [
+        _LocalIndexMatch("天使", "source", "angel", "cn_name", 29_980, 1, 3),
+        _LocalIndexMatch("天使", "source", "halo", "cn_term", 499_728, 1, 3),
+        _LocalIndexMatch("天使", "source", "angel_statue", "cn_term", 359, 1, 3),
+        _LocalIndexMatch("天使", "source", "tachibana_kanade", "cn_term", 2_897, 1, 3),
+        _LocalIndexMatch("女性", "source", "assertive_female", "cn_term", 18_031, 6, 8),
+        _LocalIndexMatch("女性", "source", "vaginal", "cn_term", 284_069, 6, 8),
+    ]
+
+    confirmed, ambiguous = _confirmed_source_matches(matches)
+
+    assert [item.canonical_tag for item in confirmed] == ["angel"]
+    assert ambiguous == ["天使", "女性"]
+
+
+def test_local_source_resolution_prefers_longer_primary_phrase_over_nested_term() -> None:
+    matches = [
+        _LocalIndexMatch("堕天使", "source", "fallen_angel", "cn_name", 1_176, 0, 3),
+        _LocalIndexMatch("天使", "source", "angel", "cn_name", 29_980, 1, 3),
+    ]
+
+    confirmed, _ambiguous = _confirmed_source_matches(matches)
+
+    assert [item.canonical_tag for item in confirmed] == ["fallen_angel"]
+
+
+def test_structured_workbench_uses_the_same_local_mapping_and_preserves_exclusions(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.post(
+        "/api/v3/workbench/candidates",
+        json={
+            "source_text": "女仆，双马尾，不要金发",
+            "source_language": "mixed",
+            "model_profile": "anima_aesthetic_v1",
+            "elements": [
+                {"id": "e_maid", "text": "女仆", "state": "required"},
+                {"id": "e_twintails", "text": "双马尾", "state": "required"},
+                {"id": "e_no_blonde", "text": "金发", "state": "excluded"},
+            ],
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["local_translation"]["local_only"] is True
+    assert payload["scene_draft"] is not None
+    literal = payload["candidates"][0]
+    assert literal["positive_prompt"] == "maid, twintails"
+    assert "blonde hair" in literal["negative_prompt"]
+
+
+def test_structured_workbench_reuses_scene_draft_translation_when_selecting_tags(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.post(
+        "/api/v3/workbench/candidates",
+        json={
+            "source_text": "未知场景",
+            "model_profile": "anima_aesthetic_v1",
+            "translated_text": "unmapped prose baseline",
+            "selected_tags": ["maid"],
+            "elements": [{"id": "e_scene", "text": "未知场景", "state": "required"}],
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["local_translation"]["engine"] == "当前工作台译文"
+    assert payload["candidates"][0]["positive_prompt"] == "maid"
+
+
+def test_local_natural_candidate_keeps_a_prose_baseline_when_no_tag_is_confirmed(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.post(
+        "/api/v3/local-natural/candidates",
+        json={"source_text": "zzqvzxq", "model_profile": "anima_aesthetic_v1"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    literal = payload["candidates"][0]
+    assert literal["lane"] == "literal"
+    assert literal["positive_prompt"] == payload["local_translation"]["translated_text"]
+    assert literal["tags"] == []
+    assert literal["unresolved_element_ids"] == []
+    assert payload["scene_draft"]["confirmed"] == []
+    assert payload["scene_draft"]["unresolved"]
+
+
+def test_local_natural_candidate_applies_only_explicitly_selected_suggestions(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.post(
+        "/api/v3/local-natural/candidates",
+        json={
+            "source_text": "zzqvzxq",
+            "translated_text": "unmapped prose baseline",
+            "selected_tags": ["maid"],
+            "model_profile": "anima_aesthetic_v1",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["local_translation"]["engine"] == "当前工作台译文"
+    assert payload["candidates"][0]["positive_prompt"] == "maid"
+    assert [item["canonical_tag"] for item in payload["scene_draft"]["confirmed"]] == ["maid"]
+    assert payload["scene_draft"]["confirmed"][0]["source"] == "user_selected"
+    assert payload["intent"]["scene_plan_en"]
+
+
 def test_workbench_explicit_relation_adds_hybrid_and_bad_profile_is_stable(reference_db: Path) -> None:
     client, token = client_and_session(reference_db)
     headers = {"X-Anima-Session": token, "Origin": ORIGIN}
@@ -419,6 +678,7 @@ def test_workspace_crud_persists_separately_and_rejects_stale_revision(
         "model_profile": "anima_base_v1",
         "input_mode": "concepts",
         "natural_text": "",
+        "selected_tags": [],
     }
     generated_snapshot = client.post(
         "/api/v3/workbench/candidates",
@@ -444,6 +704,7 @@ def test_workspace_crud_persists_separately_and_rejects_stale_revision(
     assert workspace["revision"] == 1
     assert workspace["draft"] == draft
     assert workspace["candidate_snapshot"]["candidates"][0]["positive_prompt"] == "score_7, maid, twintails"
+    assert workspace["candidate_snapshot"]["artist_suggestions"][0]["name"] == "sample_artist_a"
     assert workspace_db.is_file()
 
     listed = client.get("/api/v3/workspaces", headers={"X-Anima-Session": headers["X-Anima-Session"]})
@@ -601,6 +862,64 @@ def test_generation_run_api_requires_idempotency_and_exposes_safe_status(referen
     assert bootstrap.json()["features"]["remote_generation"] is True
 
 
+def test_artist_comparison_queues_one_fixed_seed_run_per_selected_artist(reference_db: Path) -> None:
+    queue = StubGenerationQueue()
+    runtime = create_api_runtime(reference_db, generation_queue=queue)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchanged = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
+    generated = client.post(
+        "/api/v3/workbench/candidates",
+        json={
+            "source_text": "女仆、荷叶边围裙",
+            "source_language": "zh",
+            "model_profile": "anima_base_v1",
+            "elements": [
+                {"id": "e_maid", "text": "女仆", "canonical_tag": "maid", "state": "locked"},
+                {"id": "e_apron", "text": "荷叶边围裙", "canonical_tag": "frilled_apron", "state": "locked"},
+            ],
+        },
+        headers=headers,
+    ).json()
+    request = {
+        "comparison_id": "comparison_artist_batch_01",
+        "candidate": generated["candidates"][0],
+        "intent": generated["intent"],
+        "artist_names": ["sample_artist_a", "sample_artist_b"],
+        "project_name": "画师批量对照",
+        "settings": {"seed": 424242, "batch_size": 1},
+        "remote_profile_id": "remote-1",
+        "workflow_profile_id": "workflow-1",
+    }
+    submit_headers = {**headers, "Idempotency-Key": "artist-batch-01"}
+
+    submitted = client.post("/api/v3/artist-comparisons", json=request, headers=submit_headers)
+    duplicate = client.post("/api/v3/artist-comparisons", json=request, headers=submit_headers)
+
+    assert submitted.status_code == 202
+    assert duplicate.status_code == 202
+    payload = submitted.json()
+    assert payload["comparison_id"] == "comparison_artist_batch_01"
+    assert payload["seed"] == 424242
+    assert payload["requested_count"] == 2
+    assert payload["failed"] == []
+    assert [item["artist"] for item in payload["submitted"]] == ["@sample artist a", "@sample artist b"]
+    assert [item["run"]["id"] for item in duplicate.json()["submitted"]] == [
+        item["run"]["id"] for item in payload["submitted"]
+    ]
+    prepared_jobs = [item.request_json["prompt_job"] for item in queue.runs.values()]
+    assert {job["generation_params"]["seed"] for job in prepared_jobs} == {424242}
+    assert {tuple(job["artist_selection"]) for job in prepared_jobs} == {
+        ("sample_artist_a",),
+        ("sample_artist_b",),
+    }
+    assert all(job["integration_metadata"]["artist_comparison"]["id"] == "comparison_artist_batch_01" for job in prepared_jobs)
+
+
 def test_local_translation_and_ephemeral_passphrase_endpoints_do_not_echo_secrets(
     reference_db: Path,
     tmp_path: Path,
@@ -752,6 +1071,7 @@ class StubGenerationQueue:
             remote_profile_id=remote_profile_id,
             workflow_profile_id=workflow_profile_id,
             status_message="等待本地生成队列",
+            request_json={"prompt_job": prepared.job.model_dump(mode="json")},
         )
         self.runs[run.id] = run
         self.keys[idempotency_key] = run.id

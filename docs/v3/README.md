@@ -19,6 +19,7 @@ V3 实现位于仓库顶层 [../../v3/README.md](../../v3/README.md)，使用独
 | [DATA_CONTRACT.md](DATA_CONTRACT.md) | 数据包、表结构、版本、导入和更新协议 |
 | [API_CONTRACT.md](API_CONTRACT.md) | 本地 API、核心对象、错误模型和会话安全 |
 | [V2_REUSE_INVENTORY.md](V2_REUSE_INVENTORY.md) | V2 能力的复用、抽离、冻结和重做清单 |
+| [PROMPT_CORE_LESSONS_AND_BOUNDARIES.md](PROMPT_CORE_LESSONS_AND_BOUNDARIES.md) | V2 提示词核心复盘、真实测试结论和 V3 输入/编译边界 |
 | [EVALUATION_PLAN.md](EVALUATION_PLAN.md) | 与 V2、外部优秀提示词的固定参数对比验收 |
 | [OPEN_SOURCE_AND_DATA.md](OPEN_SOURCE_AND_DATA.md) | GPL 发布、第三方代码和外部数据构建边界 |
 | [UPSTREAM_SNAPSHOT.md](UPSTREAM_SNAPSHOT.md) | 开发起点采用的上游 commit 与许可检查快照 |

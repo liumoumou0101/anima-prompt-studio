@@ -122,7 +122,7 @@ class V2GenerationQueueService:
         on_run_saved: Callable[[GenerationRun], None] | None = None,
         on_artifact_saved: Callable[[GenerationArtifact], None] | None = None,
         on_job_saved: Callable[[PromptJob], None] | None = None,
-        max_pending: int = 10,
+        max_pending: int = 20,
         existing_runs: list[GenerationRun] | None = None,
         existing_artifacts: dict[str, list[GenerationArtifact]] | None = None,
         target_lister: GenerationTargetLister | None = None,
@@ -443,7 +443,7 @@ def build_v2_generation_queue(
     *,
     credential_store: CredentialStore | None = None,
     coordinator_factory: CoordinatorFactory | None = None,
-    max_pending: int = 10,
+    max_pending: int = 20,
 ) -> V2GenerationQueueService:
     """Build a queue from existing V2 profiles, workflows and secure credentials."""
 

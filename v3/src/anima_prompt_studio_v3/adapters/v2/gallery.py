@@ -63,6 +63,8 @@ class V2GalleryReadService:
                     integration = {}
                 candidate = integration.get("candidate")
                 candidate = candidate if isinstance(candidate, dict) else {}
+                comparison = integration.get("artist_comparison")
+                comparison = comparison if isinstance(comparison, dict) else None
                 try:
                     stat = path.stat()
                 except OSError:
@@ -93,6 +95,7 @@ class V2GalleryReadService:
                         "lane": str(candidate.get("lane") or ""),
                         "versions": candidate.get("versions") if isinstance(candidate.get("versions"), dict) else {},
                     },
+                    "artist_comparison": comparison,
                     "content_url": f"/api/v3/gallery/assets/content?path={_query_value(relative)}",
                     "thumbnail_url": f"/api/v3/gallery/assets/thumbnail?path={_query_value(relative)}&size=640",
                 })

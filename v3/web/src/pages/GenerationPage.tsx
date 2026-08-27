@@ -102,6 +102,7 @@ function RunCard({run, busy, onAction}: {
       <div className="run-progress"><span style={{width: `${percent}%`}} /></div>
       <div className="run-summary"><strong>{run.status_message || stateLabels[run.state]}</strong><span>{percent}%</span></div>
       <dl><div><dt>云主机</dt><dd>{run.remote_profile_id}</dd></div><div><dt>工作流</dt><dd>{run.workflow_profile_id}</dd></div><div><dt>图片</dt><dd>{run.artifact_count}</dd></div></dl>
+      {run.artist_comparison && <p className="run-comparison">画师对照 {run.artist_comparison.position}/{run.artist_comparison.total} · {run.artist_comparison.rendered_artist} · 固定 Seed {run.artist_comparison.seed}</p>}
       {run.error && <p className="run-error" role="alert">{run.error.message}</p>}
       {run.available_actions.length > 0 && <footer>{run.available_actions.map((action) => <button type="button" key={action} disabled={busy} onClick={() => void onAction(run, action)}>{busy ? "处理中…" : actionLabels[action]}</button>)}</footer>}
     </article>

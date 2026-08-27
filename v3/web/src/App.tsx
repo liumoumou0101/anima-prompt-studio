@@ -9,6 +9,7 @@ import {TagSearchPage} from "./pages/TagSearchPage";
 import {WorkbenchPage} from "./pages/WorkbenchPage";
 import {GenerationPage} from "./pages/GenerationPage";
 import {GalleryPage} from "./pages/GalleryPage";
+import {SettingsPage} from "./pages/SettingsPage";
 
 export default function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapResponse | null>(null);
@@ -25,11 +26,12 @@ export default function App() {
       <Routes>
         <Route element={<AppShell bootstrap={bootstrap} />}>
           <Route index element={<Navigate to="/workbench" replace />} />
-          <Route path="workbench" element={<WorkbenchPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} naturalLanguageEnabled={Boolean(bootstrap.features.natural_language_parse)} localTranslationEnabled={Boolean(bootstrap.features.local_translation)} />} />
+          <Route path="workbench" element={<WorkbenchPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} naturalLanguageEnabled={Boolean(bootstrap.features.local_translation)} localTranslationEnabled={Boolean(bootstrap.features.local_translation)} />} />
           <Route path="tags" element={<TagSearchPage />} />
           <Route path="tags/:name" element={<TagDetailPage />} />
           <Route path="generate" element={<GenerationPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="gallery" element={<GalleryPage enabled={Boolean(bootstrap.features.gallery)} />} />
+          <Route path="settings" element={<SettingsPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="*" element={<Navigate to="/workbench" replace />} />
         </Route>
       </Routes>

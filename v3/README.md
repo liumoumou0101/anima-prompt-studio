@@ -118,7 +118,7 @@ anima-v3-api `
 
 远程密码仍保存在 Windows 凭据管理器。加密私钥的 passphrase 可在 V3 工作台生图栏一次输入，只保留在当前 V3 进程内，退出即清空；它通过独立凭据端点传递，不进入工作台、任务快照、SQLite、日志或 API 响应。
 
-指定 `--v2-database` 也会启用 V2 自然语言画面抽取和本地翻译薄适配器：抽取器读取 V2 已配置的 AI provider/model 和 Windows 凭据，把结果转换为 V3 Intent，再由 V3 L/C/A/H 候选核心处理；本地翻译则只是独立预览，优先使用已安装 Marian 模型并保持 `local_files_only`，否则使用内置离线词典。两者都不会调用 V2 旧提示词编译管线。
+指定 `--v2-database` 会启用 V2 本地翻译薄适配器，并保留一个显式触发的 AI 辅助拆解接口。自然语言工作台默认使用本地翻译、原文/译文证据和 V3 标签索引：只有原文精确命中或用户确认的标签进入 Literal，译文索引和相关标签只显示为建议；无标签命中时译文以可追踪 prose baseline 保留。AI 抽取不再是默认主路径。本地翻译优先使用已安装 Marian 模型并保持 `local_files_only`，否则使用内置离线词典；两者均不会调用 V2 旧提示词编译管线。
 
 可变工作台状态默认写入 `.local/state/workspaces.db`，与只读 `reference.db` 分离。可用 `--workspace-db` 指定其他本地位置。
 

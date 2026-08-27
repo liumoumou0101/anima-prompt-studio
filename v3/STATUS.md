@@ -1,10 +1,10 @@
 # V3 开发状态
 
-更新日期：2026-08-26
+更新日期：2026-08-27
 
 ## 当前阶段
 
-Phase 3 主产品闭环：远程生成、自然语言输入、画廊浏览/状态/回收站/再生成/放大和候选快照持久化均已完成。Windows 便携发布链已通过真实数据构建，下一步完成安装版 CI、联网分发与真实质量验收。
+Phase 3 主产品闭环：远程生成、画廊浏览/状态/回收站/再生成/放大和候选快照持久化已完成。自然语言默认主路径已切换为本地翻译、原文/译文证据与可审查 Scene Draft；画师批量对照已可用。下一步是补全 Scene Draft 的事实编辑、风格预设和真实远程批量画师验收。
 
 ## 已完成
 
@@ -50,9 +50,9 @@ Phase 3 主产品闭环：远程生成、自然语言输入、画廊浏览/状�
   - canonical 下划线到 ANIMA 空格文本渲染，`score_*` 特殊 token 保留。
   - 模型专用正向前缀、负向模板、排除项和 unresolved 警告。
 - 推荐候选纵向切片：
-  - conservative lane 最多添加少量可解释的高置信共现标签。
-  - 自动推荐策略禁止 character/copyright/artist 类标签泄漏。
-  - artist lane 只加入一个可移除画师，并保留 conservative 的其他内容。
+  - Literal 只保留精确映射、用户确认和可追踪的本地 prose baseline。
+  - 相关标签与画师按可解释的建议池返回；它们默认不进入提示词。
+  - 已保留 `RecommendationLaneGenerator` 的 Conservative/Artist 实现，供将来的显式选择与对照流程复用，但默认 API 不调用它们。
   - alias 解析后才显现的 required/excluded 冲突会在生成前阻断。
 - hybrid、validator 与静态 benchmark：
   - 显式关系边或经 V2 抽取器产生的英文画面计划会生成 hybrid；普通结构化输入不会凭空猜测自然语言关系。
@@ -74,21 +74,22 @@ Phase 3 主产品闭环：远程生成、自然语言输入、画廊浏览/状�
   - 标签详情展示本地说明、别名、中文检索词、标签组和相关标签。
   - 在线图片预览保留明确的离线占位，尚未静默发起联网请求。
 - 工作台候选闭环：
-  - `/workbench/candidates` 把结构化输入转换为 Intent，并复用核心 L/C/A/H 生成器。
+  - `/workbench/candidates` 把结构化输入转换为 Intent，并生成 Literal 与显式关系 Hybrid；相关标签和画师单独作为建议池返回。
   - 每次响应前运行独立 CandidateValidator，未知模型、冲突和不可生成输入返回稳定错误。
   - 工作台支持正向概念、显式排除、`!` 锁定和 Base/Aesthetic/Turbo 配置。
-  - Literal、Conservative、Artist 与显式关系 Hybrid 使用同一 DTO，逐条展示正负提示词、标签来源、自动推荐、画师和 unresolved 说明。
+  - Literal 与显式关系 Hybrid 使用同一 DTO，逐条展示正负提示词、标签来源和 unresolved 说明；选择池不会静默成为候选内容。
   - 正负提示词可一键复制；工作台与标签浏览器保留为并列入口。
 - 自然语言输入闭环：
-  - `V2NaturalLanguageIntentAdapter` 直接复用 V2 `AIExtractService`、AI provider 配置和 Windows 凭据，不导入 V2 UI、`PromptPipeline` 或 `PromptCompiler`。
-  - `/intent/parse` 将人物归属、外观、服装、动作、关系、场景、构图和排除项转换为带 semantic provenance 的 V3 Intent。
-  - `/prompt-candidates` 接受完整 Intent，并与结构化工作台入口共用同一套 V3 L/C/A/H 生成和 validator。
-  - 抽取器给出的英文画面计划只进入独立 Hybrid 候选，Literal 基准保持完全可复现；UI 明示 AI 抽取需要人工检查。
-  - 工作台可在“结构化概念”和“自然语言描述”之间切换，自然语言正文及输入模式随工作台草稿保存。
+  - 默认 `/local-natural/candidates` 使用 V2 `TranslationService`、原文精确索引和 V3 标签数据；不调用 AI API、V2 UI、`PromptPipeline` 或 `PromptCompiler`。
+  - 结构化概念页签同样接受中文概念而不要求用户输入 canonical；无关系图的中文条目会复用同一 Scene Draft 消歧与译文，明确排除项单独进入负向提示词。
+  - 响应保留 `scene_draft`：已确认、待确认建议、未命中内容、原文证据与译文彼此分离。用户确认标签时复用当前译文重新编译，不重新翻译或解析。
+  - 没有安全标签命中时，Literal 使用 `local_prose_baseline` 保留译文，避免 422 或擅自增加 `1girl` 等内容。
+  - `/intent/parse` 与 `V2NaturalLanguageIntentAdapter` 保留为未来明确触发的 AI 辅助拆解，不是前端默认主路径。
+  - 工作台可在“结构化概念”和“自然语言描述”之间切换，自然语言正文、选中的建议和输入模式随工作台草稿保存。
 - V2 本地翻译薄适配：
   - `V2LocalTranslationAdapter` 仅复用 `TranslationService`，禁止引入 V2 `PromptPipeline`、`PromptCompiler` 或 UI。
   - 已安装 Marian 模型及运行依赖时按需、本地文件限定加载；否则自动使用内置离线基础翻译，不触发下载。
-  - `/translation` 与工作台提供独立英译预览，并明确不把结果静默并入 V3 L/C/A/H 候选。
+  - `/translation` 提供独立英译预览；工作台可将翻译作为可编辑 prose baseline，但不会把它或其索引结果静默并入 required 标签。
 - 独立工作台状态层：
   - `.local/state/workspaces.db` 与只读参考数据包物理分离。
   - 工作台创建、列表、读取、更新和软删除 API；每条记录包含 revision 和 UTC 时间。
@@ -107,6 +108,9 @@ Phase 3 主产品闭环：远程生成、自然语言输入、画廊浏览/状�
   - 提交、查询和 `cancel_queued` API 已实现，响应不包含任务内部快照、工作流或凭据。
   - 历史未完成 run 可使用 `retry_check` / `continue_download` 恢复，沿用原 remote prompt ID，不重复提交。
   - Web 工作台只展示已确认指纹且兼容当前模型的 V2 目标，候选可直接提交并跳转生成页。
+  - 工作台可锁定一条无画师候选，从当前推荐池选择 1–20 位画师，以同一模型、工作流、预设、尺寸和固定 Seed 分别提交独立任务；不会混合画师或静默修改基准提示词。
+  - 批量任务及其画廊资产保留画师对照批次、画师顺序和 Seed；生成页和画廊可直接识别每张对照图。
+  - V2 本地等待队列默认容量提高至 20，以支持一次提交完整对照组。
   - Web 生成页轮询展示进度、产物数量、安全错误和服务端明确授予的恢复动作。
   - 加密私钥 passphrase 通过独立端点进入按云主机隔离的进程内保险箱；工作台只在提交前传递一次，退出时覆写清空，不进入工作区、run 快照、SQLite、manifest、日志或响应。
   - RTX 4090 / ComfyUI 0.25.0 真实验收已完成：V3 Literal 候选经 API、V2 队列、SSH 隧道和 01 Base 工作流生成并下载 640×640 图片，run 达到 completed 且 manifest 保留候选/数据包版本。
@@ -150,8 +154,8 @@ Phase 3 主产品闭环：远程生成、自然语言输入、画廊浏览/状�
 ## 测试结果
 
 ```text
-V3 Python 全量：73 passed
-V3 Web：18 passed；TypeScript typecheck 与 Vite production build 通过
+V3 Python 全量：82 passed
+V3 Web：21 passed；TypeScript typecheck 与 Vite production build 通过
 V2 全量回归：585 passed
 真实数据静态门槛：4 个 case/profile 组合全部通过
 真实数据 manifest：大小、SHA-256、SQLite integrity 和 5 类记录计数通过

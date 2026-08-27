@@ -54,6 +54,7 @@ class LocalApiServer:
             reference_db,
             frontend_dist=frontend_dist,
             workspace_db=workspace_db,
+            v2_database=v2_database,
             generation_queue=generation_queue,
             intent_parser=intent_parser,
             gallery_service=gallery_service,

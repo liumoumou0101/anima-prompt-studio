@@ -178,6 +178,11 @@ class CandidateValidator:
             )
 
         tag_prompt = _render_tag_prompt(candidate, profile)
+        local_prose_baseline = (
+            candidate.lane == CandidateLane.LITERAL
+            and bool(candidate.score_breakdown.get("prose_baseline"))
+            and not candidate.tags
+        )
         if candidate.lane == CandidateLane.HYBRID:
             if not candidate.positive_prompt.startswith(tag_prompt + ". "):
                 issues.append(
@@ -187,7 +192,7 @@ class CandidateValidator:
                         "hybrid 必须以可复现的标签段开头，并追加画面计划或关系短语。",
                     )
                 )
-        elif candidate.positive_prompt != tag_prompt:
+        elif not local_prose_baseline and candidate.positive_prompt != tag_prompt:
             issues.append(
                 _error(candidate, "positive_prompt_mismatch", "正向提示词与候选标签/画师快照不一致。")
             )

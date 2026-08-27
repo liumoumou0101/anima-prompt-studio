@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import logging
 from pathlib import Path
+import re
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -45,17 +47,21 @@ from ..core import (
     LiteralCandidateGenerator,
     LiteralGenerationError,
     ModelProfileRegistry,
-    RecommendationLaneGenerator,
 )
 from ..data import DataContractError, ReferenceDataStore
 from ..domain import (
+    CandidateArtist,
+    CandidateLane,
     ConstraintEdge,
     ConstraintGraph,
     ConstraintKind,
     ElementProvenance,
     IntentDocument,
     IntentElement,
+    IntentElementType,
+    IntentState,
     ProvenanceKind,
+    SourceSpan,
 )
 from .models import (
     ArtistRecommendRequest,
@@ -64,11 +70,15 @@ from .models import (
     GalleryProcessActionRequest,
     GalleryProcessRequest,
     GalleryStateRequest,
+    ArtistComparisonRequest,
     GenerationRunActionRequest,
     GenerationSubmitRequest,
     IntentCandidateRequest,
     IntentParseRequest,
+    LocalNaturalCandidateRequest,
     PrivateKeyPassphraseRequest,
+    RemoteProfileSettingsRequest,
+    RemoteHostFingerprintRequest,
     RelatedTagsRequest,
     SessionExchangeRequest,
     TranslationRequest,
@@ -116,6 +126,7 @@ def create_api_runtime(
     *,
     frontend_dist: Path | None = None,
     workspace_db: Path | None = None,
+    v2_database: Path | None = None,
     generation_queue: object | None = None,
     intent_parser: object | None = None,
     gallery_service: object | None = None,
@@ -136,6 +147,7 @@ def create_api_runtime(
     app.state.frontend_dist = frontend_dist
     app.state.sessions = sessions
     app.state.workspace_store = WorkspaceStore(workspace_db) if workspace_db is not None else None
+    app.state.v2_database = v2_database.resolve() if v2_database is not None else None
     app.state.generation_queue = generation_queue
     app.state.intent_parser = intent_parser
     app.state.gallery_service = gallery_service
@@ -229,6 +241,12 @@ def create_api_runtime(
             raise ApiError(503, "workspace_store_missing", "工作台状态库尚未配置。", retryable=True)
         return store
 
+    def require_v2_settings_database() -> Path:
+        database = app.state.v2_database
+        if database is None or not database.is_file():
+            raise ApiError(503, "v2_settings_unavailable", "未连接 V2 配置库，无法管理远程连接。", retryable=True)
+        return database
+
     def candidate_response(
         intent: IntentDocument,
         model_profile: str,
@@ -247,15 +265,22 @@ def create_api_runtime(
         try:
             with ReferenceDataStore(database) as store:
                 bundle = LiteralCandidateGenerator(store).generate(intent, profile)
-                recommendations = RecommendationLaneGenerator(store)
-                bundle = recommendations.add_conservative(bundle, profile)
-                bundle = recommendations.add_artist(bundle, profile)
                 bundle = HybridLaneGenerator(store).add_hybrid(bundle, profile)
                 validation = CandidateValidator(store).validate_or_raise(bundle, profile)
+                literal = bundle.candidates[0]
                 return {
                     "intent": bundle.intent.model_dump(mode="json"),
                     "candidates": [item.model_dump(mode="json") for item in bundle.candidates],
                     "validation": validation.model_dump(mode="json"),
+                    "tag_suggestions": store.related_tags(
+                        [tag.name for tag in literal.tags],
+                        categories={"general", "meta"},
+                        limit=10,
+                    ),
+                    "artist_suggestions": store.recommend_artists(
+                        [tag.name for tag in literal.tags],
+                        limit=10,
+                    ),
                     "data_pack_id": store.pack_id,
                 }
         except LiteralGenerationError as exc:
@@ -393,6 +418,37 @@ def create_api_runtime(
         payload: WorkbenchCandidateRequest,
         database: Path = Depends(require_reference_db),
     ) -> dict[str, object]:
+        translator = app.state.translation_service
+        if _workbench_uses_local_mapping(payload, translator):
+            positive_text = "，".join(
+                item.text for item in payload.elements if item.state != IntentState.EXCLUDED
+            )
+            if payload.translated_text:
+                translated_text = payload.translated_text
+                translation_engine = "当前工作台译文"
+            else:
+                try:
+                    translated = translator.translate(positive_text, direction="zh_en")
+                except (RuntimeError, ValueError) as exc:
+                    raise ApiError(422, "translation_failed", str(exc)) from exc
+                translated_text = translated.translated_text
+                translation_engine = translated.engine_name
+            with ReferenceDataStore(database) as store:
+                intent, scene_draft = _local_natural_intent(
+                    positive_text,
+                    translated_text,
+                    store,
+                    selected_tags=payload.selected_tags,
+                )
+                intent = _apply_workbench_exclusions(intent, payload, store, scene_draft)
+            response = candidate_response(intent, payload.model_profile, database)
+            response["local_translation"] = {
+                "translated_text": translated_text,
+                "engine": translation_engine,
+                "local_only": True,
+            }
+            response["scene_draft"] = scene_draft
+            return response
         try:
             intent = _workbench_intent(payload)
         except ValueError as exc:
@@ -446,6 +502,46 @@ def create_api_runtime(
             "local_only": True,
             "model_ready": bool(getattr(translator, "model_ready", False)),
         }
+
+    @app.post(f"{API_PREFIX}/local-natural/candidates", dependencies=[Depends(require_session)])
+    def generate_local_natural_candidates(
+        payload: LocalNaturalCandidateRequest,
+        database: Path = Depends(require_reference_db),
+    ) -> dict[str, object]:
+        """Default natural-language route: local translation plus deterministic tag lookup.
+
+        This deliberately avoids the V2 AI extractor.  The complete local
+        translation is retained as the scene plan, while only exact local index
+        matches become tags, so the user can see what was inferred.
+        """
+        translator = app.state.translation_service
+        if translator is None:
+            raise ApiError(503, "translation_unavailable", "本地翻译服务未安装。")
+        if payload.translated_text:
+            translated_text = payload.translated_text
+            translation_engine = "当前工作台译文"
+        else:
+            try:
+                translated = translator.translate(payload.source_text, direction="zh_en")
+            except (RuntimeError, ValueError) as exc:
+                raise ApiError(422, "translation_failed", str(exc)) from exc
+            translated_text = translated.translated_text
+            translation_engine = translated.engine_name
+        with ReferenceDataStore(database) as store:
+            intent, scene_draft = _local_natural_intent(
+                payload.source_text,
+                translated_text,
+                store,
+                selected_tags=payload.selected_tags,
+            )
+            response = candidate_response(intent, payload.model_profile, database)
+        response["local_translation"] = {
+            "translated_text": translated_text,
+            "engine": translation_engine,
+            "local_only": True,
+        }
+        response["scene_draft"] = scene_draft
+        return response
 
     @app.post(f"{API_PREFIX}/prompt-candidates", dependencies=[Depends(require_session)])
     def generate_intent_candidates(
@@ -544,6 +640,140 @@ def create_api_runtime(
             raise ApiError(422, "workflow_incompatible", str(exc)) from exc
         return _generation_run_response(run, queue)
 
+    @app.post(
+        f"{API_PREFIX}/artist-comparisons",
+        dependencies=[Depends(require_session)],
+        status_code=202,
+    )
+    def submit_artist_comparison(
+        payload: ArtistComparisonRequest,
+        database: Path = Depends(require_reference_db),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> dict[str, object]:
+        """Queue one comparable generation per selected recommendation.
+
+        The baseline candidate is intentionally immutable here.  Every prepared
+        job receives the same V2 generation settings; its only prompt delta is
+        exactly one explicitly selected artist tag.
+        """
+        queue = app.state.generation_queue
+        if queue is None:
+            raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
+        if generation_bridge is None or V2GenerationSettings is None:
+            raise ApiError(503, "v2_runtime_missing", "当前安装不包含 V2 兼容运行时。")
+        if not idempotency_key or not idempotency_key.strip():
+            raise ApiError(422, "invalid_request", "画师对照任务必须提供 Idempotency-Key。")
+        try:
+            profile = profiles.get(payload.candidate.versions.model_profile)
+        except KeyError as exc:
+            raise ApiError(422, "model_profile_unknown", "画师对照基准使用了未知模型配置。") from exc
+
+        with ReferenceDataStore(database) as store:
+            recommended = {
+                item["name"]: item
+                for item in store.recommend_artists(
+                    [tag.name for tag in payload.candidate.tags],
+                    limit=100,
+                )
+            }
+        unavailable = [name for name in payload.artist_names if name not in recommended]
+        if unavailable:
+            raise ApiError(
+                422,
+                "artist_not_recommended",
+                "所选画师不在当前基准提示词的可追溯推荐池中。",
+                details={"unavailable_artists": unavailable},
+            )
+
+        source_element_ids = list(payload.candidate.preserved_element_ids)
+        if not source_element_ids:
+            source_element_ids = [payload.intent.graph.elements[0].id]
+        project_name = f"{payload.project_name} · 画师对照 {payload.comparison_id[-8:]}"
+        submitted: list[dict[str, object]] = []
+        failed: list[dict[str, str]] = []
+        settings = V2GenerationSettings(**payload.settings.model_dump())
+
+        for position, name in enumerate(payload.artist_names, start=1):
+            recommendation = recommended[name]
+            artist = CandidateArtist(
+                name=name,
+                rendered=str(recommendation["render_name"]),
+                source_element_ids=source_element_ids,
+                reason=f"用户选择的画师对照；匹配标签：{', '.join(recommendation['sources'])}",
+                raw_score=float(recommendation["raw_score"]),
+                display_score=float(recommendation["display_score"]),
+                data_pack_id=str(recommendation["data_pack_id"]),
+                algorithm_version=str(recommendation["algorithm_version"]),
+            )
+            values = [payload.candidate.positive_prompt, artist.rendered]
+            positive_prompt = profile.tag_separator.join(dict.fromkeys(value for value in values if value))
+            comparison = {
+                "id": payload.comparison_id,
+                "artist": artist.name,
+                "rendered_artist": artist.rendered,
+                "position": position,
+                "total": len(payload.artist_names),
+                "seed": payload.settings.seed,
+            }
+            candidate = payload.candidate.model_copy(
+                update={
+                    "id": f"candidate_comparison_{payload.comparison_id.removeprefix('comparison_')}_{position}",
+                    "lane": CandidateLane.ARTIST,
+                    "title": f"画师对照 · {artist.rendered}",
+                    "positive_prompt": positive_prompt,
+                    "artists": [artist],
+                    "score_breakdown": {
+                        **payload.candidate.score_breakdown,
+                        "artist_score": artist.raw_score or 0.0,
+                        "comparison_position": float(position),
+                    },
+                    "versions": payload.candidate.versions.model_copy(update={"algorithm": "artist-comparison-v1"}),
+                },
+            )
+            try:
+                prepared = generation_bridge.prepare(
+                    candidate,
+                    payload.intent,
+                    project_name=project_name,
+                    settings=settings,
+                    workspace_id=payload.workspace_id,
+                    workspace_revision=payload.workspace_revision,
+                )
+                job = prepared.job.model_copy(
+                    update={
+                        "integration_metadata": {
+                            **prepared.job.integration_metadata,
+                            "artist_comparison": comparison,
+                        }
+                    }
+                )
+                prepared = type(prepared)(job=job, checkpoint_logical_name=prepared.checkpoint_logical_name)
+                run = queue.submit(
+                    prepared,
+                    remote_profile_id=payload.remote_profile_id,
+                    workflow_profile_id=payload.workflow_profile_id,
+                    idempotency_key=f"{idempotency_key.strip()}:{name}",
+                )
+                submitted.append({"artist": artist.rendered, "run": _generation_run_response(run, queue)})
+            except GenerationQueueFullError as exc:
+                failed.append({"artist": artist.rendered, "error": str(exc)})
+            except KeyError as exc:
+                failed.append({"artist": artist.rendered, "error": str(exc)})
+            except (ValueError, GenerationQueueError) as exc:
+                failed.append({"artist": artist.rendered, "error": str(exc)})
+
+        if not submitted:
+            message = failed[0]["error"] if failed else "画师对照任务未能进入生成队列。"
+            raise ApiError(429 if failed else 422, "artist_comparison_rejected", message, details={"failed": failed}, retryable=True)
+        return {
+            "comparison_id": payload.comparison_id,
+            "project_name": project_name,
+            "seed": payload.settings.seed,
+            "requested_count": len(payload.artist_names),
+            "submitted": submitted,
+            "failed": failed,
+        }
+
     @app.get(f"{API_PREFIX}/generation-runs/{{run_id}}", dependencies=[Depends(require_session)])
     def get_generation_run(run_id: str) -> dict[str, object]:
         queue = app.state.generation_queue
@@ -567,6 +797,99 @@ def create_api_runtime(
         if queue is None:
             raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
         return {"items": queue.targets()}
+
+    @app.get(f"{API_PREFIX}/settings/remote-profiles", dependencies=[Depends(require_session)])
+    def list_remote_profiles_for_settings(
+        database: Path = Depends(require_v2_settings_database),
+    ) -> dict[str, object]:
+        """Expose V2 connection metadata without ever exposing a secret."""
+        from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+        from anima_prompt_studio.services.remote.credential_store import CredentialStore
+
+        repository = SQLiteRepository(database)
+        try:
+            credentials = CredentialStore()
+            profiles = repository.list_remote_profiles()
+            workflows = repository.list_workflow_profiles()
+            return {
+                "items": [_remote_profile_settings_response(item, credentials) for item in profiles],
+                "workflows": [
+                    {
+                        "id": item.id,
+                        "display_name": item.display_name,
+                        "workflow_kind": item.workflow_kind,
+                        "notes": item.notes,
+                    }
+                    for item in workflows
+                ],
+                "credential_store_available": credentials.available,
+            }
+        finally:
+            repository.close()
+
+    @app.post(
+        f"{API_PREFIX}/settings/remote-profiles",
+        dependencies=[Depends(require_session)],
+        status_code=201,
+    )
+    def create_remote_profile_for_settings(
+        payload: RemoteProfileSettingsRequest,
+        database: Path = Depends(require_v2_settings_database),
+    ) -> dict[str, object]:
+        return _save_remote_profile_settings(database, payload)
+
+    @app.put(
+        f"{API_PREFIX}/settings/remote-profiles/{{profile_id}}",
+        dependencies=[Depends(require_session)],
+    )
+    def update_remote_profile_for_settings(
+        profile_id: str,
+        payload: RemoteProfileSettingsRequest,
+        database: Path = Depends(require_v2_settings_database),
+    ) -> dict[str, object]:
+        return _save_remote_profile_settings(database, payload, profile_id=profile_id)
+
+    @app.post(
+        f"{API_PREFIX}/settings/remote-profiles/{{profile_id}}/probe-host-key",
+        dependencies=[Depends(require_session)],
+    )
+    def probe_remote_profile_host_key(
+        profile_id: str,
+        database: Path = Depends(require_v2_settings_database),
+    ) -> dict[str, object]:
+        profile = _get_v2_remote_profile(database, profile_id)
+        try:
+            from anima_prompt_studio.services.remote.ssh_tunnel import SshTunnel
+            fingerprint = SshTunnel(profile).probe_fingerprint()
+        except (OSError, RuntimeError) as exc:
+            raise ApiError(502, "ssh_host_key_probe_failed", f"无法读取 SSH 主机指纹：{exc}", retryable=True) from exc
+        return {"fingerprint": fingerprint}
+
+    @app.post(
+        f"{API_PREFIX}/settings/remote-profiles/{{profile_id}}/confirm-host-key",
+        dependencies=[Depends(require_session)],
+    )
+    def confirm_remote_profile_host_key(
+        profile_id: str,
+        payload: RemoteHostFingerprintRequest,
+        database: Path = Depends(require_v2_settings_database),
+    ) -> dict[str, object]:
+        profile = _get_v2_remote_profile(database, profile_id)
+        try:
+            from anima_prompt_studio.services.remote.ssh_tunnel import SshTunnel
+            actual = SshTunnel(profile).probe_fingerprint()
+        except (OSError, RuntimeError) as exc:
+            raise ApiError(502, "ssh_host_key_probe_failed", f"无法读取 SSH 主机指纹：{exc}", retryable=True) from exc
+        if actual != payload.fingerprint:
+            raise ApiError(409, "ssh_host_key_changed", "SSH 主机指纹在确认前发生变化，请重新检测。")
+        from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+        from anima_prompt_studio.services.remote.credential_store import CredentialStore
+        repository = SQLiteRepository(database)
+        try:
+            repository.save_remote_profile(profile.model_copy(update={"known_host_fingerprint": actual}))
+            return _remote_profile_settings_response(profile.model_copy(update={"known_host_fingerprint": actual}), CredentialStore())
+        finally:
+            repository.close()
 
     @app.post(
         f"{API_PREFIX}/generation-credentials/private-key-passphrase",
@@ -820,6 +1143,9 @@ def _generation_run_response(run, queue) -> dict[str, object]:
         artifact_count = len(queue.artifacts(run.id))
     except GenerationRunNotFoundError:
         artifact_count = 0
+    prompt_job = run.request_json.get("prompt_job", {}) if isinstance(run.request_json, dict) else {}
+    integration = prompt_job.get("integration_metadata", {}) if isinstance(prompt_job, dict) else {}
+    comparison = integration.get("artist_comparison") if isinstance(integration, dict) else None
     return {
         "id": run.id,
         "prompt_job_id": run.prompt_job_id,
@@ -837,7 +1163,98 @@ def _generation_run_response(run, queue) -> dict[str, object]:
             "code": run.error_code,
             "message": run.error_message,
         } if run.error_code or run.error_message else None,
+        "artist_comparison": comparison if isinstance(comparison, dict) else None,
     }
+
+
+def _remote_profile_settings_response(profile, credentials) -> dict[str, object]:
+    return {
+        "id": profile.id,
+        "display_name": profile.display_name,
+        "ssh_host": profile.ssh_host,
+        "ssh_port": profile.ssh_port,
+        "ssh_user": profile.ssh_user,
+        "auth_type": profile.auth_type.value,
+        "private_key_path": profile.private_key_path,
+        "enabled": profile.enabled,
+        "has_saved_password": bool(credentials.read_password(profile.id)),
+        "host_fingerprint_confirmed": bool(profile.known_host_fingerprint.strip()),
+        "comfy_endpoint": f"{profile.comfy_host}:{profile.comfy_port}",
+    }
+
+
+def _get_v2_remote_profile(database: Path, profile_id: str):
+    from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+
+    repository = SQLiteRepository(database)
+    try:
+        return repository.get_remote_profile(profile_id)
+    except KeyError as exc:
+        raise ApiError(404, "remote_profile_not_found", "云主机配置不存在。") from exc
+    finally:
+        repository.close()
+
+
+def _save_remote_profile_settings(database: Path, payload: RemoteProfileSettingsRequest, *, profile_id: str | None = None) -> dict[str, object]:
+    """Update only V2's supported configuration store and Windows credentials.
+
+    A new SSH endpoint must be trusted again: carrying a fingerprint across host,
+    port, user, authentication or key changes would weaken host-key verification.
+    """
+    from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
+    from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+    from anima_prompt_studio.services.remote.credential_store import CredentialStore, CredentialStoreError
+
+    repository = SQLiteRepository(database)
+    credentials = CredentialStore()
+    try:
+        existing = None
+        if profile_id is not None:
+            try:
+                existing = repository.get_remote_profile(profile_id)
+            except KeyError as exc:
+                raise ApiError(404, "remote_profile_not_found", "云主机配置不存在。") from exc
+        changes = {
+            "display_name": payload.display_name,
+            "ssh_host": payload.ssh_host,
+            "ssh_port": payload.ssh_port,
+            "ssh_user": payload.ssh_user,
+            "auth_type": RemoteAuthType(payload.auth_type),
+            "private_key_path": payload.private_key_path,
+            "enabled": payload.enabled,
+        }
+        if existing is None:
+            profile = RemoteProfile(**changes)
+        else:
+            endpoint_changed = (
+                existing.ssh_host,
+                existing.ssh_port,
+                existing.ssh_user,
+                existing.auth_type.value,
+                existing.private_key_path,
+            ) != (
+                payload.ssh_host,
+                payload.ssh_port,
+                payload.ssh_user,
+                payload.auth_type,
+                payload.private_key_path,
+            )
+            if endpoint_changed:
+                changes["known_host_fingerprint"] = ""
+            profile = existing.model_copy(update=changes)
+        repository.save_remote_profile(profile)
+
+        entered_password = payload.password.get_secret_value() if payload.password is not None else ""
+        if entered_password and payload.remember_password:
+            try:
+                credentials.save_password(profile.id, profile.ssh_user, entered_password)
+            except CredentialStoreError as exc:
+                raise ApiError(503, "credential_store_unavailable", str(exc), retryable=True) from exc
+        elif not payload.remember_password:
+            credentials.delete_password(profile.id)
+        return _remote_profile_settings_response(profile, credentials)
+    finally:
+        repository.close()
 
 
 def _workbench_intent(payload: WorkbenchCandidateRequest) -> IntentDocument:
@@ -870,6 +1287,400 @@ def _workbench_intent(payload: WorkbenchCandidateRequest) -> IntentDocument:
         source_language=payload.source_language,
         graph=ConstraintGraph(elements=elements, edges=edges),
     )
+
+
+def _workbench_uses_local_mapping(payload: WorkbenchCandidateRequest, translator: object | None) -> bool:
+    """Use the same resolver for user-entered concept text, not only prose mode.
+
+    The structured editor is for manually separated *concepts*, not for asking
+    users to memorize canonical Danbooru spelling.  Explicit canonical input and
+    graph relations retain the original low-level API path.
+    """
+    return bool(
+        translator is not None
+        and not payload.relations
+        and not any(item.canonical_tag for item in payload.elements)
+        and any("\u3400" <= character <= "\u9fff" for character in payload.source_text)
+    )
+
+
+def _apply_workbench_exclusions(
+    intent: IntentDocument,
+    payload: WorkbenchCandidateRequest,
+    store: ReferenceDataStore,
+    scene_draft: dict[str, object],
+) -> IntentDocument:
+    """Map explicit structured exclusions without treating them as positive prose."""
+    elements = list(intent.graph.elements)
+    unresolved = list(scene_draft["unresolved"])
+    for item in payload.elements:
+        if item.state != IntentState.EXCLUDED:
+            continue
+        resolved: list[_LocalIndexMatch] = []
+        if item.canonical_tag:
+            detail = store.get_tag(item.canonical_tag)
+            if detail is not None:
+                resolved = [_LocalIndexMatch(
+                    text=item.text,
+                    origin="source",
+                    canonical_tag=str(detail["name"]),
+                    match_kind="canonical",
+                    post_count=int(detail["post_count"]),
+                )]
+        else:
+            exclusion_matches = _local_index_matches(store, _local_lookup_terms(item.text, ""))
+            resolved, _ambiguous = _confirmed_source_matches(exclusion_matches)
+        if not resolved:
+            unresolved.append(_scene_draft_item(
+                f"u_{item.id}",
+                item.text,
+                None,
+                "unresolved",
+                "未找到可安全写入负向提示词的排除标签；原文仍保留供人工处理。",
+            ))
+            continue
+        for index, match in enumerate(resolved, 1):
+            elements.append(IntentElement(
+                id=item.id if index == 1 else f"{item.id}_{index}",
+                original_text=match.text,
+                canonical_tag=match.canonical_tag,
+                type=item.type,
+                state=IntentState.EXCLUDED,
+                confidence=1.0,
+                provenance=ElementProvenance(kind=ProvenanceKind.EXACT, detail="local_structured_exclusion"),
+            ))
+    scene_draft["unresolved"] = unresolved
+    return intent.model_copy(update={"graph": ConstraintGraph(elements=elements, edges=intent.graph.edges)})
+
+
+@dataclass(frozen=True)
+class _LocalLookupTerm:
+    text: str
+    origin: str
+    start: int | None = None
+    end: int | None = None
+
+
+def _local_natural_intent(
+    source_text: str,
+    translated_text: str,
+    store: ReferenceDataStore,
+    *,
+    selected_tags: list[str],
+) -> tuple[IntentDocument, dict[str, object]]:
+    """Build a reviewable local draft without treating every index hit as required.
+
+    Source-text index hits are deterministic local evidence.  Translation hits
+    stay in the suggestion pool until the user explicitly selects them.  The
+    complete translation remains a prose fallback so an empty tag match can
+    never erase a natural-language draft.
+    """
+    matches = _local_index_matches(store, _local_lookup_terms(source_text, translated_text))
+    source_matches, ambiguous_source_terms = _confirmed_source_matches(matches)
+    selected = list(dict.fromkeys(selected_tags))
+    selected_set = set(selected)
+    elements: list[IntentElement] = []
+    confirmed: list[dict[str, object]] = []
+
+    for index, match in enumerate(source_matches, 1):
+        element_id = f"e_local_confirmed_{index}"
+        elements.append(IntentElement(
+            id=element_id,
+            original_text=match.text,
+            canonical_tag=match.canonical_tag,
+            type=IntentElementType.OTHER,
+            state=IntentState.REQUIRED,
+            confidence=1.0,
+            source_span=SourceSpan(start=match.start, end=match.end) if match.start is not None and match.end is not None else None,
+            provenance=ElementProvenance(kind=ProvenanceKind.EXACT, detail="local_source_index_exact"),
+        ))
+        confirmed.append(_scene_draft_item(
+            element_id,
+            match.text,
+            match.canonical_tag,
+            "source_exact",
+            "中文原文与本地标签索引精确匹配",
+            match.start,
+            match.end,
+        ))
+
+    confirmed_tags = {match.canonical_tag for match in source_matches}
+    for index, tag in enumerate(selected, 1):
+        detail = store.get_tag(tag)
+        if detail is None or tag in confirmed_tags:
+            continue
+        element_id = f"e_local_selected_{index}"
+        rendered = str(detail["render_name"])
+        elements.append(IntentElement(
+            id=element_id,
+            original_text=rendered,
+            canonical_tag=tag,
+            type=IntentElementType.OTHER,
+            state=IntentState.USER_SELECTED,
+            confidence=1.0,
+            provenance=ElementProvenance(kind=ProvenanceKind.MANUAL, detail="local_draft_user_selected"),
+        ))
+        confirmed.append(_scene_draft_item(
+            element_id,
+            rendered,
+            tag,
+            "user_selected",
+            "用户从建议池确认加入",
+        ))
+
+    translation_matches = [
+        match
+        for match in _confirmed_translation_matches(matches)
+        if match.canonical_tag not in confirmed_tags and match.canonical_tag not in selected_set
+    ]
+    suggestions = [
+        _scene_draft_item(
+            f"s_local_translation_{index}",
+            match.text,
+            match.canonical_tag,
+            "translation_exact",
+            "英文译文直接命中本地标签；需要确认后才会加入候选",
+        )
+        for index, match in enumerate(translation_matches[:12], 1)
+    ]
+
+    unresolved: list[dict[str, object]] = []
+    if not source_matches:
+        unresolved.append(_scene_draft_item(
+            "u_local_scene",
+            source_text.strip(),
+            None,
+            "unresolved",
+            "未找到可直接确认的中文标签；完整译文会保留为可编辑 prose baseline。",
+        ))
+
+    if not elements:
+        elements.append(IntentElement(
+            id="e_local_scene",
+            original_text="local scene description",
+            type=IntentElementType.SCENE,
+            state=IntentState.REQUIRED,
+            confidence=1.0,
+            provenance=ElementProvenance(kind=ProvenanceKind.TRANSLATION, detail="local_prose_baseline"),
+            notes=["local_prose_baseline"],
+        ))
+
+    intent = IntentDocument(
+        source_text=source_text.strip(),
+        source_language="zh",
+        translated_text=translated_text.strip(),
+        scene_plan_en=translated_text.strip() or None,
+        graph=ConstraintGraph(elements=elements),
+    )
+    scene_draft = {
+        "source_text": source_text.strip(),
+        "translated_text": translated_text.strip(),
+        "confirmed": confirmed,
+        "suggestions": suggestions,
+        "unresolved": unresolved,
+        "risk_notes": [
+            *(
+                [f"{', '.join(f'“{item}”' for item in ambiguous_source_terms[:3])} 可关联多条标签；已只确认唯一的主标签，其余仅通过建议池提供。"]
+                if ambiguous_source_terms
+                else []
+            ),
+            "当前仅自动确认唯一的主标签或英文 canonical/alias 命中；人物归属、复杂动作、空间关系和构图仍需人工检查。",
+        ],
+    }
+    return intent, scene_draft
+
+
+@dataclass(frozen=True)
+class _LocalIndexMatch:
+    text: str
+    origin: str
+    canonical_tag: str
+    match_kind: str
+    post_count: int
+    start: int | None = None
+    end: int | None = None
+
+
+def _local_lookup_terms(source_text: str, translated_text: str) -> list[_LocalLookupTerm]:
+    terms: list[_LocalLookupTerm] = []
+    seen: set[tuple[str, str, int | None, int | None]] = set()
+
+    def add(text: str, origin: str, start: int | None = None, end: int | None = None) -> None:
+        normalized = text.strip().lower()
+        if len(normalized) < 2 or len(terms) >= 2_000:
+            return
+        key = (origin, normalized, start, end)
+        if key not in seen:
+            seen.add(key)
+            terms.append(_LocalLookupTerm(normalized, origin, start, end))
+
+    def add_chinese(text: str, origin: str) -> None:
+        for segment in re.finditer(r"[\u3400-\u9fff]{2,}", text):
+            value = segment.group(0)
+            for start_index in range(len(value)):
+                max_end = min(len(value), start_index + 12)
+                for end_index in range(max_end, start_index + 1, -1):
+                    add(
+                        value[start_index:end_index],
+                        origin,
+                        segment.start() + start_index if origin == "source" else None,
+                        segment.start() + end_index if origin == "source" else None,
+                    )
+
+    def add_english(text: str, origin: str) -> None:
+        words = list(re.finditer(r"[a-z0-9_]+", text.lower()))
+        for index, word in enumerate(words):
+            add(word.group(0), origin, word.start() if origin == "source" else None, word.end() if origin == "source" else None)
+            for width in range(2, min(4, len(words) - index) + 1):
+                chunk = words[index:index + width]
+                phrase = " ".join(item.group(0) for item in chunk)
+                add(phrase, origin, chunk[0].start() if origin == "source" else None, chunk[-1].end() if origin == "source" else None)
+
+    add_chinese(source_text, "source")
+    add_english(source_text, "source")
+    add_chinese(translated_text, "translation")
+    add_english(translated_text, "translation")
+    return terms
+
+
+def _local_index_matches(store: ReferenceDataStore, terms: list[_LocalLookupTerm]) -> list[_LocalIndexMatch]:
+    if not terms:
+        return []
+    by_text: dict[str, list[_LocalLookupTerm]] = {}
+    for term in terms:
+        by_text.setdefault(term.text, []).append(term)
+    matches: list[_LocalIndexMatch] = []
+    ordered_terms = sorted(by_text)
+    for offset in range(0, len(ordered_terms), 500):
+        batch = ordered_terms[offset:offset + 500]
+        placeholders = ",".join("?" for _ in batch)
+        rows = store.connection.execute(
+            f"""SELECT s.term,s.canonical,t.render_name,t.cn_name,t.cn_terms,t.post_count
+                FROM tag_search s JOIN tags t ON t.name=s.canonical
+                WHERE s.term IN ({placeholders}) AND t.deprecated=0""",
+            batch,
+        ).fetchall()
+        for row in rows:
+            term = str(row["term"])
+            canonical_tag = str(row["canonical"])
+            match_kind = _local_match_kind(row, term)
+            for occurrence in by_text.get(term, []):
+                matches.append(_LocalIndexMatch(
+                    text=occurrence.text,
+                    origin=occurrence.origin,
+                    canonical_tag=canonical_tag,
+                    match_kind=match_kind,
+                    post_count=int(row["post_count"]),
+                    start=occurrence.start,
+                    end=occurrence.end,
+                ))
+    return matches
+
+
+def _local_match_kind(row: object, term: str) -> str:
+    """State how a tag-search row earned its term, not merely that it matched."""
+    name = str(row["canonical"])
+    render_name = str(row["render_name"])
+    if term == name:
+        return "canonical"
+    if term == render_name:
+        return "render"
+    if term == (row["cn_name"] or ""):
+        return "cn_name"
+    try:
+        if term in json.loads(row["cn_terms"] or "[]"):
+            return "cn_term"
+    except (TypeError, ValueError):
+        pass
+    return "alias"
+
+
+def _confirmed_source_matches(matches: list[_LocalIndexMatch]) -> tuple[list[_LocalIndexMatch], list[str]]:
+    """Resolve Chinese evidence without promoting every shared keyword to fact.
+
+    Chinese search terms in the reference pack intentionally include broad related
+    words.  For example, “天使” occurs on named characters, halos, statues and
+    the generic ``angel`` tag.  Only a unique canonical/render/alias/CN primary
+    name may be confirmed; broad ``cn_terms`` remain discovery metadata.
+    """
+    by_occurrence: dict[tuple[str, int | None, int | None], list[_LocalIndexMatch]] = {}
+    for match in matches:
+        if match.origin == "source":
+            by_occurrence.setdefault((match.text, match.start, match.end), []).append(match)
+
+    resolved: list[_LocalIndexMatch] = []
+    ambiguous_terms: list[str] = []
+    primary_kinds = {"canonical", "render", "alias", "cn_name"}
+    for (text, _start, _end), candidates in by_occurrence.items():
+        unique = _unique_canonical_matches(candidates)
+        primaries = _unique_canonical_matches([item for item in unique if item.match_kind in primary_kinds])
+        selected: _LocalIndexMatch | None = None
+        if len(primaries) == 1:
+            selected = primaries[0]
+        if len(unique) > 1:
+            ambiguous_terms.append(text)
+        if selected is not None:
+            resolved.append(selected)
+
+    # Prefer the most specific non-overlapping phrase: “堕天使” must win over
+    # the nested “天使”, while repeated independent phrases may both survive.
+    accepted: list[_LocalIndexMatch] = []
+    for match in sorted(resolved, key=lambda item: (-len(item.text), _match_priority(item), -item.post_count, item.canonical_tag)):
+        if any(_spans_overlap(match, existing) for existing in accepted):
+            continue
+        accepted.append(match)
+    accepted.sort(key=lambda item: (item.start if item.start is not None else 0, -len(item.text), item.canonical_tag))
+    return _dedupe_canonical_matches(accepted), list(dict.fromkeys(ambiguous_terms))
+
+
+def _confirmed_translation_matches(matches: list[_LocalIndexMatch]) -> list[_LocalIndexMatch]:
+    """Only direct English canonical/render/alias hits are translation evidence."""
+    direct_kinds = {"canonical", "render", "alias"}
+    candidates = [item for item in matches if item.origin == "translation" and item.match_kind in direct_kinds]
+    return _dedupe_canonical_matches(sorted(candidates, key=lambda item: (_match_priority(item), -len(item.text), -item.post_count, item.canonical_tag)))
+
+
+def _unique_canonical_matches(matches: list[_LocalIndexMatch]) -> list[_LocalIndexMatch]:
+    best: dict[str, _LocalIndexMatch] = {}
+    for item in matches:
+        existing = best.get(item.canonical_tag)
+        if existing is None or (_match_priority(item), -item.post_count, item.canonical_tag) < (_match_priority(existing), -existing.post_count, existing.canonical_tag):
+            best[item.canonical_tag] = item
+    return sorted(best.values(), key=lambda item: (_match_priority(item), -item.post_count, item.canonical_tag))
+
+
+def _dedupe_canonical_matches(matches: list[_LocalIndexMatch]) -> list[_LocalIndexMatch]:
+    return _unique_canonical_matches(matches)
+
+
+def _match_priority(match: _LocalIndexMatch) -> int:
+    return {"canonical": 0, "render": 1, "alias": 2, "cn_name": 3, "cn_term": 4}.get(match.match_kind, 5)
+
+
+def _spans_overlap(left: _LocalIndexMatch, right: _LocalIndexMatch) -> bool:
+    if None in {left.start, left.end, right.start, right.end}:
+        return False
+    return left.start < right.end and right.start < left.end
+
+
+def _scene_draft_item(
+    item_id: str,
+    text: str,
+    canonical_tag: str | None,
+    source: str,
+    reason: str,
+    source_start: int | None = None,
+    source_end: int | None = None,
+) -> dict[str, object]:
+    return {
+        "id": item_id,
+        "text": text,
+        "canonical_tag": canonical_tag,
+        "source": source,
+        "reason": reason,
+        "source_start": source_start,
+        "source_end": source_end,
+    }
 
 
 def _data_pack_summary(path: Path) -> dict[str, object]:

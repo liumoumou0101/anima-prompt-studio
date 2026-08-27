@@ -28,6 +28,9 @@ export function AppShell({bootstrap}: {bootstrap: BootstrapResponse}) {
             </span>
           ))}
         </nav>
+        <NavLink to="/settings" className={({isActive}) => `nav-item nav-item--settings${isActive ? " is-active" : ""}`} aria-label="设置">
+          <span className="nav-glyph">⚙</span><span>设置</span>
+        </NavLink>
         <div className="sidebar-status">
           <span className={`status-dot${bootstrap.data_pack.ready ? " is-ready" : ""}`} />
           <div><strong>{bootstrap.data_pack.ready ? "本地数据就绪" : "缺少数据包"}</strong><small>{bootstrap.data_pack.id || "未安装"}</small></div>

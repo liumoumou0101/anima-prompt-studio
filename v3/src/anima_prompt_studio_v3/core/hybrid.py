@@ -64,6 +64,8 @@ class HybridLaneGenerator:
             (candidate for candidate in bundle.candidates if candidate.lane == CandidateLane.CONSERVATIVE),
             next(candidate for candidate in bundle.candidates if candidate.lane == CandidateLane.LITERAL),
         )
+        if scene_plan and base.score_breakdown.get("prose_baseline"):
+            return bundle
         relation_text = "; ".join(phrases)
         prose_parts = [part for part in (scene_plan, relation_text) if part]
         warnings = [warning.model_copy(deep=True) for warning in base.warnings]

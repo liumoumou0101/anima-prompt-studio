@@ -1,4 +1,4 @@
-import {fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import {MemoryRouter} from "react-router-dom";
 import {beforeEach, expect, it, vi} from "vitest";
 import {WorkbenchPage} from "./WorkbenchPage";
@@ -51,7 +51,7 @@ it("submits structured required, locked and excluded concepts and renders candid
   ]);
 });
 
-it("extracts natural language through V2 and generates candidates through V3", async () => {
+it("compiles natural language through local translation without calling the V2 AI extractor", async () => {
   const intent = {
     source_text: "白发少女在雨夜街道撑伞。",
     source_language: "zh",
@@ -67,33 +67,73 @@ it("extracts natural language through V2 and generates candidates through V3", a
     },
     warnings: [{code: "ai_extraction_requires_review", message: "请检查", element_ids: []}],
   };
-  const fetchMock = vi.spyOn(globalThis, "fetch")
-    .mockResolvedValueOnce(new Response(JSON.stringify({
-      intent,
-      extraction: {summary_zh: "雨夜撑伞少女", people_count: 1, subject_mode: "character", content_rating: "safe", scene_type: "portrait", truncated_source: false},
-      parser: {name: "V2 AI Extract · test", source: "v2_ai_extract"},
-    }), {status: 200}))
-    .mockResolvedValueOnce(new Response(JSON.stringify({
-      intent,
-      candidates: [{...candidate, id: "candidate_hybrid", lane: "hybrid", title: "画面计划混合表达", positive_prompt: "score_7, white hair. A white-haired girl holds an umbrella on a rainy street"}],
-      validation: {valid: true, error_count: 0},
-      data_pack_id: "pack-r1",
-    }), {status: 200}));
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+    intent,
+    candidates: [{...candidate, id: "candidate_hybrid", lane: "hybrid", title: "画面计划混合表达", positive_prompt: "score_7, white hair. A white-haired girl holds an umbrella on a rainy street"}],
+    validation: {valid: true, error_count: 0},
+    data_pack_id: "pack-r1",
+    local_translation: {translated_text: "A white-haired girl holds an umbrella on a rainy street", engine: "内置离线基础翻译", local_only: true},
+  }), {status: 200}));
 
   render(<MemoryRouter><WorkbenchPage naturalLanguageEnabled /></MemoryRouter>);
   fireEvent.click(screen.getByRole("tab", {name: "自然语言描述"}));
   fireEvent.change(screen.getByLabelText("描述你想生成的画面"), {target: {value: intent.source_text}});
-  fireEvent.click(screen.getByRole("button", {name: "解析并生成候选"}));
+  fireEvent.click(screen.getByRole("button", {name: "编译并生成候选"}));
 
   expect(await screen.findByText("已抽取 2 项画面事实")).toBeInTheDocument();
   expect(screen.getByRole("heading", {name: "画面计划混合表达"})).toBeInTheDocument();
-  expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-    "/api/v3/intent/parse",
-    "/api/v3/prompt-candidates",
-  ]);
-  const candidateRequest = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
-  expect(candidateRequest.intent.scene_plan_en).toContain("white-haired girl");
+  expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(["/api/v3/local-natural/candidates"]);
+  const candidateRequest = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+  expect(candidateRequest.source_text).toBe(intent.source_text);
   expect(candidateRequest.model_profile).toBe("anima_base_v1");
+});
+
+it("keeps local mapping suggestions out of candidates until the user selects one", async () => {
+  const sceneDraft = {
+    source_text: "一位未知角色站在雨中",
+    translated_text: "An unknown character stands in the rain",
+    confirmed: [],
+    suggestions: [{id: "s_local_translation_1", text: "rain", canonical_tag: "rain", source: "translation_exact", reason: "译文精确命中", source_start: null, source_end: null}],
+    unresolved: [{id: "u_local_scene", text: "一位未知角色站在雨中", canonical_tag: null, source: "unresolved", reason: "保留译文", source_start: null, source_end: null}],
+    risk_notes: ["动作和构图仍需人工检查。"],
+  } as const;
+  const first = {
+    intent: {source_text: sceneDraft.source_text, source_language: "zh", translated_text: sceneDraft.translated_text, scene_plan_en: sceneDraft.translated_text, scene_negative_en: [], graph: {elements: [{id: "e_local_scene", original_text: "local scene description", type: "scene", state: "required", confidence: 1, notes: ["local_prose_baseline"]}], edges: []}, warnings: []},
+    candidates: [{...candidate, positive_prompt: sceneDraft.translated_text, tags: [], preserved_element_ids: ["e_local_scene"], score_breakdown: {mapped_elements: 0, prose_baseline: 1}}],
+    validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1", scene_draft: sceneDraft, tag_suggestions: [],
+    local_translation: {translated_text: sceneDraft.translated_text, engine: "内置离线基础翻译", local_only: true},
+  };
+  const second = {
+    ...first,
+    intent: {...first.intent, graph: {elements: [{id: "e_local_selected_1", original_text: "rain", type: "other", state: "user_selected", confidence: 1, notes: []}], edges: []}},
+    candidates: [{...candidate, positive_prompt: "rain", tags: [{name: "rain", rendered: "rain", state: "user_selected", source: "exact", source_element_ids: ["e_local_selected_1"], reason: "用户确认", raw_score: null, display_score: null, removable: true}], preserved_element_ids: ["e_local_selected_1"]}],
+    scene_draft: {...sceneDraft, confirmed: [{id: "e_local_selected_1", text: "rain", canonical_tag: "rain", source: "user_selected", reason: "用户从建议池确认加入", source_start: null, source_end: null}], suggestions: []},
+    local_translation: {translated_text: sceneDraft.translated_text, engine: "当前工作台译文", local_only: true},
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify(first), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify(second), {status: 200}));
+
+  render(<MemoryRouter><WorkbenchPage naturalLanguageEnabled /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("tab", {name: "自然语言描述"}));
+  fireEvent.change(screen.getByLabelText("描述你想生成的画面"), {target: {value: sceneDraft.source_text}});
+  fireEvent.click(screen.getByRole("button", {name: "编译并生成候选"}));
+
+  const review = await screen.findByRole("region", {name: "Scene Draft"});
+  expect(review).toBeInTheDocument();
+  expect(screen.getByRole("button", {name: /rain.*选用/})).toBeInTheDocument();
+    expect(within(review).getByText(sceneDraft.translated_text)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: /rain.*选用/}));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  const recompileRequest = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+  expect(recompileRequest).toEqual({
+    source_text: sceneDraft.source_text,
+    translated_text: sceneDraft.translated_text,
+    model_profile: "anima_base_v1",
+    selected_tags: ["rain"],
+  });
+  expect(await screen.findByText("用户从建议池确认加入")).toBeInTheDocument();
 });
 
 it("previews V2 local translation without compiling it into candidates", async () => {
@@ -130,6 +170,27 @@ it("copies the selected prompt", async () => {
 
   await waitFor(() => expect(writeText).toHaveBeenCalledWith("score_7, maid, twintails"));
   expect(screen.getByRole("button", {name: "已复制"})).toBeInTheDocument();
+});
+
+it("shows the artist comparison pool without injecting artists into candidates", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+    intent: {source_text: "女仆装", graph: {elements: []}},
+    candidates: [candidate], validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1",
+    artist_suggestions: [
+      {name: "artist_a", render_name: "@artist a", post_count: 300, raw_score: .8, display_score: 1, cooc_count: 80, sources: ["maid"], hit_count: 1, algorithm_version: "artist-v1", data_pack_id: "pack-r1"},
+      {name: "artist_b", render_name: "@artist b", post_count: 200, raw_score: .4, display_score: .5, cooc_count: 40, sources: ["twintails"], hit_count: 1, algorithm_version: "artist-v1", data_pack_id: "pack-r1"},
+    ],
+  }), {status: 200}));
+
+  render(<MemoryRouter><WorkbenchPage /></MemoryRouter>);
+  fireEvent.change(screen.getByLabelText("希望画面中出现"), {target: {value: "女仆装"}});
+  fireEvent.click(screen.getByRole("button", {name: "生成候选"}));
+
+  expect(await screen.findByRole("region", {name: "画师对照"})).toBeInTheDocument();
+  expect(screen.getByText("@artist a")).toBeInTheDocument();
+  expect(screen.getByText("匹配 maid · 共现 80")).toBeInTheDocument();
+  expect(screen.getByText("推荐不会自动写入提示词；锁定基准后可选择最多 20 位画师批量生图。")).toBeInTheDocument();
+  expect(candidate.artists).toEqual([]);
 });
 
 it("undoes and restores draft edits", () => {
@@ -235,6 +296,45 @@ it("submits a validated candidate to a compatible reused V2 target", async () =>
   expect(request.workflow_profile_id).toBe("workflow-1");
   expect(request.candidate.id).toBe("candidate_literal");
   expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get("Idempotency-Key")).toMatch(/^web-/);
+});
+
+it("locks one candidate and submits separate fixed-seed jobs for selected artists", async () => {
+  const artists = [
+    {name: "artist_a", render_name: "@artist a", post_count: 300, raw_score: .8, display_score: 1, cooc_count: 80, sources: ["maid"], hit_count: 1, algorithm_version: "artist-v1", data_pack_id: "pack-r1"},
+    {name: "artist_b", render_name: "@artist b", post_count: 200, raw_score: .4, display_score: .5, cooc_count: 40, sources: ["twintails"], hit_count: 1, algorithm_version: "artist-v1", data_pack_id: "pack-r1"},
+  ];
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [{
+      remote_profile_id: "remote-1", remote_display_name: "测试云主机", workflow_profile_id: "workflow-1", workflow_display_name: "ANIMA Base", workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_base_v1"], host_fingerprint_ready: true, auth_type: "agent", private_key_passphrase_configured: false,
+    }]}), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      intent: {source_text: "女仆", source_language: "zh", graph: {elements: []}}, candidates: [candidate], validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1", artist_suggestions: artists,
+    }), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: artists}), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      comparison_id: "comparison_abcdef012345", project_name: "画师批量对照 · abcdef01", seed: 123, requested_count: 2, submitted: [{artist: "@artist a", run: {id: "run-a"}}, {artist: "@artist b", run: {id: "run-b"}}], failed: [],
+    }), {status: 202}));
+
+  render(<MemoryRouter><WorkbenchPage remoteEnabled /></MemoryRouter>);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  fireEvent.change(screen.getByLabelText("希望画面中出现"), {target: {value: "女仆"}});
+  fireEvent.click(screen.getByRole("button", {name: "生成候选"}));
+  await screen.findByRole("heading", {name: "高保真基准"});
+  fireEvent.click(screen.getByRole("button", {name: "设为画师对照基准"}));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  fireEvent.change(screen.getByLabelText("固定 Seed"), {target: {value: "123"}});
+  const artistButtons = screen.getAllByRole("button", {name: "选入对照"});
+  fireEvent.click(artistButtons[0]);
+  fireEvent.click(artistButtons[1]);
+  fireEvent.click(screen.getByRole("button", {name: /提交 2 位画师对照/}));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+  expect(fetchMock.mock.calls[3][0]).toBe("/api/v3/artist-comparisons");
+  const request = JSON.parse(String(fetchMock.mock.calls[3][1]?.body));
+  expect(request.artist_names).toEqual(["artist_a", "artist_b"]);
+  expect(request.settings).toEqual({seed: 123, batch_size: 1});
+  expect(request.candidate.id).toBe("candidate_literal");
+  expect(new Headers(fetchMock.mock.calls[3][1]?.headers).get("Idempotency-Key")).toMatch(/^artist-comparison-/);
 });
 
 it("sends an encrypted-key passphrase separately before the generation request", async () => {

@@ -129,10 +129,15 @@ class LiteralCandidateGenerator:
         preserved: list[str] = []
         unresolved: list[str] = []
         warnings: list[CandidateWarning] = []
+        prose_baseline_ids: list[str] = []
 
         for element in intent.graph.elements:
             mapping = self.mapper.map_element(element)
             if mapping is None:
+                if _uses_local_prose_baseline(element, intent):
+                    preserved.append(element.id)
+                    prose_baseline_ids.append(element.id)
+                    continue
                 unresolved.append(element.id)
                 warnings.append(_unresolved_warning(element))
                 continue
@@ -188,6 +193,13 @@ class LiteralCandidateGenerator:
         ]
 
         positive_parts = _deduplicate([*profile.positive_prefix, *(tag.rendered for tag in tags)])
+        if not tags and prose_baseline_ids and intent.scene_plan_en:
+            positive_parts.append(intent.scene_plan_en.strip())
+            warnings.append(CandidateWarning(
+                code="local_prose_baseline",
+                message="本地索引没有可确认标签；保留完整本地译文作为可编辑的基准表达。",
+                element_ids=prose_baseline_ids,
+            ))
         if not positive_parts:
             raise LiteralGenerationError("literal 没有可安全渲染的正向内容。")
         negative_parts = (
@@ -205,7 +217,11 @@ class LiteralCandidateGenerator:
             preserved_element_ids=list(dict.fromkeys(preserved)),
             unresolved_element_ids=list(dict.fromkeys(unresolved)),
             warnings=warnings,
-            score_breakdown={"mapped_elements": float(len(preserved)), "unresolved_elements": float(len(unresolved))},
+            score_breakdown={
+                "mapped_elements": float(len(preserved) - len(prose_baseline_ids)),
+                "unresolved_elements": float(len(unresolved)),
+                "prose_baseline": float(bool(prose_baseline_ids)),
+            },
             versions=CandidateVersions(
                 data_pack=self.store.pack_id,
                 algorithm=LITERAL_ALGORITHM_VERSION,
@@ -265,6 +281,15 @@ def _unresolved_warning(element: IntentElement) -> CandidateWarning:
         code = "suggested_tag_unresolved"
         message = f"无法解析建议项“{element.original_text}”，已跳过。"
     return CandidateWarning(code=code, message=message, element_ids=[element.id])
+
+
+def _uses_local_prose_baseline(element: IntentElement, intent: IntentDocument) -> bool:
+    return (
+        element.type.value == "scene"
+        and "local_prose_baseline" in element.notes
+        and element.state in {IntentState.LOCKED, IntentState.REQUIRED}
+        and bool((intent.scene_plan_en or "").strip())
+    )
 
 
 def _deduplicate(values: Iterable[str]) -> list[str]:

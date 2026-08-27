@@ -4,7 +4,7 @@
 
 基础路径：`/api/v3`
 
-当前实现端点：`/health`、`/session/exchange`、`/bootstrap`、`/tags/search`、`/tags/{canonical_name}`、`/related-tags`、`/artists/recommend`、`/intent/parse`、`/workbench/candidates`、`/prompt-candidates`、`/generation-requests/preview`、`/generation-targets`、`/generation-runs` 提交/列表/查询/排队取消/恢复、`/gallery/assets` 列表/原图/缩略图和 `/workspaces` CRUD。其余端点按后续任务继续实现，未实现能力不会返回伪造成功响应。
+当前实现端点：`/health`、`/session/exchange`、`/bootstrap`、`/tags/search`、`/tags/{canonical_name}`、`/related-tags`、`/artists/recommend`、`/intent/parse`、`/workbench/candidates`、`/prompt-candidates`、`/generation-requests/preview`、`/generation-targets`、`/generation-runs` 提交/列表/查询/排队取消/恢复、`/artist-comparisons` 批量画师对照、`/gallery/assets` 列表/原图/缩略图和 `/workspaces` CRUD。其余端点按后续任务继续实现，未实现能力不会返回伪造成功响应。
 
 ## 1. 通用规则
 
@@ -181,7 +181,24 @@ HTTP 500 的 `message` 不返回本地绝对路径、凭据、远程命令或堆
 }
 ```
 
-服务端依次执行 literal、conservative、artist 和显式关系 hybrid 生成，并在响应前运行独立 validator。成功响应包含 `intent`、`candidates`、`validation` 和 `data_pack_id`；没有安全增量时允许省略相应 lane，但必须包含 literal。`relations` 只接受引用现有 element ID 的明确关系，不从普通文本猜测。
+服务端执行 Literal 和由显式关系触发的 Hybrid 生成，并在响应前运行独立 validator。成功响应包含 `intent`、`candidates`、`validation`、`data_pack_id`、`tag_suggestions` 与 `artist_suggestions`；必须包含 Literal。普通相关标签和画师只作为建议返回，绝不自动写入提示词。`relations` 只接受引用现有 element ID 的明确关系，不从普通文本猜测。
+
+当结构化工作台传入的是用户分拆的中文概念（而非 `canonical_tag` 或关系图）时，它与自然语言入口共用本地翻译和 Scene Draft 消歧：唯一的 canonical/别名/中文主名可确认；一对多的中文检索词不自动确认。`selected_tags` 可在复用 `translated_text` 的前提下重新编译；明确排除项仍独立进入负向提示词。
+
+### `POST /local-natural/candidates`（已实现）
+
+中文自然语言主入口。它调用 V2 的离线翻译适配器，并将原文、译文和本地索引结果分别保留为可审查的 `scene_draft`；不调用 AI API 抽取器，也不调用 V2 的旧编译管线。
+
+```json
+{
+  "source_text": "一位未知角色站在雨中",
+  "model_profile": "anima_aesthetic_v1",
+  "translated_text": "An unknown character stands in the rain",
+  "selected_tags": ["rain"]
+}
+```
+
+`translated_text` 省略时由本地翻译生成；传入时会原样复用，便于用户在不重新翻译或解析的情况下确认/取消 `selected_tags` 并重新编译。响应中的 `scene_draft` 按 `confirmed`、`suggestions` 和 `unresolved` 展示证据状态：原文精确命中与用户选择才进入 Literal；译文索引与共现结果只进入建议池。若没有安全标签命中，Literal 使用可追踪的 `local_prose_baseline` 保留译文，而不是返回 422 或擅自补充标签。
 
 ### `POST /intent/parse`（已实现）
 
@@ -200,7 +217,7 @@ HTTP 500 的 `message` 不返回本地绝对路径、凭据、远程命令或堆
 
 ### `POST /translation`（已实现）
 
-接收 `source_text` 与 `zh_en | en_zh` 方向，返回本地翻译文本、引擎名和模型就绪状态。该端点复用 V2 `TranslationService`，不联网下载模型，也不参与 Intent 抽取或候选编译。
+接收 `source_text` 与 `zh_en | en_zh` 方向，返回本地翻译文本、引擎名和模型就绪状态。该端点本身只提供翻译；`/local-natural/candidates` 可将同一翻译作为可编辑 prose baseline 进入候选编译。两者都复用 V2 `TranslationService`，且不联网下载模型。
 
 `PromptCandidate`：
 
@@ -280,6 +297,12 @@ HTTP 500 的 `message` 不返回本地绝对路径、凭据、远程命令或堆
 输入附带完整的已验证 `candidate + intent` 快照、生成参数、`remote_profile_id` 和 `workflow_profile_id`。必须提供 `Idempotency-Key`；键与 V2 任务一起持久化，服务重启后重试仍返回原任务。
 
 服务端使用原 V2 SQLite 中的云主机、工作流和输出目录配置，密码只从系统凭据库读取，不接收或返回 API 明文凭据。提交成功返回 HTTP 202 和本地 `draft` run，单工作线程依次交给现有 V2 `RemoteExecutionCoordinator`。
+
+### `POST /artist-comparisons`（已实现）
+
+画师对照把一条用户锁定的无画师基准候选复制为多个独立任务。请求必须提供 1–20 个当前基准推荐池中的 `artist_names`、固定非负 `seed`、同一个远程目标及 `Idempotency-Key`。服务端对每位画师只追加一个 `@artist`，并保持基准的正/负提示词、模型、预设、尺寸、工作流与 Seed 不变；它不会把多个画师混写进同一条提示词。
+
+响应按画师返回已进入队列的 run 和明确失败项。每个 V2 `PromptJob`、run 响应和画廊资产都会保留安全的 `artist_comparison` 元数据（批次 ID、画师、位置、总数和 Seed），便于按批次比较或单项重试；不返回内部 request JSON 或凭据。默认本地等待队列可容纳 20 项，若已有任务占满队列，响应会明确列出未接受的画师。
 
 ### `POST /generation-credentials/private-key-passphrase`（已实现）
 

@@ -64,7 +64,7 @@
 
 - `V2LocalTranslationAdapter` 只包装 V2 `TranslationService`，不导入旧 `PromptPipeline` 或 `PromptCompiler`。
 - 已安装且运行依赖齐全时按需加载本地 Marian，始终 `local_files_only`；否则使用 V2 内置离线基础翻译。
-- `/api/v3/translation` 和工作台只提供明确标注的独立预览，翻译文本不会静默进入 L/C/A/H 候选。
+- `/api/v3/translation` 仍是独立预览；工作台的 `/api/v3/local-natural/candidates` 则把翻译作为可编辑 prose baseline。它不会把译文索引或 V2 平铺结构静默转换成 required 标签，也不会调用 V2 旧提示词编译管线。
 
 ### 已落地的自然语言复用切片（2026-08-26）
 
