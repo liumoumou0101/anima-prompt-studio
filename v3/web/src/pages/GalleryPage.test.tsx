@@ -1,6 +1,11 @@
 import {fireEvent, render, screen} from "@testing-library/react";
+import type {ReactNode} from "react";
 import {beforeEach, expect, it, vi} from "vitest";
 import {GalleryPage} from "./GalleryPage";
+
+vi.mock("react-photo-album", () => ({
+  default: ({photos, render}: {photos: Array<{path: string}>; render: {photo: (props: unknown, context: {photo: {path: string}; width: number; height: number}) => ReactNode}}) => <div>{photos.map((photo) => <div key={photo.path}>{render.photo({}, {photo, width: 205, height: 205})}</div>)}</div>,
+}));
 
 const assets = [
   {
@@ -95,8 +100,9 @@ it("queues regeneration through the reused gallery process API", async () => {
   render(<GalleryPage enabled />);
   fireEvent.click(await screen.findByAltText("one.png"));
   fireEvent.click(screen.getByRole("button", {name: "再生成"}));
+  fireEvent.click(screen.getByRole("button", {name: "加入队列"}));
 
-  expect(await screen.findByText("已加入再生成队列。")).toBeInTheDocument();
+  expect(await screen.findByText("已加入 1 项再生成任务。")).toBeInTheDocument();
   expect(screen.getByRole("region", {name: "画廊处理任务"})).toBeInTheDocument();
   const request = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
   expect(request).toEqual({paths: [assets[0].path], operation: "regenerate", count: 1});

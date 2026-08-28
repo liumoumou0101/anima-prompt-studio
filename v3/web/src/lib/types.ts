@@ -329,6 +329,7 @@ export interface GalleryAsset {
   width: number | null;
   height: number | null;
   byte_size: number;
+  generation_params?: Record<string, string | number | boolean>;
   source: "generated" | "external";
   state: string;
   candidate: {id: string; lane: string; versions: Record<string, string>};

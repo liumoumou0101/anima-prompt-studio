@@ -26,7 +26,7 @@ def make_gallery(tmp_path: Path) -> tuple[Path, Path, Path]:
             "model_profile_id": "anima_base_v1",
             "positive_prompt": "score_7, white hair. A girl holding an umbrella.",
             "negative_prompt": "text, watermark",
-            "generation_params": {"width": 1024, "height": 1536},
+            "generation_params": {"width": 1024, "height": 1536, "steps": 28, "cfg": 6.5, "seed": 42},
             "integration_metadata": {
                 "schema": "v3-v2-generation-bridge/1",
                 "candidate": {
@@ -64,6 +64,7 @@ def test_v2_gallery_adapter_indexes_manifest_and_preserves_v3_candidate_trace(
     assert asset["negative_prompt"] == "text, watermark"
     assert asset["candidate"]["lane"] == "hybrid"
     assert asset["candidate"]["versions"]["data_pack"] == "pack-r1"
+    assert asset["generation_params"] == {"steps": 28, "cfg": 6.5, "seed": 42, "width": 1024, "height": 1536}
     assert service.resolve_content(asset["path"]) == image.resolve()
     assert service.shutdown(timeout=2) is True
 
@@ -128,6 +129,20 @@ def test_gallery_state_and_recoverable_trash_respect_active_process_lock(tmp_pat
     assert restored["restored"] == [relative]
     assert image.is_file()
     assert service.list_trash()["items"] == []
+
+
+def test_gallery_adapter_permanently_deletes_only_validated_trash_assets(tmp_path: Path) -> None:
+    database, root, image = make_gallery(tmp_path)
+    service = V2GalleryReadService(database, root)
+    relative = image.relative_to(root).as_posix()
+    moved = service.move_to_trash([relative])
+    trash_path = moved["trash_paths"][0]
+
+    deleted = service.delete_from_trash([trash_path, "../outside.png"])
+
+    assert deleted["deleted"] == [trash_path]
+    assert service.list_trash()["items"] == []
+    assert not image.exists()
 
 
 class FakeProcessManager:

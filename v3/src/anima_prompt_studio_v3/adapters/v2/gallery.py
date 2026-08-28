@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import os
+import subprocess
 
 from anima_prompt_studio.repositories import SQLiteRepository
 from anima_prompt_studio.services.gallery_assets import (
     IMAGE_SUFFIXES,
     TRASH_DIR_NAME,
+    delete_images_permanently,
     move_images_to_trash,
     resolve_gallery_image,
     resolve_gallery_trash_image,
@@ -88,6 +91,7 @@ class V2GalleryReadService:
                     "width": width or None,
                     "height": height or None,
                     "byte_size": stat.st_size,
+                    "generation_params": _gallery_generation_params(parameters),
                     "source": "external" if batch.run_id.startswith("folder:") else "generated",
                     "state": states.get(relative, ""),
                     "candidate": {
@@ -201,6 +205,33 @@ class V2GalleryReadService:
             "restored": [path.relative_to(self.output_root).as_posix() for path in restored],
             "failed": [{"path": str(path), "error": error} for path, error in failed],
         }
+
+    def delete_from_trash(self, relative_paths: list[str]) -> dict[str, object]:
+        requested = list(dict.fromkeys(Path(path).as_posix() for path in relative_paths if path))
+        resolved = [
+            path for relative in requested
+            if (path := resolve_gallery_trash_image(relative, self.output_root)) is not None
+        ]
+        deleted, failed = delete_images_permanently(resolved, self.output_root)
+        trash_root = self.output_root / TRASH_DIR_NAME
+        return {
+            "deleted": [path.relative_to(trash_root).as_posix() for path in deleted],
+            "failed": [{"path": str(path), "error": error} for path, error in failed],
+        }
+
+    def reveal(self, relative_path: str) -> bool:
+        """Open the local file manager only for a validated gallery asset."""
+        path = self.resolve_content(relative_path)
+        if path is None or os.name != "nt":
+            return False
+        try:
+            subprocess.Popen(
+                ["explorer.exe", f"/select,{path}"],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except OSError:
+            return False
+        return True
 
     def resolve_trash_content(self, relative_path: str) -> Path | None:
         return resolve_gallery_trash_image(relative_path, self.output_root)
@@ -361,3 +392,15 @@ def _query_value(value: str) -> str:
     from urllib.parse import quote
 
     return quote(value, safe="")
+
+
+def _gallery_generation_params(parameters: dict[str, Any]) -> dict[str, object]:
+    """Return only the display-safe generation controls stored by V2 manifests."""
+    nested = parameters.get("generation_params")
+    source = nested if isinstance(nested, dict) else parameters
+    keys = ("steps", "cfg", "sampler", "scheduler", "seed", "batch_size", "width", "height")
+    return {
+        key: source[key]
+        for key in keys
+        if key in source and isinstance(source[key], (str, int, float, bool))
+    }

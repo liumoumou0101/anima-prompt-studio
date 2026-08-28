@@ -1019,6 +1019,22 @@ def create_api_runtime(
             raise ApiError(503, "gallery_not_configured", "画廊尚未连接 V2 图片目录。")
         return service.restore_from_trash(payload.paths)
 
+    @app.post(f"{API_PREFIX}/gallery/trash/delete", dependencies=[Depends(require_session)])
+    def delete_gallery_trash(payload: GalleryPathsRequest) -> dict[str, object]:
+        service = app.state.gallery_service
+        if service is None:
+            raise ApiError(503, "gallery_not_configured", "画廊尚未连接 V2 图片目录。")
+        return service.delete_from_trash(payload.paths)
+
+    @app.post(f"{API_PREFIX}/gallery/assets/reveal", dependencies=[Depends(require_session)])
+    def reveal_gallery_asset(payload: GalleryPathsRequest) -> dict[str, object]:
+        service = app.state.gallery_service
+        if service is None:
+            raise ApiError(503, "gallery_not_configured", "画廊尚未连接 V2 图片目录。")
+        if not service.reveal(payload.paths[0]):
+            raise ApiError(404, "gallery_asset_not_found", "无法在文件夹中显示图片。")
+        return {"ok": True}
+
     @app.get(f"{API_PREFIX}/gallery/process", dependencies=[Depends(require_session)])
     def list_gallery_process_jobs() -> dict[str, object]:
         service = app.state.gallery_service

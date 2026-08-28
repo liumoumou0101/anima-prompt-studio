@@ -1032,6 +1032,20 @@ def test_gallery_api_lists_and_streams_only_files_inside_output_root(
     )
     assert restored.status_code == 200
     assert restored.json()["restored"] == [asset["path"]]
+    moved_again = client.post(
+        "/api/v3/gallery/assets/trash",
+        json={"paths": [asset["path"]]},
+        headers=write_headers,
+    )
+    assert moved_again.status_code == 200
+    deleted = client.post(
+        "/api/v3/gallery/trash/delete",
+        json={"paths": moved_again.json()["trash_paths"]},
+        headers=write_headers,
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] == moved_again.json()["trash_paths"]
+    assert not image.exists()
     process_status = client.get("/api/v3/gallery/process", headers={"X-Anima-Session": token})
     assert process_status.status_code == 200
     assert process_status.json()["processing"]["available"] is False
