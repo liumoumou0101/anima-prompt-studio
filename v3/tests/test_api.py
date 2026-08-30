@@ -18,7 +18,12 @@ from anima_prompt_studio_v3.adapters.v2 import (
     build_v2_local_translation_adapter,
 )
 from anima_prompt_studio_v3.api import LocalApiServer, SessionManager, create_api_runtime
-from anima_prompt_studio_v3.api.app import _LocalIndexMatch, _confirmed_source_matches
+from anima_prompt_studio_v3.api.app import (
+    _LocalExclusionEvidence,
+    _LocalIndexMatch,
+    _confirmed_source_matches,
+    _local_exclusion_concept_matches,
+)
 from anima_prompt_studio_v3.data import (
     DataPackSnapshot,
     ReferenceBuildInputs,
@@ -123,6 +128,47 @@ def test_tag_search_detail_related_and_artist_endpoints_are_read_only(reference_
     assert search.json()["items"][0]["name"] == "maid"
     assert search.json()["items"][0]["display_name"] == "maid"
 
+    browse = client.get("/api/v3/tags/browse", headers=auth)
+    assert browse.status_code == 200
+    assert browse.json()["featured"][0]["name"] == "touhou"
+    assert browse.json()["groups"][0]["name"] == "attire"
+    assert [item["name"] for item in browse.json()["groups"][0]["items"]] == ["maid", "frilled_apron"]
+    assert browse.json()["other_groups"] == [{
+        "id": "tag_group:colors",
+        "name": "colors",
+        "cn_name": "颜色",
+        "tag_count": 1,
+    }]
+    assert browse.json()["ungrouped"]["total"] == 4
+    assert browse.json()["ungrouped"]["safe_count"] == 3
+    assert browse.json()["ungrouped"]["nsfw_count"] == 1
+    assert "underwear" not in {item["name"] for item in browse.json()["ungrouped"]["items"]}
+
+    ungrouped = client.get(
+        "/api/v3/tags/ungrouped",
+        params={"category": "general", "safety": "safe", "limit": 10},
+        headers=auth,
+    )
+    assert ungrouped.status_code == 200
+    assert [item["name"] for item in ungrouped.json()["items"]] == ["twintails"]
+    assert ungrouped.json()["summary"]["total"] == 4
+
+    nsfw_only = client.get(
+        "/api/v3/tags/ungrouped",
+        params={"category": "general", "safety": "nsfw", "heat": "longtail"},
+        headers=auth,
+    )
+    assert nsfw_only.status_code == 200
+    assert [item["name"] for item in nsfw_only.json()["items"]] == ["underwear"]
+    assert nsfw_only.json()["items"][0]["nsfw"] is True
+
+    group = client.get("/api/v3/tag-groups/attire", params={"q": "apron", "limit": 1}, headers=auth)
+    assert group.status_code == 200
+    assert group.json()["group"]["title"] == "服装"
+    assert group.json()["total"] == 1
+    assert group.json()["items"][0]["name"] == "frilled_apron"
+    assert group.json()["has_more"] is False
+
     detail = client.get("/api/v3/tags/maid_uniform", headers=auth)
     assert detail.status_code == 200
     assert detail.json()["name"] == "maid"
@@ -144,6 +190,32 @@ def test_tag_search_detail_related_and_artist_endpoints_are_read_only(reference_
     )
     assert artists.status_code == 200
     assert artists.json()["items"][0]["name"] == "sample_artist_a"
+
+    artist_search = client.get(
+        "/api/v3/artists/search",
+        params={"q": "@sample artist a"},
+        headers=auth,
+    )
+    assert artist_search.status_code == 200
+    assert artist_search.json()["summary"] == {
+        "artist_count": 2,
+        "post_count": 1500,
+        "association_count": 3,
+    }
+    assert [item["name"] for item in artist_search.json()["items"]] == ["sample_artist_a"]
+    assert [item["name"] for item in artist_search.json()["items"][0]["preview_tags"]] == ["maid", "twintails"]
+
+    artist_detail = client.get("/api/v3/artists/sample_artist_a", headers=auth)
+    assert artist_detail.status_code == 200
+    assert artist_detail.json()["render_name"] == "@sample artist a"
+    assert [item["name"] for item in artist_detail.json()["contexts"]] == ["maid", "twintails"]
+    assert artist_detail.json()["contexts"][0]["dimensions"] == ["appearance"]
+    assert artist_detail.json()["contexts"][0]["coverage"] == pytest.approx(0.5714)
+    assert artist_detail.json()["analysis_note"].endswith("不是 ANIMA 生成质量评分。")
+
+    missing_artist = client.get("/api/v3/artists/missing_artist", headers=auth)
+    assert missing_artist.status_code == 404
+    assert missing_artist.json()["error"]["code"] == "artist_not_found"
     assert sha256_file(reference_db) == original_hash
 
 
@@ -463,6 +535,165 @@ def test_local_natural_candidate_endpoint_uses_only_local_translation(
         "maid",
         "twintails",
     }
+    assert next(
+        item for item in payload["scene_draft"]["confirmed"] if item["canonical_tag"] == "maid"
+    )["fact_type"] == "clothing"
+
+
+def test_local_natural_candidate_separates_inline_and_explicit_exclusions(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.post(
+        "/api/v3/local-natural/candidates",
+        json={
+            "source_text": "女仆，不要金发",
+            "excluded_text": "内衣",
+            "model_profile": "anima_aesthetic_v1",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    literal = payload["candidates"][0]
+    assert literal["positive_prompt"] == "maid"
+    assert "blonde hair" in literal["negative_prompt"]
+    assert "underwear" in literal["negative_prompt"]
+    assert "blonde hair" not in literal["positive_prompt"]
+    assert "underwear" not in literal["positive_prompt"]
+    assert {item["canonical_tag"] for item in payload["scene_draft"]["exclusions"]} == {
+        "blonde_hair",
+        "underwear",
+    }
+    excluded_elements = [item for item in payload["intent"]["graph"]["elements"] if item["state"] == "excluded"]
+    assert {item["canonical_tag"] for item in excluded_elements} == {"blonde_hair", "underwear"}
+    assert "不要金发" not in payload["local_translation"]["translated_text"]
+
+
+def test_local_natural_candidate_does_not_claim_partial_tag_coverage_is_complete(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.post(
+        "/api/v3/local-natural/candidates",
+        json={"source_text": "女仆在未知场景，双马尾", "model_profile": "anima_aesthetic_v1"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {item["canonical_tag"] for item in payload["scene_draft"]["confirmed"]} == {"maid", "twintails"}
+    assert payload["scene_draft"]["unresolved"]
+    assert "只有部分原文" in payload["scene_draft"]["unresolved"][0]["reason"]
+    assert "e_local_unresolved_scene" in payload["candidates"][0]["unresolved_element_ids"]
+
+
+def test_local_natural_candidate_requires_user_confirmation_for_fact_ownership(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    auth = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+    request = {
+        "source_text": "博丽灵梦穿女仆装",
+        "translated_text": "Hakurei Reimu wears a maid outfit",
+        "model_profile": "anima_aesthetic_v1",
+        "selected_tags": [],
+    }
+
+    first = client.post("/api/v3/local-natural/candidates", json=request, headers=auth)
+    assert first.status_code == 200
+    first_payload = first.json()
+    entities = first_payload["scene_draft"]["entities"]
+    assert [(item["label"], item["canonical_tag"]) for item in entities] == [("博丽灵梦", "hakurei_reimu")]
+    maid = next(item for item in first_payload["scene_draft"]["confirmed"] if item["canonical_tag"] == "maid")
+    assert maid["owner_entity_id"] is None
+    assert maid["suggested_owner_entity_id"] == entities[0]["id"]
+    assert first_payload["scene_draft"]["relations"] == []
+    first_maid_element = next(item for item in first_payload["intent"]["graph"]["elements"] if item["id"] == maid["id"])
+    assert first_maid_element["entity_id"] is None
+
+    second = client.post(
+        "/api/v3/local-natural/candidates",
+        json={**request, "fact_owners": {maid["id"]: entities[0]["id"]}},
+        headers=auth,
+    )
+    assert second.status_code == 200
+    second_payload = second.json()
+    confirmed_maid = next(item for item in second_payload["scene_draft"]["confirmed"] if item["canonical_tag"] == "maid")
+    assert confirmed_maid["owner_entity_id"] == entities[0]["id"]
+    assert confirmed_maid["suggested_owner_entity_id"] is None
+    maid_element = next(item for item in second_payload["intent"]["graph"]["elements"] if item["id"] == maid["id"])
+    assert maid_element["entity_id"] == entities[0]["id"]
+    assert second_payload["intent"]["graph"]["edges"] == []
+    assert second_payload["scene_draft"]["relations"] == [{
+        "id": "c_local_relation_1",
+        "source_entity_id": entities[0]["id"],
+        "target_element_id": maid["id"],
+        "relation": "wearing",
+        "state": "suggested",
+        "phrase": "hakurei reimu wearing maid",
+        "reason": "已确认服装归属；穿着关系仍需单独确认",
+    }]
+    assert second_payload["candidates"][0]["positive_prompt"] == first_payload["candidates"][0]["positive_prompt"]
+
+    third = client.post(
+        "/api/v3/local-natural/candidates",
+        json={
+            **request,
+            "fact_owners": {maid["id"]: entities[0]["id"]},
+            "confirmed_relations": [{
+                "source_entity_id": entities[0]["id"],
+                "target_element_id": maid["id"],
+                "relation": "wearing",
+            }],
+        },
+        headers=auth,
+    )
+    assert third.status_code == 200
+    third_payload = third.json()
+    assert third_payload["scene_draft"]["relations"][0]["state"] == "confirmed"
+    assert third_payload["intent"]["graph"]["edges"] == [{
+        "id": "c_local_relation_1",
+        "source_element_id": entities[0]["source_element_id"],
+        "target_element_id": maid["id"],
+        "kind": "relation",
+        "relation": "wearing",
+        "custom_relation": None,
+        "reason": "用户在 Scene Draft 中确认穿着关系",
+    }]
+    literal = next(item for item in third_payload["candidates"] if item["lane"] == "literal")
+    hybrid = next(item for item in third_payload["candidates"] if item["lane"] == "hybrid")
+    assert literal["positive_prompt"] == first_payload["candidates"][0]["positive_prompt"]
+    assert "hakurei reimu wearing maid" in hybrid["positive_prompt"]
 
 
 def test_local_source_resolution_confirms_only_the_unique_primary_tag_for_ambiguous_cn_term() -> None:
@@ -490,6 +721,26 @@ def test_local_source_resolution_prefers_longer_primary_phrase_over_nested_term(
     confirmed, _ambiguous = _confirmed_source_matches(matches)
 
     assert [item.canonical_tag for item in confirmed] == ["fallen_angel"]
+
+
+def test_broad_text_exclusion_expands_transparently_instead_of_picking_one_ambiguous_tag() -> None:
+    class Store:
+        @staticmethod
+        def get_tag(name: str) -> dict[str, object] | None:
+            if name in {"english_text", "signature", "watermark"}:
+                return {"post_count": 100}
+            return None
+
+    matches = _local_exclusion_concept_matches(
+        Store(),  # type: ignore[arg-type]
+        (_LocalExclusionEvidence("文字和水印", 10, 15),),
+        "",
+    )
+
+    assert {item.canonical_tag for item in matches} == {"english_text", "signature", "watermark"}
+    assert {item.match_kind for item in matches} == {"exclusion_concept"}
+    assert {item.text for item in matches} == {"文字"}
+    assert {(item.start, item.end) for item in matches} == {(10, 12)}
 
 
 def test_structured_workbench_uses_the_same_local_mapping_and_preserves_exclusions(

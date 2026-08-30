@@ -61,6 +61,7 @@ from ..domain import (
     IntentElementType,
     IntentState,
     ProvenanceKind,
+    RelationKind,
     SourceSpan,
 )
 from .models import (
@@ -94,6 +95,38 @@ from .workspace_store import WorkspaceNotFoundError, WorkspaceRevisionConflictEr
 API_PREFIX = "/api/v3"
 MAX_JSON_BODY = 1024 * 1024
 TAG_CATEGORIES = {"general", "artist", "copyright", "character", "meta"}
+TAG_BROWSE_CATEGORIES = {"general", "copyright", "character", "meta"}
+TAG_SENSITIVE_GROUPS = {
+    "ass",
+    "bdsm_and_torture",
+    "breasts_tags",
+    "nudity",
+    "pussy",
+    "sex_acts",
+    "sex_objects",
+    "sexual_attire",
+    "sexual_positions",
+}
+TAG_BROWSE_GROUPS = [
+    ("hair_color", "发色", "从基础发色开始组合人物外观"),
+    ("hair_styles", "发型", "长度、扎法与轮廓"),
+    ("eyes_tags", "眼睛", "颜色、形态与视线"),
+    ("face_tags", "表情与面部", "情绪、妆容和面部细节"),
+    ("attire", "服装", "常见服装与角色着装"),
+    ("fashion_style", "穿搭风格", "整体造型与时代风格"),
+    ("accessories", "配饰", "首饰、随身装饰与点缀"),
+    ("posture", "姿势", "站、坐、卧与身体状态"),
+    ("gestures", "动作手势", "手部动作与人物互动"),
+    ("holding_tags", "手持物", "人物与道具的关系"),
+    ("image_composition", "构图", "景别、视角与画面组织"),
+    ("lighting", "光线", "时间、方向与照明氛围"),
+    ("backgrounds", "背景", "环境复杂度与背景处理"),
+    ("locations", "地点", "室内、户外与幻想场所"),
+    ("flowers", "花卉植物", "自然物与装饰性植物"),
+    ("food_tags", "食物", "餐饮、甜点与料理"),
+    ("jobs", "职业身份", "制服、职业与人物设定"),
+    ("legendary_creatures", "幻想生物", "传说生物与非人角色"),
+]
 LOGGER = logging.getLogger(__name__)
 
 
@@ -367,6 +400,150 @@ def create_api_runtime(
             items = [_tag_search_item(row) for row in rows[:limit]]
             return {"items": items, "next_cursor": None, "data_pack_id": store.pack_id}
 
+    @app.get(f"{API_PREFIX}/tags/browse", dependencies=[Depends(require_session)])
+    def browse_tags(
+        category: list[str] = Query(default=[]),
+        include_nsfw: bool = False,
+        featured_limit: int = Query(default=24, ge=6, le=60),
+        tags_per_group: int = Query(default=12, ge=4, le=30),
+        database: Path = Depends(require_reference_db),
+    ) -> dict[str, object]:
+        invalid_categories = set(category) - TAG_BROWSE_CATEGORIES
+        if invalid_categories:
+            raise ApiError(422, "invalid_request", f"未知标签分类：{sorted(invalid_categories)}")
+        categories = set(category) or TAG_BROWSE_CATEGORIES
+        group_meta = {name: (title, description) for name, title, description in TAG_BROWSE_GROUPS}
+        with ReferenceDataStore(database) as store:
+            featured = store.popular_tags(
+                categories=categories,
+                include_nsfw=include_nsfw,
+                limit=featured_limit,
+            )
+            groups = store.browse_groups(
+                [name for name, _title, _description in TAG_BROWSE_GROUPS],
+                categories=categories,
+                include_nsfw=include_nsfw,
+                limit_per_group=tags_per_group,
+            )
+            other_groups = store.list_groups(
+                excluded_names=[
+                    *[name for name, _title, _description in TAG_BROWSE_GROUPS],
+                    *([] if include_nsfw else TAG_SENSITIVE_GROUPS),
+                ],
+                categories=categories,
+                include_nsfw=include_nsfw,
+            )
+            ungrouped = store.ungrouped_tags(
+                categories=categories,
+                safety="all" if include_nsfw else "safe",
+                limit=12,
+            )
+            return {
+                "featured": [_tag_search_item(row, match_kind="popular") for row in featured],
+                "groups": [
+                    {
+                        **{key: value for key, value in group.items() if key != "items"},
+                        "title": group_meta[group["name"]][0],
+                        "description": group_meta[group["name"]][1],
+                        "items": [_tag_search_item(row, match_kind="group") for row in group["items"]],
+                    }
+                    for group in groups
+                ],
+                "other_groups": other_groups,
+                "ungrouped": {
+                    **store.ungrouped_summary(categories=categories),
+                    "items": [_tag_search_item(row, match_kind="ungrouped") for row in ungrouped["items"]],
+                },
+                "data_pack_id": store.pack_id,
+            }
+
+    @app.get(f"{API_PREFIX}/tags/ungrouped", dependencies=[Depends(require_session)])
+    def ungrouped_tags(
+        q: str = Query(default="", max_length=200),
+        category: list[str] = Query(default=[]),
+        safety: str = Query(default="safe", pattern=r"^(safe|nsfw|all)$"),
+        heat: str = Query(default="all", pattern=r"^(all|100k|10k|1k|longtail)$"),
+        sort: str = Query(default="popularity", pattern=r"^(popularity|name)$"),
+        limit: int = Query(default=80, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        database: Path = Depends(require_reference_db),
+    ) -> dict[str, object]:
+        invalid_categories = set(category) - TAG_BROWSE_CATEGORIES
+        if invalid_categories:
+            raise ApiError(422, "invalid_request", f"未知标签分类：{sorted(invalid_categories)}")
+        categories = set(category) or TAG_BROWSE_CATEGORIES
+        with ReferenceDataStore(database) as store:
+            result = store.ungrouped_tags(
+                query=q,
+                categories=categories,
+                safety=safety,
+                heat=heat,
+                sort=sort,
+                limit=limit,
+                offset=offset,
+            )
+            items = [_tag_search_item(row, match_kind="ungrouped") for row in result["items"]]
+            return {
+                "summary": store.ungrouped_summary(),
+                "items": items,
+                "total": result["total"],
+                "offset": offset,
+                "limit": limit,
+                "has_more": offset + len(items) < result["total"],
+                "data_pack_id": store.pack_id,
+            }
+
+    @app.get(f"{API_PREFIX}/tag-groups/{{group_name}}", dependencies=[Depends(require_session)])
+    def tag_group(
+        group_name: str,
+        q: str = Query(default="", max_length=200),
+        category: list[str] = Query(default=[]),
+        include_nsfw: bool = False,
+        has_cn_name: bool = False,
+        sort: str = Query(default="popularity", pattern=r"^(popularity|name)$"),
+        limit: int = Query(default=80, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        database: Path = Depends(require_reference_db),
+    ) -> dict[str, object]:
+        invalid_categories = set(category) - TAG_BROWSE_CATEGORIES
+        if invalid_categories:
+            raise ApiError(422, "invalid_request", f"未知标签分类：{sorted(invalid_categories)}")
+        categories = set(category) or TAG_BROWSE_CATEGORIES
+        group_meta = {name: (title, description) for name, title, description in TAG_BROWSE_GROUPS}
+        with ReferenceDataStore(database) as store:
+            result = store.group_tags(
+                group_name,
+                query=q,
+                categories=categories,
+                include_nsfw=include_nsfw,
+                has_cn_name=has_cn_name,
+                sort=sort,
+                limit=limit,
+                offset=offset,
+            )
+            if result is None:
+                raise ApiError(404, "tag_group_not_found", "标签分组不存在。", details={"name": group_name})
+            title, description = group_meta.get(
+                result["name"],
+                (result["cn_name"] or str(result["name"]).replace("_", " "), "浏览这个分组中的全部本地标签"),
+            )
+            items = [_tag_search_item(row, match_kind="group") for row in result["items"]]
+            return {
+                "group": {
+                    "id": result["id"],
+                    "name": result["name"],
+                    "cn_name": result["cn_name"],
+                    "title": title,
+                    "description": description,
+                },
+                "items": items,
+                "total": result["total"],
+                "offset": offset,
+                "limit": limit,
+                "has_more": offset + len(items) < result["total"],
+                "data_pack_id": store.pack_id,
+            }
+
     @app.get(f"{API_PREFIX}/tags/{{canonical_name:path}}", dependencies=[Depends(require_session)])
     def tag_detail(
         canonical_name: str,
@@ -402,6 +579,27 @@ def create_api_runtime(
             )
             return {"items": items, "data_pack_id": store.pack_id}
 
+    @app.get(f"{API_PREFIX}/artists/search", dependencies=[Depends(require_session)])
+    def search_artists(
+        q: str = Query(default="", max_length=200),
+        sort: str = Query(default="popularity", pattern=r"^(popularity|name)$"),
+        limit: int = Query(default=48, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        database: Path = Depends(require_reference_db),
+    ) -> dict[str, object]:
+        with ReferenceDataStore(database) as store:
+            result = store.search_artists(q, sort=sort, limit=limit, offset=offset)
+            items = result["items"]
+            return {
+                "summary": store.artist_summary(),
+                "items": items,
+                "total": result["total"],
+                "offset": offset,
+                "limit": limit,
+                "has_more": offset + len(items) < result["total"],
+                "data_pack_id": store.pack_id,
+            }
+
     @app.post(f"{API_PREFIX}/artists/recommend", dependencies=[Depends(require_session)])
     def recommend_artists(
         payload: ArtistRecommendRequest,
@@ -410,6 +608,42 @@ def create_api_runtime(
         with ReferenceDataStore(database) as store:
             return {
                 "items": store.recommend_artists(payload.tags, limit=payload.limit),
+                "data_pack_id": store.pack_id,
+            }
+
+    @app.get(f"{API_PREFIX}/artists/{{canonical_name:path}}", dependencies=[Depends(require_session)])
+    def artist_detail(
+        canonical_name: str,
+        database: Path = Depends(require_reference_db),
+    ) -> dict[str, object]:
+        with ReferenceDataStore(database) as store:
+            artist = store.get_artist(canonical_name)
+            contexts = store.artist_contexts(canonical_name)
+            if artist is None or contexts is None:
+                raise ApiError(404, "artist_not_found", "画师标签不存在。", details={"name": canonical_name})
+            dimension_counts: dict[str, int] = {}
+            safe_count = 0
+            nsfw_count = 0
+            unknown_count = 0
+            for item in contexts:
+                for dimension in item["dimensions"]:
+                    dimension_counts[dimension] = dimension_counts.get(dimension, 0) + 1
+                if item["nsfw"] is True:
+                    nsfw_count += 1
+                elif item["nsfw"] is False:
+                    safe_count += 1
+                else:
+                    unknown_count += 1
+            return {
+                **artist,
+                "contexts": contexts,
+                "dimension_counts": dimension_counts,
+                "safety_summary": {
+                    "safe_count": safe_count,
+                    "nsfw_count": nsfw_count,
+                    "unknown_count": unknown_count,
+                },
+                "analysis_note": "关联强度来自历史标签共现，不是 ANIMA 生成质量评分。",
                 "data_pack_id": store.pack_id,
             }
 
@@ -517,12 +751,13 @@ def create_api_runtime(
         translator = app.state.translation_service
         if translator is None:
             raise ApiError(503, "translation_unavailable", "本地翻译服务未安装。")
+        evidence = _split_local_natural_evidence(payload.source_text)
         if payload.translated_text:
             translated_text = payload.translated_text
             translation_engine = "当前工作台译文"
         else:
             try:
-                translated = translator.translate(payload.source_text, direction="zh_en")
+                translated = translator.translate(evidence.positive_text, direction="zh_en")
             except (RuntimeError, ValueError) as exc:
                 raise ApiError(422, "translation_failed", str(exc)) from exc
             translated_text = translated.translated_text
@@ -533,6 +768,10 @@ def create_api_runtime(
                 translated_text,
                 store,
                 selected_tags=payload.selected_tags,
+                fact_owners=payload.fact_owners,
+                confirmed_relations=[item.model_dump() for item in payload.confirmed_relations],
+                explicit_excluded_text=payload.excluded_text,
+                evidence=evidence,
             )
             response = candidate_response(intent, payload.model_profile, database)
         response["local_translation"] = {
@@ -1377,12 +1616,97 @@ class _LocalLookupTerm:
     end: int | None = None
 
 
+@dataclass(frozen=True)
+class _LocalExclusionEvidence:
+    text: str
+    start: int
+    end: int
+
+
+@dataclass(frozen=True)
+class _LocalNaturalEvidence:
+    positive_text: str
+    exclusions: tuple[_LocalExclusionEvidence, ...]
+
+
+_LOCAL_EXCLUSION_MARKER = re.compile(r"(?:不要|不需要|无需|避免|排除|禁止|去掉|移除|不含|不带)")
+_LOCAL_CLAUSE = re.compile(r"[^，,。；;！!？?\n]+")
+_LOCAL_EXCLUSION_CONCEPT_TAGS: dict[str, tuple[str, ...]] = {
+    # “文字”是用户意图，不是 reference.db 中唯一的 canonical tag。
+    # V3 将它透明展开成可审阅的负向标签，而不是伪装成一次精确命中。
+    "文字": ("english_text", "speech_bubble", "signature", "artist_name", "character_name", "copyright_name", "web_address", "watermark"),
+    "文本": ("english_text", "speech_bubble", "signature", "artist_name", "character_name", "copyright_name", "web_address", "watermark"),
+}
+
+_LOCAL_FACT_TYPE_GROUPS: dict[IntentElementType, frozenset[str]] = {
+    IntentElementType.SUBJECT: frozenset({"character_count", "groups", "people", "legendary_creatures"}),
+    IntentElementType.APPEARANCE: frozenset({
+        "body_parts", "breasts_tags", "ears_tags", "eyes_tags", "face_tags", "feet", "hair",
+        "hair_color", "hair_styles", "hands", "makeup", "shoulders", "skin_color", "wings",
+    }),
+    IntentElementType.CLOTHING: frozenset({
+        "accessories", "attire", "embellishment", "eyewear", "fashion_style", "handwear",
+        "headwear", "legwear", "neck_and_neckwear", "patterns", "sleeves",
+    }),
+    IntentElementType.ACTION: frozenset({"dances", "gestures", "holding_tags", "posture", "sports", "verbs_and_gerunds"}),
+    IntentElementType.SCENE: frozenset({
+        "backgrounds", "fire", "flowers", "holidays_and_celebrations", "lighting", "locations",
+        "real_world_locations", "water",
+    }),
+    IntentElementType.COMPOSITION: frozenset({"focus_tags", "image_composition"}),
+    IntentElementType.STYLE: frozenset({"artistic_license", "fine_art_parody", "prints", "theme", "visual_aesthetic"}),
+}
+
+
+def _split_local_natural_evidence(source_text: str) -> _LocalNaturalEvidence:
+    """Split explicit exclusions before translation or tag lookup.
+
+    This is a deliberately small V3 evidence rule, not a resurrection of V2's
+    prompt pipeline. It recognizes only explicit user language and preserves
+    source spans so every exclusion remains reviewable.
+    """
+
+    exclusions: list[_LocalExclusionEvidence] = []
+    removed_ranges: list[tuple[int, int]] = []
+    for clause in _LOCAL_CLAUSE.finditer(source_text):
+        marker = _LOCAL_EXCLUSION_MARKER.search(clause.group(0))
+        if marker is None:
+            continue
+        clause_text = clause.group(0)
+        tail = clause_text[marker.end():]
+        content = tail.strip()
+        if not content:
+            continue
+        content_start = clause.start() + marker.end() + (len(tail) - len(tail.lstrip()))
+        content_end = content_start + len(content)
+        exclusions.append(_LocalExclusionEvidence(content, content_start, content_end))
+        removed_ranges.append((clause.start() + marker.start(), clause.end()))
+
+    if not removed_ranges:
+        return _LocalNaturalEvidence(source_text.strip(), ())
+
+    pieces: list[str] = []
+    cursor = 0
+    for start, end in removed_ranges:
+        pieces.append(source_text[cursor:start])
+        cursor = end
+    pieces.append(source_text[cursor:])
+    positive_text = "".join(pieces)
+    positive_text = re.sub(r"[，,。；;！!？?\s]+$", "", positive_text).strip()
+    positive_text = re.sub(r"^[，,。；;！!？?\s]+", "", positive_text).strip()
+    return _LocalNaturalEvidence(positive_text, tuple(exclusions))
+
+
 def _local_natural_intent(
     source_text: str,
     translated_text: str,
     store: ReferenceDataStore,
     *,
     selected_tags: list[str],
+    fact_owners: dict[str, str] | None = None,
+    confirmed_relations: list[dict[str, str]] | None = None,
+    explicit_excluded_text: str = "",
+    evidence: _LocalNaturalEvidence | None = None,
 ) -> tuple[IntentDocument, dict[str, object]]:
     """Build a reviewable local draft without treating every index hit as required.
 
@@ -1391,20 +1715,63 @@ def _local_natural_intent(
     complete translation remains a prose fallback so an empty tag match can
     never erase a natural-language draft.
     """
+    evidence = evidence or _split_local_natural_evidence(source_text)
     matches = _local_index_matches(store, _local_lookup_terms(source_text, translated_text))
-    source_matches, ambiguous_source_terms = _confirmed_source_matches(matches)
+    source_candidates = [
+        match for match in matches
+        if match.origin == "source" and not _match_in_exclusion_evidence(match, evidence.exclusions)
+    ]
+    excluded_candidates = [
+        match for match in matches
+        if match.origin == "source" and _match_in_exclusion_evidence(match, evidence.exclusions)
+    ]
+    source_matches, ambiguous_source_terms = _confirmed_source_matches(source_candidates)
+    excluded_matches, ambiguous_exclusion_terms = _confirmed_source_matches(excluded_candidates)
+    excluded_matches.extend(_local_exclusion_concept_matches(store, evidence.exclusions, ""))
+    explicit_exclusion_matches: list[_LocalIndexMatch] = []
+    if explicit_excluded_text.strip():
+        explicit_raw = _local_index_matches(store, _local_lookup_terms(explicit_excluded_text, ""))
+        explicit_confirmed, explicit_ambiguous = _confirmed_source_matches(explicit_raw)
+        explicit_exclusion_matches = [
+            _LocalIndexMatch(
+                text=item.text,
+                origin="explicit_exclusion",
+                canonical_tag=item.canonical_tag,
+                match_kind=item.match_kind,
+                post_count=item.post_count,
+            )
+            for item in explicit_confirmed
+        ]
+        explicit_exclusion_matches.extend(_local_exclusion_concept_matches(store, (), explicit_excluded_text))
+        ambiguous_exclusion_terms.extend(explicit_ambiguous)
+
+    excluded_matches = _dedupe_canonical_matches([*excluded_matches, *explicit_exclusion_matches])
+    mapped_exclusion_texts = {match.text for match in excluded_matches}
+    ambiguous_exclusion_terms = [item for item in ambiguous_exclusion_terms if item not in mapped_exclusion_texts]
+    excluded_tags = {match.canonical_tag for match in excluded_matches}
     selected = list(dict.fromkeys(selected_tags))
+    requested_fact_owners = fact_owners or {}
+    requested_relation_keys = {
+        (str(item["source_entity_id"]), str(item["target_element_id"]), str(item["relation"]))
+        for item in (confirmed_relations or [])
+    }
     selected_set = set(selected)
     elements: list[IntentElement] = []
     confirmed: list[dict[str, object]] = []
+    exclusions: list[dict[str, object]] = []
+    entities: list[dict[str, object]] = []
 
     for index, match in enumerate(source_matches, 1):
         element_id = f"e_local_confirmed_{index}"
+        fact_type = _local_fact_type(store, match.canonical_tag)
+        detail = store.get_tag(match.canonical_tag)
+        entity_id = _local_entity_id(element_id) if detail is not None and _local_entity_anchor(detail) else None
         elements.append(IntentElement(
             id=element_id,
             original_text=match.text,
             canonical_tag=match.canonical_tag,
-            type=IntentElementType.OTHER,
+            entity_id=entity_id,
+            type=fact_type,
             state=IntentState.REQUIRED,
             confidence=1.0,
             source_span=SourceSpan(start=match.start, end=match.end) if match.start is not None and match.end is not None else None,
@@ -1418,20 +1785,26 @@ def _local_natural_intent(
             "中文原文与本地标签索引精确匹配",
             match.start,
             match.end,
+            fact_type,
         ))
+        if entity_id is not None:
+            entities.append(_scene_entity_item(entity_id, element_id, match.text, match.canonical_tag, match.start, match.end))
 
     confirmed_tags = {match.canonical_tag for match in source_matches}
     for index, tag in enumerate(selected, 1):
         detail = store.get_tag(tag)
-        if detail is None or tag in confirmed_tags:
+        if detail is None or tag in confirmed_tags or tag in excluded_tags:
             continue
         element_id = f"e_local_selected_{index}"
         rendered = str(detail["render_name"])
+        fact_type = _local_fact_type_from_detail(detail)
+        entity_id = _local_entity_id(element_id) if _local_entity_anchor(detail) else None
         elements.append(IntentElement(
             id=element_id,
             original_text=rendered,
             canonical_tag=tag,
-            type=IntentElementType.OTHER,
+            entity_id=entity_id,
+            type=fact_type,
             state=IntentState.USER_SELECTED,
             confidence=1.0,
             provenance=ElementProvenance(kind=ProvenanceKind.MANUAL, detail="local_draft_user_selected"),
@@ -1442,6 +1815,64 @@ def _local_natural_intent(
             tag,
             "user_selected",
             "用户从建议池确认加入",
+            fact_type=fact_type,
+        ))
+        if entity_id is not None:
+            entities.append(_scene_entity_item(entity_id, element_id, rendered, tag))
+
+    for index, match in enumerate(excluded_matches, 1):
+        element_id = f"e_local_excluded_{index}"
+        fact_type = _local_fact_type(store, match.canonical_tag)
+        elements.append(IntentElement(
+            id=element_id,
+            original_text=match.text,
+            canonical_tag=match.canonical_tag,
+            type=fact_type,
+            state=IntentState.EXCLUDED,
+            confidence=1.0,
+            source_span=SourceSpan(start=match.start, end=match.end) if match.start is not None and match.end is not None else None,
+            provenance=ElementProvenance(kind=ProvenanceKind.EXACT, detail="local_source_explicit_exclusion"),
+        ))
+        exclusions.append(_scene_draft_item(
+            element_id,
+            match.text,
+            match.canonical_tag,
+            "source_excluded",
+            (
+                "广义排除概念展开；只进入负向提示词，可在生成前复核"
+                if match.match_kind == "exclusion_concept"
+                else "用户明确排除；不会进入正向提示词"
+            ),
+            match.start,
+            match.end,
+            fact_type,
+        ))
+
+    for index, item in enumerate(evidence.exclusions, 1):
+        if any(
+            match.start is not None and match.end is not None
+            and item.start <= match.start and match.end <= item.end
+            for match in excluded_matches
+        ):
+            continue
+        element_id = f"e_local_exclusion_unresolved_{index}"
+        elements.append(IntentElement(
+            id=element_id,
+            original_text=item.text,
+            type=IntentElementType.OTHER,
+            state=IntentState.EXCLUDED,
+            confidence=1.0,
+            source_span=SourceSpan(start=item.start, end=item.end),
+            provenance=ElementProvenance(kind=ProvenanceKind.EXACT, detail="local_source_unresolved_exclusion"),
+        ))
+        exclusions.append(_scene_draft_item(
+            element_id,
+            item.text,
+            None,
+            "source_excluded",
+            "已识别为排除内容，但尚未找到可安全使用的本地标签",
+            item.start,
+            item.end,
         ))
 
     translation_matches = [
@@ -1456,21 +1887,98 @@ def _local_natural_intent(
             match.canonical_tag,
             "translation_exact",
             "英文译文直接命中本地标签；需要确认后才会加入候选",
+            fact_type=_local_fact_type(store, match.canonical_tag),
         )
         for index, match in enumerate(translation_matches[:12], 1)
     ]
 
+    valid_entity_ids = {str(item["id"]) for item in entities}
+    entity_source_ids = {str(item["source_element_id"]) for item in entities}
+    assignable_types = {
+        IntentElementType.APPEARANCE.value,
+        IntentElementType.CLOTHING.value,
+        IntentElementType.ACTION.value,
+        IntentElementType.RELATION.value,
+        IntentElementType.OBJECT.value,
+    }
+    element_indexes = {element.id: index for index, element in enumerate(elements)}
+    stale_owner_assignments: list[str] = []
+    for item in confirmed:
+        item_id = str(item["id"])
+        if item_id in entity_source_ids or str(item["fact_type"]) not in assignable_types:
+            continue
+        requested_owner = requested_fact_owners.get(item_id)
+        if requested_owner:
+            if requested_owner not in valid_entity_ids:
+                stale_owner_assignments.append(item_id)
+                continue
+            item["owner_entity_id"] = requested_owner
+            element_index = element_indexes.get(item_id)
+            if element_index is not None:
+                elements[element_index] = elements[element_index].model_copy(update={"entity_id": requested_owner})
+        elif len(entities) == 1:
+            item["suggested_owner_entity_id"] = str(entities[0]["id"])
+
+    entity_by_id = {str(item["id"]): item for item in entities}
+    relations: list[dict[str, object]] = []
+    relation_edges: list[ConstraintEdge] = []
+    available_relation_keys: set[tuple[str, str, str]] = set()
+    for item in confirmed:
+        if str(item["fact_type"]) != IntentElementType.CLOTHING.value or not item.get("owner_entity_id"):
+            continue
+        source_entity_id = str(item["owner_entity_id"])
+        source_entity = entity_by_id.get(source_entity_id)
+        if source_entity is None:
+            continue
+        target_element_id = str(item["id"])
+        relation_key = (source_entity_id, target_element_id, RelationKind.WEARING.value)
+        available_relation_keys.add(relation_key)
+        state = "confirmed" if relation_key in requested_relation_keys else "suggested"
+        relation_id = f"c_local_relation_{len(relations) + 1}"
+        phrase = (
+            f"{str(source_entity['canonical_tag']).replace('_', ' ')} wearing "
+            f"{str(item['canonical_tag']).replace('_', ' ')}"
+        )
+        relations.append({
+            "id": relation_id,
+            "source_entity_id": source_entity_id,
+            "target_element_id": target_element_id,
+            "relation": RelationKind.WEARING.value,
+            "state": state,
+            "phrase": phrase,
+            "reason": (
+                "用户已确认实体与服装归属，并进一步确认穿着关系"
+                if state == "confirmed"
+                else "已确认服装归属；穿着关系仍需单独确认"
+            ),
+        })
+        if state == "confirmed":
+            relation_edges.append(ConstraintEdge(
+                id=relation_id,
+                source_element_id=str(source_entity["source_element_id"]),
+                target_element_id=target_element_id,
+                kind=ConstraintKind.RELATION,
+                relation=RelationKind.WEARING,
+                reason="用户在 Scene Draft 中确认穿着关系",
+            ))
+    stale_relation_assignments = requested_relation_keys - available_relation_keys
+
     unresolved: list[dict[str, object]] = []
-    if not source_matches:
+    has_uncovered_source = _has_uncovered_source_evidence(evidence.positive_text, source_matches)
+    if has_uncovered_source:
         unresolved.append(_scene_draft_item(
             "u_local_scene",
-            source_text.strip(),
+            evidence.positive_text,
             None,
             "unresolved",
-            "未找到可直接确认的中文标签；完整译文会保留为可编辑 prose baseline。",
+            (
+                "未找到可直接确认的中文标签；完整译文会保留为可编辑 prose baseline。"
+                if not source_matches
+                else "只有部分原文获得确定标签；其余人物、动作、关系、场景或风格继续保留在可编辑画面计划中。"
+            ),
         ))
 
-    if not elements:
+    if not source_matches and evidence.positive_text:
         elements.append(IntentElement(
             id="e_local_scene",
             original_text="local scene description",
@@ -1480,18 +1988,32 @@ def _local_natural_intent(
             provenance=ElementProvenance(kind=ProvenanceKind.TRANSLATION, detail="local_prose_baseline"),
             notes=["local_prose_baseline"],
         ))
+    elif has_uncovered_source:
+        elements.append(IntentElement(
+            id="e_local_unresolved_scene",
+            original_text=evidence.positive_text,
+            type=IntentElementType.SCENE,
+            state=IntentState.REQUIRED,
+            confidence=1.0,
+            provenance=ElementProvenance(kind=ProvenanceKind.TRANSLATION, detail="local_partial_prose_evidence"),
+            notes=["local_partial_prose_evidence"],
+        ))
 
     intent = IntentDocument(
         source_text=source_text.strip(),
         source_language="zh",
         translated_text=translated_text.strip(),
         scene_plan_en=translated_text.strip() or None,
-        graph=ConstraintGraph(elements=elements),
+        scene_negative_en=[match.canonical_tag.replace("_", " ") for match in excluded_matches],
+        graph=ConstraintGraph(elements=elements, edges=relation_edges),
     )
     scene_draft = {
         "source_text": source_text.strip(),
         "translated_text": translated_text.strip(),
+        "entities": entities,
+        "relations": relations,
         "confirmed": confirmed,
+        "exclusions": exclusions,
         "suggestions": suggestions,
         "unresolved": unresolved,
         "risk_notes": [
@@ -1500,10 +2022,131 @@ def _local_natural_intent(
                 if ambiguous_source_terms
                 else []
             ),
+            *(
+                [f"排除内容 {', '.join(f'“{item}”' for item in ambiguous_exclusion_terms[:3])} 可关联多条标签；请确认负向结果。"]
+                if ambiguous_exclusion_terms
+                else []
+            ),
+            *(
+                ["部分排除内容尚未映射为本地标签；提交前请检查负向提示词。"]
+                if any(item["canonical_tag"] is None for item in exclusions)
+                else []
+            ),
+            *(
+                ["已选择的建议与明确排除冲突；本次按排除优先，未加入正向候选。"]
+                if selected_set & excluded_tags
+                else []
+            ),
+            *(
+                ["部分属性归属引用了已不存在的实体；本次未应用，请重新确认。"]
+                if stale_owner_assignments
+                else []
+            ),
+            *(
+                ["部分已确认关系不再对应当前实体与事实；本次未应用，请重新确认。"]
+                if stale_relation_assignments
+                else []
+            ),
             "当前仅自动确认唯一的主标签或英文 canonical/alias 命中；人物归属、复杂动作、空间关系和构图仍需人工检查。",
         ],
     }
     return intent, scene_draft
+
+
+def _match_in_exclusion_evidence(
+    match: _LocalIndexMatch,
+    exclusions: tuple[_LocalExclusionEvidence, ...],
+) -> bool:
+    if match.start is None or match.end is None:
+        return False
+    return any(item.start <= match.start and match.end <= item.end for item in exclusions)
+
+
+def _local_fact_type(store: ReferenceDataStore, canonical_tag: str) -> IntentElementType:
+    detail = store.get_tag(canonical_tag)
+    return _local_fact_type_from_detail(detail) if detail is not None else IntentElementType.OTHER
+
+
+def _local_fact_type_from_detail(detail: dict[str, object]) -> IntentElementType:
+    category = str(detail.get("category_name") or "")
+    if category == "character":
+        return IntentElementType.CHARACTER
+    if category == "copyright":
+        return IntentElementType.CHARACTER
+    group_names = {
+        str(group.get("name") or "").removeprefix("tag_group:")
+        for group in detail.get("groups", [])
+        if isinstance(group, dict)
+    }
+    matches = [fact_type for fact_type, names in _LOCAL_FACT_TYPE_GROUPS.items() if group_names & names]
+    return matches[0] if len(matches) == 1 else IntentElementType.OTHER
+
+
+def _local_entity_anchor(detail: dict[str, object]) -> bool:
+    if str(detail.get("category_name") or "") == "character":
+        return True
+    group_names = {
+        str(group.get("name") or "").removeprefix("tag_group:")
+        for group in detail.get("groups", [])
+        if isinstance(group, dict)
+    }
+    return bool(group_names & {"people", "legendary_creatures"})
+
+
+def _local_entity_id(element_id: str) -> str:
+    return f"entity_{element_id.removeprefix('e_')}"
+
+
+def _local_exclusion_concept_matches(
+    store: ReferenceDataStore,
+    inline_exclusions: tuple[_LocalExclusionEvidence, ...],
+    explicit_excluded_text: str,
+) -> list[_LocalIndexMatch]:
+    matches: list[_LocalIndexMatch] = []
+    sources: list[tuple[str, int | None]] = [
+        (item.text, item.start) for item in inline_exclusions
+    ]
+    if explicit_excluded_text.strip():
+        sources.append((explicit_excluded_text, None))
+    for text, source_start in sources:
+        for concept, canonical_tags in _LOCAL_EXCLUSION_CONCEPT_TAGS.items():
+            offset = text.find(concept)
+            if offset < 0:
+                continue
+            for canonical_tag in canonical_tags:
+                detail = store.get_tag(canonical_tag)
+                if detail is None:
+                    continue
+                start = source_start + offset if source_start is not None else None
+                matches.append(_LocalIndexMatch(
+                    text=concept,
+                    origin="exclusion_concept",
+                    canonical_tag=canonical_tag,
+                    match_kind="exclusion_concept",
+                    post_count=int(detail["post_count"]),
+                    start=start,
+                    end=start + len(concept) if start is not None else None,
+                ))
+    return matches
+
+
+def _has_uncovered_source_evidence(
+    positive_text: str,
+    confirmed_matches: list[_LocalIndexMatch],
+) -> bool:
+    """Return whether meaningful source evidence remains outside exact matches.
+
+    The check intentionally errs toward showing an unresolved draft.  A partial
+    draft is safer than claiming a sentence is fully understood because two
+    nouns happened to match the tag index.
+    """
+
+    remaining = positive_text
+    for match in sorted(confirmed_matches, key=lambda item: -len(item.text)):
+        remaining = remaining.replace(match.text, "", 1)
+    remaining = re.sub(r"[，,。；;：:！!？?、()（）\[\]{}\s]+", "", remaining)
+    remaining = re.sub(r"^(?:一个|一位|一名|的|和|与|及|在|从|向|穿|着|有)+", "", remaining)
+    return bool(re.search(r"[\u3400-\u9fffA-Za-z0-9]", remaining))
 
 
 @dataclass(frozen=True)
@@ -1670,7 +2313,7 @@ def _dedupe_canonical_matches(matches: list[_LocalIndexMatch]) -> list[_LocalInd
 
 
 def _match_priority(match: _LocalIndexMatch) -> int:
-    return {"canonical": 0, "render": 1, "alias": 2, "cn_name": 3, "cn_term": 4}.get(match.match_kind, 5)
+    return {"canonical": 0, "render": 1, "alias": 2, "cn_name": 3, "cn_term": 4, "exclusion_concept": 5}.get(match.match_kind, 6)
 
 
 def _spans_overlap(left: _LocalIndexMatch, right: _LocalIndexMatch) -> bool:
@@ -1687,13 +2330,35 @@ def _scene_draft_item(
     reason: str,
     source_start: int | None = None,
     source_end: int | None = None,
+    fact_type: IntentElementType = IntentElementType.OTHER,
 ) -> dict[str, object]:
     return {
         "id": item_id,
         "text": text,
         "canonical_tag": canonical_tag,
         "source": source,
+        "fact_type": fact_type.value,
+        "owner_entity_id": None,
+        "suggested_owner_entity_id": None,
         "reason": reason,
+        "source_start": source_start,
+        "source_end": source_end,
+    }
+
+
+def _scene_entity_item(
+    entity_id: str,
+    source_element_id: str,
+    label: str,
+    canonical_tag: str,
+    source_start: int | None = None,
+    source_end: int | None = None,
+) -> dict[str, object]:
+    return {
+        "id": entity_id,
+        "label": label,
+        "canonical_tag": canonical_tag,
+        "source_element_id": source_element_id,
         "source_start": source_start,
         "source_end": source_end,
     }
@@ -1713,7 +2378,7 @@ def _data_pack_summary(path: Path) -> dict[str, object]:
         return {"id": None, "ready": False, "cutoff_mode": None}
 
 
-def _tag_search_item(row: dict[str, object]) -> dict[str, object]:
+def _tag_search_item(row: dict[str, object], *, match_kind: str = "search") -> dict[str, object]:
     return {
         "id": row["id"],
         "name": row["name"],
@@ -1722,7 +2387,7 @@ def _tag_search_item(row: dict[str, object]) -> dict[str, object]:
         "category": row["category_name"],
         "post_count": row["post_count"],
         "nsfw": row["nsfw"],
-        "match": {"kind": "search", "score": None},
+        "match": {"kind": match_kind, "score": None},
     }
 
 

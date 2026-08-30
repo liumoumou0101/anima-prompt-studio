@@ -1,10 +1,10 @@
 # V3 开发状态
 
-更新日期：2026-08-27
+更新日期：2026-08-30
 
 ## 当前阶段
 
-Phase 3 主产品闭环：远程生成、画廊浏览/状态/回收站/再生成/放大和候选快照持久化已完成。自然语言默认主路径已切换为本地翻译、原文/译文证据与可审查 Scene Draft；画师批量对照已可用。下一步是补全 Scene Draft 的事实编辑、风格预设和真实远程批量画师验收。
+Phase 3 主产品闭环已进入功能冻结与收尾：远程生成、画廊、标签/画师浏览、自然语言 Scene Draft、Literal/Hybrid、画师批量对照和候选快照持久化均已可用。当前版本不再扩展超出 ANIMA 纯提示词稳定能力的复杂语义结构，剩余工作集中在缺陷修复、固定 Seed 效果验收、发布整理和风险说明。
 
 ## 已完成
 
@@ -83,6 +83,8 @@ Phase 3 主产品闭环：远程生成、画廊浏览/状态/回收站/再生成
   - 默认 `/local-natural/candidates` 使用 V2 `TranslationService`、原文精确索引和 V3 标签数据；不调用 AI API、V2 UI、`PromptPipeline` 或 `PromptCompiler`。
   - 结构化概念页签同样接受中文概念而不要求用户输入 canonical；无关系图的中文条目会复用同一 Scene Draft 消歧与译文，明确排除项单独进入负向提示词。
   - 响应保留 `scene_draft`：已确认、待确认建议、未命中内容、原文证据与译文彼此分离。用户确认标签时复用当前译文重新编译，不重新翻译或解析。
+  - Scene Draft 已按参考数据支持事实分层、可见实体锚点和人工属性归属；单实体只给归属建议，不会自动确认或改写 Literal。
+  - 首个显式关系切片支持在服装归属确认后单独确认 `wearing`；关系只写入 ConstraintGraph 与 Hybrid，Literal 保持不变，并可随工作台候选快照保存和恢复。
   - 没有安全标签命中时，Literal 使用 `local_prose_baseline` 保留译文，避免 422 或擅自增加 `1girl` 等内容。
   - `/intent/parse` 与 `V2NaturalLanguageIntentAdapter` 保留为未来明确触发的 AI 辅助拆解，不是前端默认主路径。
   - 工作台可在“结构化概念”和“自然语言描述”之间切换，自然语言正文、选中的建议和输入模式随工作台草稿保存。
@@ -130,6 +132,7 @@ Phase 3 主产品闭环：远程生成、画廊浏览/状态/回收站/再生成
   - 工作台新增可迁移的 `candidate_snapshot_json`，保存最后一次通过 validator 的完整 Intent、候选、校验报告和 data pack ID。
   - 编辑、撤销或恢复输入会清除旧候选，避免把与当前草稿不一致的结果保存为快照。
   - 刷新后打开工作台会恢复当时的候选卡片，可直接复制或提交同一不可变候选。
+  - 浏览器恢复快照同时保存工作台 ID 与 revision；刷新后不再把已保存工作台错误显示为“未保存”。
 - 数据包安装、原子更新与回滚：
   - `DataPackManager` 将每个 pack 安装到不可变 `packs/<pack_id>/`，不直接替换 Windows 上可能仍被读取的 SQLite 文件。
   - 安装前后都验证 manifest、文件大小/SHA-256、SQLite integrity、五类记录数、数据库契约、pack ID 和固定健康查询。
@@ -154,8 +157,8 @@ Phase 3 主产品闭环：远程生成、画廊浏览/状态/回收站/再生成
 ## 测试结果
 
 ```text
-V3 Python 全量：82 passed
-V3 Web：21 passed；TypeScript typecheck 与 Vite production build 通过
+V3 Python 全量：88 passed
+V3 Web：30 passed；TypeScript typecheck 与 Vite production build 通过
 V2 全量回归：585 passed
 真实数据静态门槛：4 个 case/profile 组合全部通过
 真实数据 manifest：大小、SHA-256、SQLite integrity 和 5 类记录计数通过
@@ -163,6 +166,8 @@ Web 依赖审计：npm 官方源 high 级别 0 vulnerabilities
 发布包：V2/V3 wheel 构建、内容扫描、干净安装、pip check、CLI 与 HTTP smoke 全部通过
 Windows 冻结包：真实数据 EXE 首启/升级/V2 桥接通过；便携 ZIP 内容与哈希检查通过
 真实远程闭环：RTX 4090 上基础生成、下载、画廊索引、再生成和 1.5× 放大全部通过
+收尾四图效果矩阵：3080 Ti / Aesthetic v1.1 复跑 4/4 completed；关系确认保持可选，默认负向 `artist name` 保留
+精致二次元插画探索：3080 Ti / Aesthetic v1.1 五方向 5/5 completed；人物环境、都市氛围和幻想场景已形成可保留基线
 ```
 
 V2 回归覆盖远程执行、Web 画廊、本地翻译保护和模型参数预设。本阶段对 V2 `PromptJob` 仅做向后兼容的不透明集成元数据扩展，585 项全量回归全部通过。
@@ -244,10 +249,12 @@ Phase 1 真实数据 smoke test 使用“女仆、双马尾、不要金发”得
 - 工作台软删除恢复入口和多标签页可视化合并。
 - 在线标签图片预览、限流和缓存。
 - 用户 ComfyUI 环境的真实生图验收。
+- Illustrious（光辉系）、Pony 等后续模型族的独立 ModelProfile 与工作流兼容。
+- 将区域提示、姿势控制、局部重绘等 ComfyUI 操作编排下沉到产品层；该项属于更后续正式版本。
 
 ## 下一步
 
-1. 数据包正式下载地址确定后，在 Windows CI 实际生成并安装/卸载测试 Setup EXE。
-2. 确定数据包发布地址后增加联网下载、断点续传和发布索引签名策略。
-3. 在用户真实 ComfyUI 环境验收生成、恢复、再生成和放大。
-4. 执行 V2、V3 L/C/A/H 与外部优秀提示词的正式固定参数效果对比。
+1. 按 [RELEASE_FINISH_CHECKLIST.md](RELEASE_FINISH_CHECKLIST.md) 完成当前 ANIMA 版本收尾，不再增加未经过生图证明的复杂语义结构。
+2. 保留四图机器报告与人工视觉复核作为当前 ANIMA 固定 Seed 基线，不为单张结果继续增加关系特判。
+3. 数据包正式下载地址确定后，在 Windows CI 实际生成并安装/卸载测试 Setup EXE。
+4. 在用户真实 ComfyUI 环境复核生成、恢复、再生成和放大。

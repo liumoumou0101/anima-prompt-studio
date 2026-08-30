@@ -6,10 +6,14 @@ import {AppShell} from "./components/AppShell";
 import {ErrorState, LoadingState} from "./components/States";
 import {TagDetailPage} from "./pages/TagDetailPage";
 import {TagSearchPage} from "./pages/TagSearchPage";
+import {TagGroupPage} from "./pages/TagGroupPage";
+import {TagUngroupedPage} from "./pages/TagUngroupedPage";
 import {WorkbenchPage} from "./pages/WorkbenchPage";
 import {GenerationPage} from "./pages/GenerationPage";
 import {GalleryPage} from "./pages/GalleryPage";
 import {SettingsPage} from "./pages/SettingsPage";
+import {ArtistSearchPage} from "./pages/ArtistSearchPage";
+import {ArtistDetailPage} from "./pages/ArtistDetailPage";
 
 export default function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapResponse | null>(null);
@@ -28,7 +32,11 @@ export default function App() {
           <Route index element={<Navigate to="/workbench" replace />} />
           <Route path="workbench" element={<WorkbenchPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} naturalLanguageEnabled={Boolean(bootstrap.features.local_translation)} localTranslationEnabled={Boolean(bootstrap.features.local_translation)} />} />
           <Route path="tags" element={<TagSearchPage />} />
+          <Route path="tags/groups/:groupName" element={<TagGroupPage />} />
+          <Route path="tags/ungrouped" element={<TagUngroupedPage />} />
           <Route path="tags/:name" element={<TagDetailPage />} />
+          <Route path="artists" element={<ArtistSearchPage />} />
+          <Route path="artists/:name" element={<ArtistDetailPage />} />
           <Route path="generate" element={<GenerationPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="gallery" element={<GalleryPage enabled={Boolean(bootstrap.features.gallery)} />} />
           <Route path="settings" element={<SettingsPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />

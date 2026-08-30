@@ -88,12 +88,13 @@ def element(
     *,
     canonical: str | None = None,
     state: IntentState = IntentState.REQUIRED,
+    fact_type: IntentElementType = IntentElementType.CLOTHING,
 ) -> IntentElement:
     return IntentElement(
         id=element_id,
         original_text=text,
         canonical_tag=canonical,
-        type=IntentElementType.CLOTHING,
+        type=fact_type,
         state=state,
         confidence=1.0,
         provenance=ElementProvenance(kind=ProvenanceKind.USER),
@@ -166,6 +167,27 @@ def test_base_literal_candidate_is_deterministic_and_traceable(store: ReferenceD
     assert candidate.unresolved_element_ids == ["e_relation"]
     assert candidate.warnings[0].code == "required_tag_unresolved"
     assert candidate.versions.data_pack == store.pack_id
+
+
+def test_literal_orders_reviewed_fact_layers_without_adding_content(store: ReferenceDataStore) -> None:
+    layered = IntentDocument(
+        source_text="女仆装的博丽灵梦留着双马尾",
+        source_language="zh",
+        graph=ConstraintGraph(elements=[
+            element("e_clothing", "女仆装", canonical="maid", fact_type=IntentElementType.CLOTHING),
+            element("e_character", "博丽灵梦", canonical="hakurei_reimu", fact_type=IntentElementType.CHARACTER),
+            element("e_appearance", "双马尾", canonical="twintails", fact_type=IntentElementType.APPEARANCE),
+        ]),
+    )
+
+    candidate = LiteralCandidateGenerator(store).generate(
+        layered,
+        ModelProfileRegistry.built_in().get("anima_aesthetic_v1"),
+    ).candidates[0]
+
+    assert candidate.positive_prompt == "hakurei reimu, twintails, maid"
+    assert [tag.name for tag in candidate.tags] == ["hakurei_reimu", "twintails", "maid"]
+    assert {tag.name for tag in candidate.tags} == {"hakurei_reimu", "twintails", "maid"}
 
 
 def test_aesthetic_and_turbo_render_model_specific_templates(store: ReferenceDataStore) -> None:

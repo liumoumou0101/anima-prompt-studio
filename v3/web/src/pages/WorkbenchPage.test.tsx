@@ -1,9 +1,10 @@
 import {fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import {MemoryRouter} from "react-router-dom";
 import {beforeEach, expect, it, vi} from "vitest";
+import type {PromptCandidate, WorkbenchResponse} from "../lib/types";
 import {WorkbenchPage} from "./WorkbenchPage";
 
-const candidate = {
+const candidate: PromptCandidate = {
   id: "candidate_literal",
   lane: "literal",
   title: "高保真基准",
@@ -22,8 +23,16 @@ const candidate = {
 };
 
 beforeEach(() => {
+  localStorage.clear();
   sessionStorage.setItem("anima-v3-session", "session-token");
   vi.restoreAllMocks();
+});
+
+it("imports selected supermarket tags into the structured draft", () => {
+  render(<MemoryRouter initialEntries={["/workbench?tag=maid&tag=twintails&tag=maid"]}><WorkbenchPage /></MemoryRouter>);
+
+  expect(screen.getByLabelText("希望画面中出现")).toHaveValue("maid，twintails");
+  expect(screen.getByText("2 个正向概念")).toBeInTheDocument();
 });
 
 it("submits structured required, locked and excluded concepts and renders candidates", async () => {
@@ -41,7 +50,8 @@ it("submits structured required, locked and excluded concepts and renders candid
 
   expect(await screen.findByRole("heading", {name: "高保真基准"})).toBeInTheDocument();
   expect(screen.getByText("score_7, maid, twintails")).toBeInTheDocument();
-  expect(screen.getByText("安全校验通过")).toBeInTheDocument();
+  expect(screen.getByText("结构检查通过")).toBeInTheDocument();
+  expect(screen.getByText(/语义仍需确认/)).toBeInTheDocument();
 
   const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
   expect(body.elements).toEqual([
@@ -80,12 +90,12 @@ it("compiles natural language through local translation without calling the V2 A
   fireEvent.change(screen.getByLabelText("描述你想生成的画面"), {target: {value: intent.source_text}});
   fireEvent.click(screen.getByRole("button", {name: "编译并生成候选"}));
 
-  expect(await screen.findByText("已抽取 2 项画面事实")).toBeInTheDocument();
+  expect(await screen.findByText("已整理 2 项画面证据")).toBeInTheDocument();
   expect(screen.getByRole("heading", {name: "画面计划混合表达"})).toBeInTheDocument();
   expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(["/api/v3/local-natural/candidates"]);
   const candidateRequest = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
   expect(candidateRequest.source_text).toBe(intent.source_text);
-  expect(candidateRequest.model_profile).toBe("anima_base_v1");
+  expect(candidateRequest.model_profile).toBe("anima_aesthetic_v1");
 });
 
 it("keeps local mapping suggestions out of candidates until the user selects one", async () => {
@@ -93,6 +103,7 @@ it("keeps local mapping suggestions out of candidates until the user selects one
     source_text: "一位未知角色站在雨中",
     translated_text: "An unknown character stands in the rain",
     confirmed: [],
+    exclusions: [],
     suggestions: [{id: "s_local_translation_1", text: "rain", canonical_tag: "rain", source: "translation_exact", reason: "译文精确命中", source_start: null, source_end: null}],
     unresolved: [{id: "u_local_scene", text: "一位未知角色站在雨中", canonical_tag: null, source: "unresolved", reason: "保留译文", source_start: null, source_end: null}],
     risk_notes: ["动作和构图仍需人工检查。"],
@@ -129,11 +140,155 @@ it("keeps local mapping suggestions out of candidates until the user selects one
   const recompileRequest = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
   expect(recompileRequest).toEqual({
     source_text: sceneDraft.source_text,
+    excluded_text: "",
     translated_text: sceneDraft.translated_text,
-    model_profile: "anima_base_v1",
+    model_profile: "anima_aesthetic_v1",
     selected_tags: ["rain"],
   });
   expect(await screen.findByText("用户从建议池确认加入")).toBeInTheDocument();
+});
+
+it("keeps exclusions separate and reapplies an edited scene plan without translation", async () => {
+  const sceneDraft = {
+    source_text: "女仆，不要金发",
+    translated_text: "A maid",
+    confirmed: [{id: "e_local_confirmed_1", text: "女仆", canonical_tag: "maid", source: "source_exact", fact_type: "clothing", reason: "中文原文精确匹配", source_start: 0, source_end: 2}],
+    exclusions: [{id: "e_local_excluded_1", text: "金发", canonical_tag: "blonde_hair", source: "source_excluded", fact_type: "appearance", reason: "用户明确排除", source_start: 5, source_end: 7}],
+    suggestions: [],
+    unresolved: [],
+    risk_notes: ["动作和构图仍需人工检查。"],
+  } as const;
+  const makeResponse = (translatedText: string) => ({
+    intent: {
+      source_text: sceneDraft.source_text,
+      source_language: "zh",
+      translated_text: translatedText,
+      scene_plan_en: translatedText,
+      scene_negative_en: ["blonde hair"],
+      graph: {elements: [
+        {id: "e_local_confirmed_1", original_text: "女仆", type: "other", state: "required", confidence: 1, notes: []},
+        {id: "e_local_excluded_1", original_text: "金发", type: "other", state: "excluded", confidence: 1, notes: []},
+      ], edges: []},
+      warnings: [],
+    },
+    candidates: [{...candidate, positive_prompt: `maid. ${translatedText}`, negative_prompt: "blonde hair"}],
+    validation: {valid: true, error_count: 0},
+    data_pack_id: "pack-r1",
+    scene_draft: {...sceneDraft, translated_text: translatedText},
+    tag_suggestions: [],
+    local_translation: {translated_text: translatedText, engine: translatedText === "A maid" ? "内置离线基础翻译" : "当前工作台译文", local_only: true},
+  });
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify(makeResponse("A maid")), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify(makeResponse("A maid descending from the sky")), {status: 200}));
+
+  render(<MemoryRouter><WorkbenchPage naturalLanguageEnabled /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("tab", {name: "自然语言描述"}));
+  fireEvent.change(screen.getByLabelText("描述你想生成的画面"), {target: {value: sceneDraft.source_text}});
+  fireEvent.change(screen.getByLabelText("明确排除（可选）"), {target: {value: "内衣"}});
+  fireEvent.click(screen.getByRole("button", {name: "编译并生成候选"}));
+
+  const review = await screen.findByRole("region", {name: "Scene Draft"});
+  expect(within(review).getByText("已确认画面事实")).toBeInTheDocument();
+  expect(within(review).getByText("服装配饰")).toBeInTheDocument();
+  expect(within(review).getByText("明确排除")).toBeInTheDocument();
+  expect(within(review).getByText("金发")).toBeInTheDocument();
+  expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({excluded_text: "内衣"});
+
+  fireEvent.change(within(review).getByLabelText("可编辑画面计划"), {target: {value: "A maid descending from the sky"}});
+  fireEvent.click(within(review).getByRole("button", {name: "应用译文修改"}));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+    source_text: sceneDraft.source_text,
+    excluded_text: "内衣",
+    translated_text: "A maid descending from the sky",
+    model_profile: "anima_aesthetic_v1",
+    selected_tags: [],
+  });
+  expect(await within(review).findByDisplayValue("A maid descending from the sky")).toBeInTheDocument();
+});
+
+it("keeps ownership and wearing relations separate until the user confirms each step", async () => {
+  const entityId = "entity_local_confirmed_1";
+  const sourceText = "博丽灵梦穿女仆装";
+  const translatedText = "Hakurei Reimu wears a maid outfit";
+  const makeResponse = (stage: "unowned" | "owned" | "related"): WorkbenchResponse & {local_translation: {translated_text: string; engine: string; local_only: true}} => ({
+    intent: {
+      source_text: sourceText,
+      source_language: "zh",
+      translated_text: translatedText,
+      scene_plan_en: translatedText,
+      scene_negative_en: [],
+      graph: {elements: [
+        {id: "e_local_confirmed_1", original_text: "博丽灵梦", type: "character", state: "required", confidence: 1, notes: []},
+        {id: "e_local_confirmed_2", original_text: "女仆装", type: "clothing", state: "required", confidence: 1, notes: []},
+      ], edges: stage === "related" ? [{id: "c_local_relation_1", source_element_id: "e_local_confirmed_1", target_element_id: "e_local_confirmed_2", kind: "relation", relation: "wearing", reason: "用户确认"}] : []},
+      warnings: [],
+    },
+    candidates: [
+      {...candidate, positive_prompt: "hakurei reimu, maid"},
+      ...(stage === "related" ? [{...candidate, id: "candidate_hybrid", lane: "hybrid" as const, title: "画面计划混合表达", positive_prompt: "hakurei reimu, maid. Hakurei Reimu wears a maid outfit; hakurei reimu wearing maid"}] : []),
+    ],
+    validation: {valid: true, error_count: 0},
+    data_pack_id: "pack-r1",
+    scene_draft: {
+      source_text: sourceText,
+      translated_text: translatedText,
+      entities: [{id: entityId, label: "博丽灵梦", canonical_tag: "hakurei_reimu", source_element_id: "e_local_confirmed_1", source_start: 0, source_end: 4}],
+      confirmed: [
+        {id: "e_local_confirmed_1", text: "博丽灵梦", canonical_tag: "hakurei_reimu", source: "source_exact", fact_type: "character", reason: "中文原文精确匹配", source_start: 0, source_end: 4},
+        {id: "e_local_confirmed_2", text: "女仆装", canonical_tag: "maid", source: "source_exact", fact_type: "clothing", owner_entity_id: stage === "unowned" ? null : entityId, suggested_owner_entity_id: stage === "unowned" ? entityId : null, reason: "中文原文精确匹配", source_start: 5, source_end: 8},
+      ],
+      relations: stage === "unowned" ? [] : [{id: "c_local_relation_1", source_entity_id: entityId, target_element_id: "e_local_confirmed_2", relation: "wearing", state: stage === "related" ? "confirmed" : "suggested", phrase: "hakurei reimu wearing maid", reason: stage === "related" ? "用户已确认实体与服装归属，并进一步确认穿着关系" : "已确认服装归属；穿着关系仍需单独确认"}],
+      exclusions: [], suggestions: [], unresolved: [], risk_notes: [],
+    },
+    tag_suggestions: [],
+    local_translation: {translated_text: translatedText, engine: "当前工作台译文", local_only: true},
+  });
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify(makeResponse("unowned")), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify(makeResponse("owned")), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify(makeResponse("related")), {status: 200}));
+
+  render(<MemoryRouter><WorkbenchPage naturalLanguageEnabled /></MemoryRouter>);
+  fireEvent.change(screen.getByLabelText("描述你想生成的画面"), {target: {value: sourceText}});
+  fireEvent.click(screen.getByRole("button", {name: "编译并生成候选"}));
+
+  const review = await screen.findByRole("region", {name: "Scene Draft"});
+  expect(within(review).getByText("实体与属性归属")).toBeInTheDocument();
+  expect(within(review).getByText("建议归属：博丽灵梦")).toBeInTheDocument();
+  const owner = within(review).getByLabelText("女仆装 的归属");
+  expect(owner).toHaveValue("");
+  fireEvent.change(owner, {target: {value: entityId}});
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+    source_text: sourceText,
+    excluded_text: "",
+    translated_text: translatedText,
+    model_profile: "anima_aesthetic_v1",
+    selected_tags: [],
+    fact_owners: {e_local_confirmed_2: entityId},
+  });
+  expect(await within(review).findByLabelText("女仆装 的归属")).toHaveValue(entityId);
+  expect(screen.getAllByText("hakurei reimu, maid").length).toBeGreaterThan(0);
+  expect(within(review).getByText("显式关系")).toBeInTheDocument();
+  expect(within(review).getByText("hakurei reimu wearing maid")).toBeInTheDocument();
+  fireEvent.click(within(review).getByRole("button", {name: "确认关系"}));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({
+    source_text: sourceText,
+    excluded_text: "",
+    translated_text: translatedText,
+    model_profile: "anima_aesthetic_v1",
+    selected_tags: [],
+    fact_owners: {e_local_confirmed_2: entityId},
+    confirmed_relations: [{source_entity_id: entityId, target_element_id: "e_local_confirmed_2", relation: "wearing"}],
+  });
+  expect(await within(review).findByRole("button", {name: "取消确认"})).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByText("hakurei reimu, maid. Hakurei Reimu wears a maid outfit; hakurei reimu wearing maid")).toBeInTheDocument();
 });
 
 it("previews V2 local translation without compiling it into candidates", async () => {
@@ -227,6 +382,10 @@ it("saves and restores a revisioned workspace", async () => {
   expect(await screen.findByText("已保存 revision 1")).toBeInTheDocument();
   const saveBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
   expect(saveBody.draft.positive_text).toBe("女仆，双马尾");
+  await waitFor(() => {
+    const recovered = JSON.parse(String(localStorage.getItem("anima-v3-workbench-recovery")));
+    expect(recovered.workspace).toMatchObject({id: "workspace_1", revision: 1, title: "女仆测试"});
+  });
 
   fireEvent.click(screen.getByRole("button", {name: "打开"}));
   fireEvent.click(await screen.findByRole("button", {name: /女仆测试/}));
@@ -240,6 +399,14 @@ it("persists the last validated candidate snapshot with the workspace", async ()
     candidates: [candidate],
     validation: {valid: true, candidate_reports: [{candidate_id: "candidate_literal", valid: true, issues: []}], issues: []},
     data_pack_id: "pack-r1",
+    scene_draft: {
+      source_text: "女仆",
+      translated_text: "A maid",
+      entities: [],
+      relations: [{id: "c_relation_1", source_entity_id: "entity_subject", target_element_id: "e_maid", relation: "wearing" as const, state: "confirmed" as const, phrase: "subject wearing maid", reason: "用户确认"}],
+      confirmed: [], exclusions: [], suggestions: [], unresolved: [], risk_notes: [],
+    },
+    local_translation: {translated_text: "A maid", engine: "当前工作台译文", local_only: true},
   };
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify(generated), {status: 200}))
@@ -260,6 +427,35 @@ it("persists the last validated candidate snapshot with the workspace", async ()
   const saveRequest = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
   expect(saveRequest.candidate_snapshot.candidates[0].positive_prompt).toBe("score_7, maid, twintails");
   expect(saveRequest.candidate_snapshot.data_pack_id).toBe("pack-r1");
+  expect(saveRequest.candidate_snapshot).not.toHaveProperty("local_translation");
+  expect(saveRequest.candidate_snapshot.scene_draft.relations[0].state).toBe("confirmed");
+});
+
+it("restores Scene Draft review when opening a saved candidate snapshot", async () => {
+  const translatedText = "A maid standing in the rain";
+  const sceneDraft = {
+    source_text: "雨中的女仆",
+    translated_text: translatedText,
+    confirmed: [{id: "e_maid", text: "女仆", canonical_tag: "maid", source: "source_exact", reason: "中文精确匹配", source_start: 3, source_end: 5}],
+    exclusions: [], suggestions: [], unresolved: [], risk_notes: ["动作仍需确认。"],
+  };
+  const snapshot = {
+    intent: {source_text: sceneDraft.source_text, source_language: "zh", translated_text: translatedText, scene_plan_en: translatedText, scene_negative_en: [], graph: {elements: [{id: "e_maid", original_text: "女仆", type: "other", state: "required", confidence: 1, notes: []}], edges: []}, warnings: []},
+    candidates: [candidate], validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1", scene_draft: sceneDraft,
+  };
+  const record = {
+    id: "workspace_scene", title: "雨夜女仆", draft: {positive_text: "", excluded_text: "", model_profile: "anima_aesthetic_v1", input_mode: "natural", natural_text: sceneDraft.source_text, selected_tags: []},
+    candidate_snapshot: snapshot, revision: 1, created_at: "2026-08-30T00:00:00+00:00", updated_at: "2026-08-30T00:00:00+00:00",
+  };
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({items: [record]}), {status: 200}));
+
+  render(<MemoryRouter><WorkbenchPage naturalLanguageEnabled /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", {name: "打开"}));
+  fireEvent.click(await screen.findByRole("button", {name: /雨夜女仆/}));
+
+  expect(await screen.findByRole("region", {name: "Scene Draft"})).toBeInTheDocument();
+  expect(screen.getByLabelText("可编辑画面计划")).toHaveValue(translatedText);
+  expect(screen.getByText("已整理 1 项画面证据")).toBeInTheDocument();
 });
 
 it("submits a validated candidate to a compatible reused V2 target", async () => {
@@ -270,7 +466,7 @@ it("submits a validated candidate to a compatible reused V2 target", async () =>
       workflow_profile_id: "workflow-1",
       workflow_display_name: "ANIMA Base",
       workflow_kind: "txt2img_basic",
-      compatible_model_profiles: ["anima_base_v1"],
+      compatible_model_profiles: ["anima_base_v1", "anima_aesthetic_v1"],
       host_fingerprint_ready: true,
       auth_type: "agent",
       private_key_passphrase_configured: false,
@@ -305,7 +501,7 @@ it("locks one candidate and submits separate fixed-seed jobs for selected artist
   ];
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify({items: [{
-      remote_profile_id: "remote-1", remote_display_name: "测试云主机", workflow_profile_id: "workflow-1", workflow_display_name: "ANIMA Base", workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_base_v1"], host_fingerprint_ready: true, auth_type: "agent", private_key_passphrase_configured: false,
+      remote_profile_id: "remote-1", remote_display_name: "测试云主机", workflow_profile_id: "workflow-1", workflow_display_name: "ANIMA Base", workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_base_v1", "anima_aesthetic_v1"], host_fingerprint_ready: true, auth_type: "agent", private_key_passphrase_configured: false,
     }]}), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({
       intent: {source_text: "女仆", source_language: "zh", graph: {elements: []}}, candidates: [candidate], validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1", artist_suggestions: artists,
@@ -345,7 +541,7 @@ it("sends an encrypted-key passphrase separately before the generation request",
       workflow_profile_id: "workflow-1",
       workflow_display_name: "ANIMA Base",
       workflow_kind: "txt2img_basic",
-      compatible_model_profiles: ["anima_base_v1"],
+      compatible_model_profiles: ["anima_base_v1", "anima_aesthetic_v1"],
       host_fingerprint_ready: true,
       auth_type: "private_key",
       private_key_passphrase_configured: false,

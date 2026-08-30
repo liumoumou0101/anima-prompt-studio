@@ -75,6 +75,63 @@ export interface SearchResponse {
   data_pack_id: string;
 }
 
+export interface TagBrowseGroup {
+  id: string;
+  name: string;
+  cn_name: string | null;
+  title: string;
+  description: string;
+  tag_count: number;
+  items: TagSearchItem[];
+}
+
+export interface TagGroupSummary {
+  id: string;
+  name: string;
+  cn_name: string | null;
+  tag_count: number;
+}
+
+export interface TagUngroupedSummary {
+  total: number;
+  safe_count: number;
+  nsfw_count: number;
+  unknown_count: number;
+  category_counts: Partial<Record<TagCategory, number>>;
+}
+
+export interface TagUngroupedPreview extends TagUngroupedSummary {
+  items: TagSearchItem[];
+}
+
+export interface TagBrowseResponse {
+  featured: TagSearchItem[];
+  groups: TagBrowseGroup[];
+  other_groups: TagGroupSummary[];
+  ungrouped: TagUngroupedPreview;
+  data_pack_id: string;
+}
+
+export interface TagGroupResponse {
+  group: Omit<TagBrowseGroup, "tag_count" | "items">;
+  items: TagSearchItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  data_pack_id: string;
+}
+
+export interface TagUngroupedResponse {
+  summary: TagUngroupedSummary;
+  items: TagSearchItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  data_pack_id: string;
+}
+
 export interface ApiErrorPayload {
   error: {
     code: string;
@@ -121,6 +178,76 @@ export interface ArtistSuggestion {
   data_pack_id: string;
 }
 
+export interface ArtistSummary {
+  artist_count: number;
+  post_count: number;
+  association_count: number;
+}
+
+export interface ArtistPreviewTag {
+  name: string;
+  render_name: string;
+  cn_name: string | null;
+  category_name: TagCategory;
+  cooc_count: number;
+  npmi: number | null;
+}
+
+export interface ArtistSearchItem {
+  id: number;
+  name: string;
+  render_name: string;
+  post_count: number;
+  association_count: number;
+  preview_tags: ArtistPreviewTag[];
+}
+
+export interface ArtistSearchResponse {
+  summary: ArtistSummary;
+  items: ArtistSearchItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  data_pack_id: string;
+}
+
+export type ArtistContextDimension = "composition" | "setting" | "action" | "appearance" | "character" | "copyright" | "meta" | "motif";
+
+export interface ArtistContextTag {
+  id: number;
+  name: string;
+  render_name: string;
+  cn_name: string | null;
+  category: number;
+  category_name: TagCategory;
+  post_count: number;
+  nsfw: boolean | null;
+  deprecated: boolean;
+  groups: TagGroup[];
+  dimensions: ArtistContextDimension[];
+  cooc_count: number;
+  coverage: number;
+  npmi: number | null;
+  association_score: number | null;
+  rank: number;
+  algorithm_version: string;
+  data_pack_id: string;
+}
+
+export interface ArtistDetail {
+  id: number;
+  name: string;
+  render_name: string;
+  post_count: number;
+  association_count: number;
+  contexts: ArtistContextTag[];
+  dimension_counts: Partial<Record<ArtistContextDimension, number>>;
+  safety_summary: {safe_count: number; nsfw_count: number; unknown_count: number};
+  analysis_note: string;
+  data_pack_id: string;
+}
+
 export interface ArtistComparisonInfo {
   id: string;
   artist: string;
@@ -161,16 +288,41 @@ export interface SceneDraftItem {
   id: string;
   text: string;
   canonical_tag: string | null;
-  source: "source_exact" | "translation_exact" | "user_selected" | "unresolved";
+  source: "source_exact" | "source_excluded" | "translation_exact" | "user_selected" | "unresolved";
+  fact_type?: "subject" | "character" | "appearance" | "clothing" | "action" | "object" | "scene" | "composition" | "style" | "quality" | "relation" | "other";
+  owner_entity_id?: string | null;
+  suggested_owner_entity_id?: string | null;
   reason: string;
   source_start: number | null;
   source_end: number | null;
 }
 
+export interface SceneEntity {
+  id: string;
+  label: string;
+  canonical_tag: string;
+  source_element_id: string;
+  source_start: number | null;
+  source_end: number | null;
+}
+
+export interface SceneRelation {
+  id: string;
+  source_entity_id: string;
+  target_element_id: string;
+  relation: "wearing";
+  state: "suggested" | "confirmed";
+  phrase: string;
+  reason: string;
+}
+
 export interface SceneDraft {
   source_text: string;
   translated_text: string;
+  entities?: SceneEntity[];
+  relations?: SceneRelation[];
   confirmed: SceneDraftItem[];
+  exclusions: SceneDraftItem[];
   suggestions: SceneDraftItem[];
   unresolved: SceneDraftItem[];
   risk_notes: string[];

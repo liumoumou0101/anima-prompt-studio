@@ -11,6 +11,24 @@ from typing import Any, Iterable
 from .contracts import DATA_CONTRACT, DataContractError
 
 
+ARTIST_CONTEXT_GROUPS: dict[str, frozenset[str]] = {
+    "composition": frozenset({"image_composition", "focus_tags", "lighting", "backgrounds"}),
+    "setting": frozenset({
+        "locations", "real_world_locations", "theme", "holidays_and_celebrations",
+        "fire", "water", "flowers", "technology",
+    }),
+    "action": frozenset({
+        "posture", "gestures", "holding_tags", "verbs_and_gerunds", "dances", "sports",
+    }),
+    "appearance": frozenset({
+        "accessories", "attire", "colors", "eyes_tags", "eyewear", "face_tags",
+        "fashion_style", "hair", "hair_color", "hair_styles", "handwear", "headwear",
+        "legwear", "makeup", "neck_and_neckwear", "patterns", "skin_color", "sleeves",
+        "wings",
+    }),
+}
+
+
 class ReferenceDataStore:
     """Read-only query facade over a validated V3 reference database."""
 
@@ -76,6 +94,268 @@ class ReferenceDataStore:
             if len(result) >= limit:
                 break
         return result
+
+    def popular_tags(
+        self,
+        *,
+        categories: set[str] | None = None,
+        include_nsfw: bool = False,
+        limit: int = 24,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        filters = ["t.deprecated=0"]
+        parameters: list[Any] = []
+        if categories:
+            ordered = sorted(categories)
+            filters.append("t.category_name IN (" + ",".join("?" for _ in ordered) + ")")
+            parameters.extend(ordered)
+        if not include_nsfw:
+            filters.append("t.nsfw=0")
+        parameters.append(limit)
+        rows = self.connection.execute(
+            """SELECT t.id,t.name,t.render_name,t.cn_name,t.category,t.category_name,
+                      t.post_count,t.nsfw,t.deprecated
+               FROM tags t WHERE """
+            + " AND ".join(filters)
+            + " ORDER BY t.post_count DESC,t.name LIMIT ?",
+            parameters,
+        ).fetchall()
+        return [_tag_summary(row) for row in rows]
+
+    def browse_groups(
+        self,
+        group_names: Iterable[str],
+        *,
+        categories: set[str] | None = None,
+        include_nsfw: bool = False,
+        limit_per_group: int = 12,
+    ) -> list[dict[str, Any]]:
+        if limit_per_group <= 0:
+            return []
+        result: list[dict[str, Any]] = []
+        for raw_name in group_names:
+            name = _canonical(raw_name)
+            group = self.connection.execute(
+                "SELECT id,name,cn_name FROM tag_groups WHERE name=?",
+                (name,),
+            ).fetchone()
+            if group is None:
+                continue
+            filters = ["m.group_id=?", "t.deprecated=0"]
+            parameters: list[Any] = [group["id"]]
+            if categories:
+                ordered = sorted(categories)
+                filters.append("t.category_name IN (" + ",".join("?" for _ in ordered) + ")")
+                parameters.extend(ordered)
+            if not include_nsfw:
+                filters.append("t.nsfw=0")
+            where = " AND ".join(filters)
+            count = self.connection.execute(
+                "SELECT COUNT(*) FROM tag_group_members m JOIN tags t ON t.id=m.tag_id WHERE " + where,
+                parameters,
+            ).fetchone()[0]
+            rows = self.connection.execute(
+                """SELECT t.id,t.name,t.render_name,t.cn_name,t.category,t.category_name,
+                          t.post_count,t.nsfw,t.deprecated
+                   FROM tag_group_members m JOIN tags t ON t.id=m.tag_id WHERE """
+                + where
+                + " ORDER BY t.post_count DESC,t.name LIMIT ?",
+                [*parameters, limit_per_group],
+            ).fetchall()
+            if not rows:
+                continue
+            result.append({
+                "id": group["id"],
+                "name": group["name"],
+                "cn_name": group["cn_name"],
+                "tag_count": count,
+                "items": [_tag_summary(row) for row in rows],
+            })
+        return result
+
+    def list_groups(
+        self,
+        *,
+        excluded_names: Iterable[str] = (),
+        categories: set[str] | None = None,
+        include_nsfw: bool = False,
+    ) -> list[dict[str, Any]]:
+        filters = ["t.deprecated=0"]
+        parameters: list[Any] = []
+        excluded = sorted({_canonical(name) for name in excluded_names})
+        if excluded:
+            filters.append("g.name NOT IN (" + ",".join("?" for _ in excluded) + ")")
+            parameters.extend(excluded)
+        if categories:
+            ordered = sorted(categories)
+            filters.append("t.category_name IN (" + ",".join("?" for _ in ordered) + ")")
+            parameters.extend(ordered)
+        if not include_nsfw:
+            filters.append("t.nsfw=0")
+        rows = self.connection.execute(
+            """SELECT g.id,g.name,g.cn_name,COUNT(*) AS tag_count
+               FROM tag_groups g
+               JOIN tag_group_members m ON m.group_id=g.id
+               JOIN tags t ON t.id=m.tag_id
+               WHERE """
+            + " AND ".join(filters)
+            + " GROUP BY g.id,g.name,g.cn_name HAVING COUNT(*)>0"
+            + " ORDER BY tag_count DESC,g.name",
+            parameters,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def ungrouped_summary(
+        self,
+        *,
+        categories: set[str] | None = None,
+    ) -> dict[str, Any]:
+        filters = ["t.deprecated=0", "t.id NOT IN (SELECT tag_id FROM tag_group_members)"]
+        parameters: list[Any] = []
+        if categories:
+            ordered = sorted(categories)
+            filters.append("t.category_name IN (" + ",".join("?" for _ in ordered) + ")")
+            parameters.extend(ordered)
+        rows = self.connection.execute(
+            """SELECT t.category_name,t.nsfw,COUNT(*) AS tag_count
+               FROM tags t WHERE """
+            + " AND ".join(filters)
+            + " GROUP BY t.category_name,t.nsfw",
+            parameters,
+        ).fetchall()
+        category_counts: dict[str, int] = defaultdict(int)
+        safe_count = 0
+        nsfw_count = 0
+        unknown_count = 0
+        for row in rows:
+            count = int(row["tag_count"])
+            category_counts[str(row["category_name"])] += count
+            if row["nsfw"] == 1:
+                nsfw_count += count
+            elif row["nsfw"] == 0:
+                safe_count += count
+            else:
+                unknown_count += count
+        return {
+            "total": safe_count + nsfw_count + unknown_count,
+            "safe_count": safe_count,
+            "nsfw_count": nsfw_count,
+            "unknown_count": unknown_count,
+            "category_counts": dict(category_counts),
+        }
+
+    def ungrouped_tags(
+        self,
+        *,
+        query: str = "",
+        categories: set[str] | None = None,
+        safety: str = "safe",
+        heat: str = "all",
+        sort: str = "popularity",
+        limit: int = 80,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        filters = ["t.deprecated=0", "t.id NOT IN (SELECT tag_id FROM tag_group_members)"]
+        parameters: list[Any] = []
+        tokens = re.findall(r"[0-9a-zA-Z_\u3400-\u9fff]+", query.lower())
+        source = "FROM tags t"
+        if query.strip():
+            if not tokens:
+                return {"total": 0, "items": []}
+            match = " AND ".join(f'"{token}"*' for token in tokens)
+            source += " JOIN (SELECT DISTINCT canonical FROM tag_search WHERE tag_search MATCH ?) s ON s.canonical=t.name"
+            parameters.append(match)
+        if categories:
+            ordered = sorted(categories)
+            filters.append("t.category_name IN (" + ",".join("?" for _ in ordered) + ")")
+            parameters.extend(ordered)
+        if safety == "safe":
+            filters.append("t.nsfw=0")
+        elif safety == "nsfw":
+            filters.append("t.nsfw=1")
+        if heat == "100k":
+            filters.append("t.post_count>=100000")
+        elif heat == "10k":
+            filters.extend(["t.post_count>=10000", "t.post_count<100000"])
+        elif heat == "1k":
+            filters.extend(["t.post_count>=1000", "t.post_count<10000"])
+        elif heat == "longtail":
+            filters.append("t.post_count<1000")
+        where = " AND ".join(filters)
+        total = self.connection.execute(
+            "SELECT COUNT(*) " + source + " WHERE " + where,
+            parameters,
+        ).fetchone()[0]
+        order_by = "t.name" if sort == "name" else "t.post_count DESC,t.name"
+        rows = self.connection.execute(
+            """SELECT t.id,t.name,t.render_name,t.cn_name,t.category,t.category_name,
+                      t.post_count,t.nsfw,t.deprecated """
+            + source
+            + " WHERE "
+            + where
+            + f" ORDER BY {order_by} LIMIT ? OFFSET ?",
+            [*parameters, max(0, limit), max(0, offset)],
+        ).fetchall()
+        return {"total": total, "items": [_tag_summary(row) for row in rows]}
+
+    def group_tags(
+        self,
+        group_name: str,
+        *,
+        query: str = "",
+        categories: set[str] | None = None,
+        include_nsfw: bool = False,
+        has_cn_name: bool = False,
+        sort: str = "popularity",
+        limit: int = 80,
+        offset: int = 0,
+    ) -> dict[str, Any] | None:
+        name = _canonical(group_name).removeprefix("tag_group:")
+        group = self.connection.execute(
+            "SELECT id,name,cn_name FROM tag_groups WHERE name=? OR id=?",
+            (name, f"tag_group:{name}"),
+        ).fetchone()
+        if group is None:
+            return None
+        filters = ["m.group_id=?", "t.deprecated=0"]
+        parameters: list[Any] = [group["id"]]
+        if categories:
+            ordered = sorted(categories)
+            filters.append("t.category_name IN (" + ",".join("?" for _ in ordered) + ")")
+            parameters.extend(ordered)
+        if not include_nsfw:
+            filters.append("t.nsfw=0")
+        if has_cn_name:
+            filters.append("t.cn_name IS NOT NULL AND TRIM(t.cn_name)<>''")
+        normalized_query = query.strip().lower().replace(" ", "_")
+        if normalized_query:
+            pattern = f"%{normalized_query}%"
+            filters.append(
+                "(LOWER(t.name) LIKE ? OR LOWER(t.render_name) LIKE ? OR LOWER(COALESCE(t.cn_name,'')) LIKE ?)"
+            )
+            parameters.extend([pattern, pattern.replace("_", " "), pattern])
+        where = " AND ".join(filters)
+        total = self.connection.execute(
+            "SELECT COUNT(*) FROM tag_group_members m JOIN tags t ON t.id=m.tag_id WHERE " + where,
+            parameters,
+        ).fetchone()[0]
+        order_by = "t.name" if sort == "name" else "t.post_count DESC,t.name"
+        rows = self.connection.execute(
+            """SELECT t.id,t.name,t.render_name,t.cn_name,t.category,t.category_name,
+                      t.post_count,t.nsfw,t.deprecated
+               FROM tag_group_members m JOIN tags t ON t.id=m.tag_id WHERE """
+            + where
+            + f" ORDER BY {order_by} LIMIT ? OFFSET ?",
+            [*parameters, max(0, limit), max(0, offset)],
+        ).fetchall()
+        return {
+            "id": group["id"],
+            "name": group["name"],
+            "cn_name": group["cn_name"],
+            "total": total,
+            "items": [_tag_summary(row) for row in rows],
+        }
 
     def get_tag(self, canonical_name: str) -> dict[str, Any] | None:
         canonical = _canonical(canonical_name)
@@ -198,6 +478,126 @@ class ReferenceDataStore:
             for name in ordered
         ]
 
+    def artist_summary(self) -> dict[str, int]:
+        row = self.connection.execute(
+            """SELECT COUNT(*) AS artist_count,
+                      COALESCE(SUM(a.post_count),0) AS post_count,
+                      (SELECT COUNT(*) FROM artist_tag_cooccurrence) AS association_count
+               FROM artists a"""
+        ).fetchone()
+        return {
+            "artist_count": int(row["artist_count"]),
+            "post_count": int(row["post_count"]),
+            "association_count": int(row["association_count"]),
+        }
+
+    def search_artists(
+        self,
+        query: str = "",
+        *,
+        sort: str = "popularity",
+        limit: int = 48,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        raw_query = query.strip().lower().removeprefix("@").strip()
+        canonical_query = _canonical(raw_query) if raw_query else ""
+        filters: list[str] = []
+        parameters: list[Any] = []
+        if canonical_query:
+            filters.append("(INSTR(LOWER(a.name),?)>0 OR INSTR(LOWER(a.render_name),?)>0)")
+            parameters.extend([canonical_query, raw_query.replace("_", " ")])
+        where = " WHERE " + " AND ".join(filters) if filters else ""
+        total = self.connection.execute(
+            "SELECT COUNT(*) FROM artists a" + where,
+            parameters,
+        ).fetchone()[0]
+        if canonical_query:
+            relevance = (
+                "CASE WHEN LOWER(a.name)=? THEN 0 WHEN LOWER(a.name) LIKE ? THEN 1 "
+                "WHEN LOWER(a.render_name) LIKE ? THEN 2 ELSE 3 END,"
+            )
+            order_parameters = [canonical_query, canonical_query + "%", "@" + raw_query.replace("_", " ") + "%"]
+        else:
+            relevance = ""
+            order_parameters = []
+        order_by = "a.name" if sort == "name" else "a.post_count DESC,a.name"
+        rows = self.connection.execute(
+            """SELECT a.id,a.name,a.render_name,a.post_count,
+                      (SELECT COUNT(*) FROM artist_tag_cooccurrence e WHERE e.artist_id=a.id) AS association_count
+               FROM artists a"""
+            + where
+            + " ORDER BY "
+            + relevance
+            + order_by
+            + " LIMIT ? OFFSET ?",
+            [*parameters, *order_parameters, max(0, limit), max(0, offset)],
+        ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            preview = self.connection.execute(
+                """SELECT t.name,t.render_name,t.cn_name,t.category_name,e.cooc_count,e.npmi
+                   FROM artist_tag_cooccurrence e JOIN tags t ON t.id=e.tag_id
+                   WHERE e.artist_id=? AND t.deprecated=0 AND t.nsfw=0 AND t.category_name='general'
+                   ORDER BY e.rank LIMIT 4""",
+                (row["id"],),
+            ).fetchall()
+            items.append({
+                "id": row["id"],
+                "name": row["name"],
+                "render_name": row["render_name"],
+                "post_count": row["post_count"],
+                "association_count": row["association_count"],
+                "preview_tags": [dict(item) for item in preview],
+            })
+        return {"total": int(total), "items": items}
+
+    def get_artist(self, canonical_name: str) -> dict[str, Any] | None:
+        canonical = _canonical(canonical_name.strip().removeprefix("@"))
+        row = self.connection.execute(
+            """SELECT a.id,a.name,a.render_name,a.post_count,
+                      (SELECT COUNT(*) FROM artist_tag_cooccurrence e WHERE e.artist_id=a.id) AS association_count
+               FROM artists a WHERE a.name=?""",
+            (canonical,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def artist_contexts(self, canonical_name: str) -> list[dict[str, Any]] | None:
+        artist = self.get_artist(canonical_name)
+        if artist is None:
+            return None
+        rows = self.connection.execute(
+            """SELECT t.id,t.name,t.render_name,t.cn_name,t.category,t.category_name,
+                      t.post_count,t.nsfw,t.deprecated,e.cooc_count,e.artist_post_count,
+                      e.tag_post_count,e.npmi,e.rank,e.score_version
+               FROM artist_tag_cooccurrence e JOIN tags t ON t.id=e.tag_id
+               WHERE e.artist_id=? AND t.deprecated=0 ORDER BY e.rank""",
+            (artist["id"],),
+        ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            groups = [dict(item) for item in self.connection.execute(
+                """SELECT g.id,g.name,g.cn_name FROM tag_group_members m
+                   JOIN tag_groups g ON g.id=m.group_id WHERE m.tag_id=? ORDER BY g.id""",
+                (row["id"],),
+            )]
+            dimensions = _artist_context_dimensions(str(row["category_name"]), groups)
+            artist_post_count = max(1, int(row["artist_post_count"]))
+            npmi = float(row["npmi"]) if row["npmi"] is not None else None
+            item = _tag_summary(row)
+            item.update({
+                "groups": groups,
+                "dimensions": dimensions,
+                "cooc_count": int(row["cooc_count"]),
+                "coverage": round(min(1.0, int(row["cooc_count"]) / artist_post_count), 4),
+                "npmi": round(npmi, 6) if npmi is not None else None,
+                "association_score": round(min(1.0, max(0.0, npmi)), 4) if npmi is not None else None,
+                "rank": int(row["rank"]),
+                "algorithm_version": row["score_version"],
+                "data_pack_id": self.pack_id,
+            })
+            result.append(item)
+        return result
+
     def _resolve_tags(self, names: Iterable[str]) -> dict[str, int]:
         resolved: dict[str, int] = {}
         for raw_name in names:
@@ -216,6 +616,16 @@ class ReferenceDataStore:
 
 def _canonical(value: str) -> str:
     return value.strip().lower().replace(" ", "_")
+
+
+def _artist_context_dimensions(category_name: str, groups: list[dict[str, Any]]) -> list[str]:
+    if category_name == "character":
+        return ["character"]
+    if category_name == "copyright":
+        return ["copyright"]
+    group_names = {str(group["name"]) for group in groups}
+    dimensions = [name for name, members in ARTIST_CONTEXT_GROUPS.items() if group_names & members]
+    return dimensions or (["meta"] if category_name == "meta" else ["motif"])
 
 
 def _tag_summary(row: sqlite3.Row) -> dict[str, Any]:

@@ -25,7 +25,23 @@ from ..domain import (
 from .profiles import ModelProfile, NegativePromptMode
 
 
-LITERAL_ALGORITHM_VERSION = "literal-mapper-v1"
+LITERAL_ALGORITHM_VERSION = "literal-mapper-v2"
+
+
+_PROMPT_FACT_ORDER = {
+    "quality": 0,
+    "character": 10,
+    "subject": 20,
+    "appearance": 30,
+    "clothing": 40,
+    "action": 50,
+    "relation": 55,
+    "object": 60,
+    "scene": 70,
+    "composition": 80,
+    "style": 90,
+    "other": 100,
+}
 
 
 class LiteralGenerationError(ValueError):
@@ -131,7 +147,7 @@ class LiteralCandidateGenerator:
         warnings: list[CandidateWarning] = []
         prose_baseline_ids: list[str] = []
 
-        for element in intent.graph.elements:
+        for element_index, element in enumerate(intent.graph.elements):
             mapping = self.mapper.map_element(element)
             if mapping is None:
                 if _uses_local_prose_baseline(element, intent):
@@ -161,6 +177,8 @@ class LiteralCandidateGenerator:
                 positive[mapping.canonical_name] = {
                     "mapping": mapping,
                     "state": _candidate_state(element.state),
+                    "fact_type": element.type,
+                    "source_order": element_index,
                     "element_ids": [element.id],
                     "reasons": [mapping.reason],
                     "removable": element.state != IntentState.LOCKED,
@@ -172,6 +190,8 @@ class LiteralCandidateGenerator:
                     existing["state"] = _candidate_state(element.state)
                 if element.state == IntentState.LOCKED:
                     existing["removable"] = False
+                if _prompt_fact_priority(element.type.value) < _prompt_fact_priority(existing["fact_type"].value):
+                    existing["fact_type"] = element.type
 
         mapped_conflicts = set(positive) & excluded_canonical
         if mapped_conflicts:
@@ -189,7 +209,13 @@ class LiteralCandidateGenerator:
                 algorithm_version=LITERAL_ALGORITHM_VERSION,
                 removable=entry["removable"],
             )
-            for name, entry in positive.items()
+            for name, entry in sorted(
+                positive.items(),
+                key=lambda item: (
+                    _prompt_fact_priority(item[1]["fact_type"].value),
+                    item[1]["source_order"],
+                ),
+            )
         ]
 
         positive_parts = _deduplicate([*profile.positive_prefix, *(tag.rendered for tag in tags)])
@@ -268,6 +294,12 @@ def _candidate_state_priority(state: CandidateTagState) -> int:
         CandidateTagState.AUTOMATIC: 100,
     }
     return mapping[state]
+
+
+def _prompt_fact_priority(value: str) -> int:
+    """Order reviewed facts without inventing any additional prompt content."""
+
+    return _PROMPT_FACT_ORDER.get(value, _PROMPT_FACT_ORDER["other"])
 
 
 def _unresolved_warning(element: IntentElement) -> CandidateWarning:

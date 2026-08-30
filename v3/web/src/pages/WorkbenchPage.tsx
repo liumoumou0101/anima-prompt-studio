@@ -1,7 +1,8 @@
 import {useEffect, useMemo, useRef, useState} from "react";
 import type {FormEvent} from "react";
+import {useSearchParams} from "react-router-dom";
 import {apiRequest, ApiClientError} from "../lib/api";
-import type {ArtistComparisonSubmission, ArtistSuggestion, CandidateLane, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, IntentParseResponse, PromptCandidate, SceneDraft, TagSuggestion, TranslationResponse, WorkbenchResponse, WorkspaceDraft, WorkspaceListResponse, WorkspaceRecord} from "../lib/types";
+import type {ArtistComparisonSubmission, ArtistSuggestion, CandidateLane, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, IntentParseResponse, PromptCandidate, SceneDraft, SceneRelation, TagSuggestion, TranslationResponse, WorkbenchResponse, WorkspaceDraft, WorkspaceListResponse, WorkspaceRecord} from "../lib/types";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
 
 const profiles = [
@@ -10,6 +11,9 @@ const profiles = [
   {id: "anima_turbo_v1", label: "ANIMA Turbo"},
 ];
 const RECOVERY_KEY = "anima-v3-workbench-recovery";
+const GENERATION_TARGET_KEY = "anima-v3-generation-target";
+type WorkspaceIdentity = Pick<WorkspaceRecord, "id" | "title" | "revision" | "created_at" | "updated_at">;
+type RecoveredWorkbench = {draft: WorkspaceDraft; result: WorkbenchResponse | null; workspaceTitle: string; workspace: WorkspaceIdentity | null};
 
 const laneMeta: Record<CandidateLane, {index: string; label: string; detail: string}> = {
   literal: {index: "L", label: "Literal", detail: "只保留可确定映射的输入"},
@@ -19,24 +23,38 @@ const laneMeta: Record<CandidateLane, {index: string; label: string; detail: str
 };
 
 export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = false, localTranslationEnabled = false}: {remoteEnabled?: boolean; naturalLanguageEnabled?: boolean; localTranslationEnabled?: boolean}) {
+  const [searchParams] = useSearchParams();
+  const importedTags = useMemo(() => Array.from(new Set(searchParams.getAll("tag").map((item) => item.trim()).filter(Boolean))), []);
   const recovered = useMemo(loadRecoveredWorkbench, []);
-  const [draft, setDraft] = useState<WorkspaceDraft>(recovered?.draft || {positive_text: "", excluded_text: "", model_profile: "anima_base_v1", input_mode: "concepts", natural_text: "", selected_tags: []});
+  const [draft, setDraft] = useState<WorkspaceDraft>(() => {
+    const base = recovered?.draft || {positive_text: "", excluded_text: "", model_profile: "anima_aesthetic_v1", input_mode: naturalLanguageEnabled ? "natural" : "concepts", natural_text: "", selected_tags: []};
+    if (!importedTags.length) return base;
+    const currentTags = base.selected_tags || [];
+    return {
+      ...base,
+      input_mode: "concepts",
+      positive_text: mergeImportedTags(base.positive_text, importedTags),
+      selected_tags: Array.from(new Set([...currentTags, ...importedTags])),
+    };
+  });
   const [past, setPast] = useState<WorkspaceDraft[]>([]);
   const [future, setFuture] = useState<WorkspaceDraft[]>([]);
   const [result, setResult] = useState<WorkbenchResponse | null>(recovered?.result || null);
   const [error, setError] = useState<ApiClientError | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
-  const [workspace, setWorkspace] = useState<WorkspaceRecord | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceIdentity | null>(recovered?.workspace || null);
   const [workspaceTitle, setWorkspaceTitle] = useState(recovered?.workspaceTitle || "未命名工作台");
   const [workspaceList, setWorkspaceList] = useState<WorkspaceRecord[] | null>(null);
   const [workspaceNotice, setWorkspaceNotice] = useState<{kind: "success" | "error"; text: string} | null>(null);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [generationTargets, setGenerationTargets] = useState<GenerationTarget[]>([]);
-  const [selectedTarget, setSelectedTarget] = useState("");
+  const [selectedTarget, setSelectedTarget] = useState(() => {
+    try { return localStorage.getItem(GENERATION_TARGET_KEY) || ""; } catch { return ""; }
+  });
   const [generationBusy, setGenerationBusy] = useState<string | null>(null);
   const [generationNotice, setGenerationNotice] = useState<string | null>(null);
-  const [parseInfo, setParseInfo] = useState<IntentParseResponse | null>(null);
+  const [parseInfo, setParseInfo] = useState<IntentParseResponse | null>(() => recovered?.result ? buildLocalParseInfo(recovered.result, "已恢复的工作台快照") : null);
   const [translation, setTranslation] = useState<TranslationResponse | null>(null);
   const [translationBusy, setTranslationBusy] = useState(false);
   const [privateKeyPassphrase, setPrivateKeyPassphrase] = useState("");
@@ -57,19 +75,25 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
 
   const positiveItems = useMemo(() => splitConcepts(positiveText), [positiveText]);
   const excludedItems = useMemo(() => splitConcepts(excludedText), [excludedText]);
-  const compatibleTargets = useMemo(
-    () => generationTargets.filter((target) => !target.compatible_model_profiles.length || target.compatible_model_profiles.includes(profile)),
-    [generationTargets, profile],
-  );
+  const compatibleTargets = useMemo(() => {
+    const unique = new Map<string, GenerationTarget>();
+    for (const target of generationTargets) {
+      if (target.compatible_model_profiles.length && !target.compatible_model_profiles.includes(profile)) continue;
+      const visibleIdentity = `${target.remote_display_name}\u0000${target.workflow_display_name}`;
+      if (!unique.has(visibleIdentity)) unique.set(visibleIdentity, target);
+    }
+    return [...unique.values()];
+  }, [generationTargets, profile]);
   const activeTarget = compatibleTargets.find((target) => targetKey(target) === selectedTarget);
+  const reviewedFacts = useMemo(() => groupIntentFacts(parseInfo?.intent.graph.elements || []), [parseInfo]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(RECOVERY_KEY, JSON.stringify({draft, result, workspaceTitle, saved_at: new Date().toISOString()}));
+      localStorage.setItem(RECOVERY_KEY, JSON.stringify({draft, result, workspaceTitle, workspace, saved_at: new Date().toISOString()}));
     } catch {
       // Recovery is best-effort: quota errors must never interrupt prompt work.
     }
-  }, [draft, result, workspaceTitle]);
+  }, [draft, result, workspaceTitle, workspace]);
   const translationSource = inputMode === "natural" ? naturalText : positiveText;
 
   useEffect(() => {
@@ -81,9 +105,15 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
 
   useEffect(() => {
     if (!compatibleTargets.some((target) => targetKey(target) === selectedTarget)) {
-      setSelectedTarget(compatibleTargets[0] ? targetKey(compatibleTargets[0]) : "");
+      const preferred = compatibleTargets.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name)) || compatibleTargets[0];
+      setSelectedTarget(preferred ? targetKey(preferred) : "");
     }
   }, [compatibleTargets, selectedTarget]);
+
+  useEffect(() => {
+    if (!selectedTarget) return;
+    try { localStorage.setItem(GENERATION_TARGET_KEY, selectedTarget); } catch { /* Best-effort preference. */ }
+  }, [selectedTarget]);
 
   function editDraft(patch: Partial<WorkspaceDraft>) {
     const next = {...draft, ...patch};
@@ -133,10 +163,10 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
     try {
       const saved = workspace ? await apiRequest<WorkspaceRecord>(`/api/v3/workspaces/${workspace.id}`, {
         method: "PUT",
-        body: JSON.stringify({title: workspaceTitle, draft, candidate_snapshot: result, revision: workspace.revision}),
+        body: JSON.stringify({title: workspaceTitle, draft, candidate_snapshot: workspaceCandidateSnapshot(result), revision: workspace.revision}),
       }) : await apiRequest<WorkspaceRecord>("/api/v3/workspaces", {
         method: "POST",
-        body: JSON.stringify({title: workspaceTitle, draft, candidate_snapshot: result}),
+        body: JSON.stringify({title: workspaceTitle, draft, candidate_snapshot: workspaceCandidateSnapshot(result)}),
       });
       setWorkspace(saved);
       setWorkspaceTitle(saved.title);
@@ -170,7 +200,7 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
     setPast([]);
     setFuture([]);
     setResult(item.candidate_snapshot || null);
-    setParseInfo(null);
+    setParseInfo(item.candidate_snapshot ? buildLocalParseInfo(item.candidate_snapshot, "已打开的工作台快照") : null);
     setArtistComparisonBase(null);
     setArtistSuggestions([]);
     setSelectedArtists([]);
@@ -203,11 +233,7 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   }
 
   function setLocalParseInfo(payload: WorkbenchResponse & {local_translation?: {engine: string}}, label: string) {
-    setParseInfo({
-      intent: payload.intent,
-      extraction: {summary_zh: label, people_count: 0, subject_mode: "local", content_rating: "unknown", scene_type: "local", truncated_source: false},
-      parser: {name: `本地翻译 · ${payload.local_translation?.engine || "当前译文"}`, source: "v2_local_translation"},
-    });
+    setParseInfo(buildLocalParseInfo(payload, label));
   }
 
   async function generate(event: FormEvent) {
@@ -220,7 +246,7 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
       if (inputMode === "natural") {
         const local = await apiRequest<WorkbenchResponse & {local_translation: {translated_text: string; engine: string; local_only: boolean}}>("/api/v3/local-natural/candidates", {
           method: "POST",
-          body: JSON.stringify({source_text: naturalText, model_profile: profile, selected_tags: selectedTags}),
+          body: JSON.stringify({source_text: naturalText, excluded_text: excludedText, model_profile: profile, selected_tags: selectedTags}),
         });
         setLocalParseInfo(local, "本地翻译与本地标签索引");
         payload = local;
@@ -253,13 +279,97 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
       const local = inputMode === "natural"
         ? await apiRequest<WorkbenchResponse & {local_translation: {translated_text: string; engine: string; local_only: boolean}}>("/api/v3/local-natural/candidates", {
           method: "POST",
-          body: JSON.stringify({source_text: naturalText, translated_text: translatedText, model_profile: profile, selected_tags: nextTags}),
+          body: JSON.stringify({source_text: naturalText, excluded_text: excludedText, translated_text: translatedText, model_profile: profile, selected_tags: nextTags, ...factOwnersRequest(result.scene_draft), ...confirmedRelationsRequest(result.scene_draft)}),
         })
         : await apiRequest<WorkbenchResponse & {local_translation?: {engine: string}}>("/api/v3/workbench/candidates", {
           method: "POST",
           body: JSON.stringify(structuredCandidateRequest(nextTags, translatedText)),
         });
       setLocalParseInfo(local, "复用当前译文并更新用户选择");
+      setResult(local);
+    } catch (caught) {
+      setError(caught as ApiClientError);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function applySceneDraftTranslation(translatedText: string) {
+    const sourceText = inputMode === "natural" ? naturalText : positiveText;
+    if (!result?.scene_draft || !sourceText.trim() || !translatedText.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const local = inputMode === "natural"
+        ? await apiRequest<WorkbenchResponse & {local_translation: {translated_text: string; engine: string; local_only: boolean}}>("/api/v3/local-natural/candidates", {
+          method: "POST",
+          body: JSON.stringify({source_text: naturalText, excluded_text: excludedText, translated_text: translatedText, model_profile: profile, selected_tags: selectedTags, ...factOwnersRequest(result.scene_draft), ...confirmedRelationsRequest(result.scene_draft)}),
+        })
+        : await apiRequest<WorkbenchResponse & {local_translation?: {engine: string}}>("/api/v3/workbench/candidates", {
+          method: "POST",
+          body: JSON.stringify(structuredCandidateRequest(selectedTags, translatedText)),
+        });
+      setLocalParseInfo(local, "使用已编辑译文重新映射；未调用翻译模型");
+      setResult(local);
+    } catch (caught) {
+      setError(caught as ApiClientError);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function applyFactOwner(factId: string, entityId: string) {
+    if (inputMode !== "natural" || !result?.scene_draft || !naturalText.trim()) return;
+    const factOwners = confirmedFactOwners(result.scene_draft);
+    if (entityId) factOwners[factId] = entityId;
+    else delete factOwners[factId];
+    const confirmedRelations = confirmedSceneRelations(result.scene_draft)
+      .filter((relation) => factOwners[relation.target_element_id] === relation.source_entity_id);
+    setLoading(true);
+    setError(null);
+    try {
+      const local = await apiRequest<WorkbenchResponse & {local_translation: {translated_text: string; engine: string; local_only: boolean}}>("/api/v3/local-natural/candidates", {
+        method: "POST",
+        body: JSON.stringify({
+          source_text: naturalText,
+          excluded_text: excludedText,
+          translated_text: result.scene_draft.translated_text,
+          model_profile: profile,
+          selected_tags: selectedTags,
+          fact_owners: factOwners,
+          ...(confirmedRelations.length ? {confirmed_relations: confirmedRelations} : {}),
+        }),
+      });
+      setLocalParseInfo(local, "已更新实体归属；未调用翻译模型");
+      setResult(local);
+    } catch (caught) {
+      setError(caught as ApiClientError);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function applySceneRelation(relation: SceneRelation, confirmed: boolean) {
+    if (inputMode !== "natural" || !result?.scene_draft || !naturalText.trim()) return;
+    const relations = confirmedSceneRelations(result.scene_draft)
+      .filter((item) => relationRequestKey(item) !== relationRequestKey(relation));
+    if (confirmed) relations.push(sceneRelationRequest(relation));
+    setLoading(true);
+    setError(null);
+    try {
+      const local = await apiRequest<WorkbenchResponse & {local_translation: {translated_text: string; engine: string; local_only: boolean}}>("/api/v3/local-natural/candidates", {
+        method: "POST",
+        body: JSON.stringify({
+          source_text: naturalText,
+          excluded_text: excludedText,
+          translated_text: result.scene_draft.translated_text,
+          model_profile: profile,
+          selected_tags: selectedTags,
+          ...factOwnersRequest(result.scene_draft),
+          ...(relations.length ? {confirmed_relations: relations} : {}),
+        }),
+      });
+      setLocalParseInfo(local, "已更新显式关系；未调用翻译模型");
       setResult(local);
     } catch (caught) {
       setError(caught as ApiClientError);
@@ -471,7 +581,11 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
           {inputMode === "concepts" ? <>
             <label htmlFor="excluded-concepts">明确排除</label>
             <textarea id="excluded-concepts" value={excludedText} onChange={(event) => editDraft({excluded_text: event.target.value})} placeholder="例如：金发、文字、水印" rows={3} />
-          </> : <p className="natural-mode-hint">需要排除的内容请直接写进描述，例如“不要文字和水印”；抽取后会以删除线事实展示。</p>}
+          </> : <>
+            <label htmlFor="natural-exclusions">明确排除（可选）</label>
+            <textarea id="natural-exclusions" value={excludedText} onChange={(event) => editDraft({excluded_text: event.target.value})} placeholder="例如：文字、水印、金发" rows={3} />
+            <p className="natural-mode-hint">描述里的“不要文字和水印”也会识别；这里用于补充或修正，并始终按排除优先。</p>
+          </>}
           <label htmlFor="model-profile">模型配置</label>
           <select id="model-profile" value={profile} onChange={(event) => editDraft({model_profile: event.target.value})}>
             {profiles.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
@@ -487,10 +601,10 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
       </section>}
 
       {parseInfo && <section className="intent-review" aria-label="自然语言抽取结果">
-        <div><strong>已抽取 {parseInfo.intent.graph.elements.length} 项画面事实</strong><span>{parseInfo.parser.name} · {parseInfo.extraction.summary_zh}</span></div>
-        <div className="intent-facts">{parseInfo.intent.graph.elements.map((element) => <span key={element.id} className={element.state === "excluded" ? "is-excluded" : ""}>{element.original_text}<small>{element.type}</small></span>)}</div>
+        <div><strong>已整理 {reviewedFacts.length} 项画面证据</strong><span>{parseInfo.parser.name} · {parseInfo.extraction.summary_zh}</span></div>
+        <div className="intent-facts">{reviewedFacts.map(({element, count}) => <span key={`${element.state}:${element.original_text}`} className={element.state === "excluded" ? "is-excluded" : ""}>{element.original_text}<small>{element.state === "excluded" ? `排除${count > 1 ? ` · ${count} 个映射` : ""}` : factTypeLabel(element.type)}</small></span>)}</div>
         {parseInfo.intent.scene_plan_en && <details><summary>查看 Hybrid 英文画面计划</summary><p>{parseInfo.intent.scene_plan_en}</p></details>}
-        {result?.scene_draft ? <SceneDraftReview draft={result.scene_draft} relatedSuggestions={result.tag_suggestions || []} selectedTags={selectedTags} busy={loading} onToggle={toggleTagSuggestion} /> : <p className="intent-review-warning">本地翻译只会把本地索引中的精确匹配加入标签；未命中的画面信息会保留在 Hybrid 英文提示词中，提交前可继续检查候选说明。</p>}
+        {result?.scene_draft ? <SceneDraftReview draft={result.scene_draft} relatedSuggestions={result.tag_suggestions || []} selectedTags={selectedTags} busy={loading} onToggle={toggleTagSuggestion} onApplyTranslation={applySceneDraftTranslation} onAssignFactOwner={inputMode === "natural" ? applyFactOwner : undefined} onToggleRelation={inputMode === "natural" ? applySceneRelation : undefined} /> : <p className="intent-review-warning">本地翻译只会把本地索引中的精确匹配加入标签；未命中的画面信息会保留在 Hybrid 英文提示词中，提交前可继续检查候选说明。</p>}
       </section>}
 
       <div className="workbench-results" aria-live="polite">
@@ -498,7 +612,7 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
           <ErrorState message={error.message} requestId={error.requestId} />
         ) : result ? (
           <>
-            <div className="validation-strip"><span className="status-dot is-ready" /><strong>安全校验通过</strong><span>{result.candidates.length} 条候选 · {result.data_pack_id}</span></div>
+            <div className="validation-strip"><span className="status-dot is-ready" /><strong>结构检查通过</strong><span>语义仍需确认 · {result.candidates.length} 条候选 · {result.data_pack_id}</span></div>
             {remoteEnabled && <div className="generation-submit-bar">
               <div><strong>远程生图</strong><span>{compatibleTargets.length ? "选择 V2 已验证目标后，从候选卡片提交" : "当前模型没有已确认指纹的兼容工作流"}</span></div>
               <select aria-label="远程生成目标" value={selectedTarget} onChange={(event) => setSelectedTarget(event.target.value)} disabled={!compatibleTargets.length}>
@@ -574,13 +688,18 @@ function ArtistComparisonPanel({items, base, selectedArtists, seed, remoteEnable
   );
 }
 
-function SceneDraftReview({draft, relatedSuggestions, selectedTags, busy, onToggle}: {
+function SceneDraftReview({draft, relatedSuggestions, selectedTags, busy, onToggle, onApplyTranslation, onAssignFactOwner, onToggleRelation}: {
   draft: SceneDraft;
   relatedSuggestions: TagSuggestion[];
   selectedTags: string[];
   busy: boolean;
   onToggle: (tag: string) => Promise<void>;
+  onApplyTranslation: (translatedText: string) => Promise<void>;
+  onAssignFactOwner?: (factId: string, entityId: string) => Promise<void>;
+  onToggleRelation?: (relation: SceneRelation, confirmed: boolean) => Promise<void>;
 }) {
+  const [translatedText, setTranslatedText] = useState(draft.translated_text);
+  useEffect(() => setTranslatedText(draft.translated_text), [draft.translated_text]);
   const suggestions = new Map<string, {rendered: string; reason: string}>();
   for (const item of draft.suggestions) {
     if (item.canonical_tag) suggestions.set(item.canonical_tag, {rendered: item.canonical_tag.replaceAll("_", " "), reason: item.reason});
@@ -591,8 +710,15 @@ function SceneDraftReview({draft, relatedSuggestions, selectedTags, busy, onTogg
   return (
     <section className="scene-draft-review" aria-label="Scene Draft">
       <header><div><strong>Scene Draft</strong><span>原文证据、译文和本地映射分开保存；建议不会自动加入候选。</span></div></header>
-      <div className="scene-draft-prose"><strong>本地译文</strong><p>{draft.translated_text || "翻译结果为空；请编辑原文后重试。"}</p></div>
-      <DraftGroup label="已确认" items={draft.confirmed} empty="当前没有可直接确认的本地标签。" />
+      <div className="scene-draft-prose">
+        <div><strong>可编辑画面计划</strong><span>修改后只重新映射与渲染，不重新加载翻译模型。</span></div>
+        <textarea aria-label="可编辑画面计划" value={translatedText} disabled={busy} onChange={(event) => setTranslatedText(event.target.value)} rows={4} />
+        <button type="button" disabled={busy || !translatedText.trim() || translatedText.trim() === draft.translated_text.trim()} onClick={() => void onApplyTranslation(translatedText.trim())}>{busy ? "正在重新映射…" : "应用译文修改"}</button>
+      </div>
+      <LayeredDraftGroup items={draft.confirmed} />
+      <EntityOwnershipReview draft={draft} busy={busy} onAssign={onAssignFactOwner} />
+      <SceneRelationReview draft={draft} busy={busy} onToggle={onToggleRelation} />
+      <DraftGroup label="明确排除" items={draft.exclusions || []} empty="当前没有识别到明确排除项。" excluded />
       <div className="scene-draft-group">
         <strong>待确认建议</strong>
         {suggestions.size ? <div className="scene-draft-suggestions">{[...suggestions].map(([tag, item]) => {
@@ -606,8 +732,80 @@ function SceneDraftReview({draft, relatedSuggestions, selectedTags, busy, onTogg
   );
 }
 
-function DraftGroup({label, items, empty}: {label: string; items: SceneDraft["confirmed"]; empty: string}) {
-  return <div className="scene-draft-group"><strong>{label}</strong>{items.length ? <ul>{items.map((item) => <li key={item.id}><span>{item.text}</span>{item.canonical_tag && <code>{item.canonical_tag.replaceAll("_", " ")}</code>}<small>{item.reason}</small></li>)}</ul> : <p>{empty}</p>}</div>;
+function DraftGroup({label, items, empty, excluded = false}: {label: string; items: SceneDraft["confirmed"]; empty: string; excluded?: boolean}) {
+  return <div className={`scene-draft-group${excluded ? " is-excluded" : ""}`}><strong>{label}</strong>{items.length ? <ul>{items.map((item) => <li key={item.id}><span>{item.text}</span>{item.canonical_tag && <code>{item.canonical_tag.replaceAll("_", " ")}</code>}<small>{item.reason}</small></li>)}</ul> : <p>{empty}</p>}</div>;
+}
+
+const factLayerMeta: Array<{type: NonNullable<SceneDraft["confirmed"][number]["fact_type"]>; label: string}> = [
+  {type: "character", label: "角色身份"},
+  {type: "subject", label: "可见主体"},
+  {type: "appearance", label: "外观特征"},
+  {type: "clothing", label: "服装配饰"},
+  {type: "action", label: "动作姿态"},
+  {type: "relation", label: "实体关系"},
+  {type: "object", label: "物体道具"},
+  {type: "scene", label: "场景光线"},
+  {type: "composition", label: "构图镜头"},
+  {type: "style", label: "风格表达"},
+  {type: "quality", label: "模型质量控制"},
+  {type: "other", label: "尚未归层"},
+];
+
+function LayeredDraftGroup({items}: {items: SceneDraft["confirmed"]}) {
+  const layers = factLayerMeta
+    .map((meta) => ({...meta, items: items.filter((item) => (item.fact_type || "other") === meta.type)}))
+    .filter((layer) => layer.items.length > 0);
+  return (
+    <div className="scene-draft-layers">
+      <div><strong>已确认画面事实</strong><span>只改变排列和审阅层次，不会补充原文没有的内容。</span></div>
+      {layers.length ? layers.map((layer) => (
+        <DraftGroup key={layer.type} label={layer.label} items={layer.items} empty="" />
+      )) : <p>当前没有可直接确认的本地标签。</p>}
+    </div>
+  );
+}
+
+const ownerAssignableTypes = new Set(["appearance", "clothing", "action", "relation", "object"]);
+
+function EntityOwnershipReview({draft, busy, onAssign}: {draft: SceneDraft; busy: boolean; onAssign?: (factId: string, entityId: string) => Promise<void>}) {
+  const entities = draft.entities || [];
+  if (!entities.length || !onAssign) return null;
+  const entityById = new Map(entities.map((entity) => [entity.id, entity]));
+  const entitySourceIds = new Set(entities.map((entity) => entity.source_element_id));
+  const facts = draft.confirmed.filter((item) => !entitySourceIds.has(item.id) && ownerAssignableTypes.has(item.fact_type || "other"));
+  return (
+    <div className="scene-entity-review">
+      <div><strong>实体与属性归属</strong><span>建议不会自动确认，也不会因此改变当前提示词。</span></div>
+      <div className="scene-entity-list">{entities.map((entity) => <span key={entity.id}><b>{entity.label}</b><code>{entity.canonical_tag.replaceAll("_", " ")}</code></span>)}</div>
+      {facts.length ? <ul>{facts.map((item) => {
+        const suggested = item.suggested_owner_entity_id ? entityById.get(item.suggested_owner_entity_id) : null;
+        return <li key={item.id}>
+          <div><span>{item.text}</span>{suggested && !item.owner_entity_id && <small>建议归属：{suggested.label}</small>}</div>
+          <select aria-label={`${item.text} 的归属`} value={item.owner_entity_id || ""} disabled={busy} onChange={(event) => void onAssign(item.id, event.target.value)}>
+            <option value="">未确认归属</option>
+            {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.label}</option>)}
+          </select>
+        </li>;
+      })}</ul> : <p>当前没有可绑定到实体的已确认属性、动作或道具。</p>}
+    </div>
+  );
+}
+
+function SceneRelationReview({draft, busy, onToggle}: {draft: SceneDraft; busy: boolean; onToggle?: (relation: SceneRelation, confirmed: boolean) => Promise<void>}) {
+  const relations = draft.relations || [];
+  if (!relations.length || !onToggle) return null;
+  return (
+    <div className="scene-relation-review">
+      <div><strong>显式关系</strong><span>只有再次确认的关系才进入 Hybrid；Literal 始终不变。</span></div>
+      <ul>{relations.map((relation) => {
+        const confirmed = relation.state === "confirmed";
+        return <li key={relation.id}>
+          <div><code>{relation.phrase}</code><small>{relation.reason}</small></div>
+          <button type="button" aria-pressed={confirmed} disabled={busy} onClick={() => void onToggle(relation, !confirmed)}>{confirmed ? "取消确认" : "确认关系"}</button>
+        </li>;
+      })}</ul>
+    </div>
+  );
 }
 
 function CandidateCard({candidate, copied, onCopy, onGenerate, generationBusy = false, generationDisabled = false, onUseArtistComparisonBase, isArtistComparisonBase = false}: {
@@ -627,7 +825,7 @@ function CandidateCard({candidate, copied, onCopy, onGenerate, generationBusy = 
       <header className="candidate-header">
         <span className="lane-index">{meta.index}</span>
         <div><span>{meta.label}</span><h2>{candidate.title}</h2><p>{meta.detail}</p></div>
-        <span className="candidate-valid">✓ VALID</span>
+        <span className="candidate-valid">✓ FORMAT</span>
       </header>
       <PromptBlock label="Positive" value={candidate.positive_prompt} copied={copied === `${candidate.id}:positive`} onCopy={() => onCopy(candidate, "positive")} />
       {candidate.negative_prompt && <PromptBlock label="Negative" value={candidate.negative_prompt} copied={copied === `${candidate.id}:negative`} onCopy={() => onCopy(candidate, "negative")} negative />}
@@ -660,22 +858,97 @@ function splitConcepts(value: string): string[] {
   return value.split(/[，,;；\n]+/).map((item) => item.trim()).filter(Boolean);
 }
 
+function mergeImportedTags(value: string, importedTags: string[]): string {
+  const current = splitConcepts(value);
+  const known = new Set(current.map((item) => item.toLowerCase().replaceAll(" ", "_")));
+  return [...current, ...importedTags.filter((item) => !known.has(item.toLowerCase().replaceAll(" ", "_")))].join("，");
+}
+
 function sameStringList(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+function confirmedFactOwners(draft: SceneDraft): Record<string, string> {
+  return Object.fromEntries(draft.confirmed.filter((item) => item.owner_entity_id).map((item) => [item.id, item.owner_entity_id as string]));
+}
+
+function factOwnersRequest(draft: SceneDraft): {fact_owners?: Record<string, string>} {
+  const factOwners = confirmedFactOwners(draft);
+  return Object.keys(factOwners).length ? {fact_owners: factOwners} : {};
+}
+
+type SceneRelationRequest = Pick<SceneRelation, "source_entity_id" | "target_element_id" | "relation">;
+
+function sceneRelationRequest(relation: SceneRelation): SceneRelationRequest {
+  return {source_entity_id: relation.source_entity_id, target_element_id: relation.target_element_id, relation: relation.relation};
+}
+
+function confirmedSceneRelations(draft: SceneDraft): SceneRelationRequest[] {
+  return (draft.relations || []).filter((item) => item.state === "confirmed").map(sceneRelationRequest);
+}
+
+function confirmedRelationsRequest(draft: SceneDraft): {confirmed_relations?: SceneRelationRequest[]} {
+  const relations = confirmedSceneRelations(draft);
+  return relations.length ? {confirmed_relations: relations} : {};
+}
+
+function relationRequestKey(relation: SceneRelationRequest): string {
+  return `${relation.source_entity_id}\u0000${relation.target_element_id}\u0000${relation.relation}`;
+}
+
+function workspaceCandidateSnapshot(result: WorkbenchResponse | null): WorkbenchResponse | null {
+  if (!result) return null;
+  return {
+    intent: result.intent,
+    candidates: result.candidates,
+    validation: result.validation,
+    data_pack_id: result.data_pack_id,
+    ...(result.artist_suggestions ? {artist_suggestions: result.artist_suggestions} : {}),
+    ...(result.tag_suggestions ? {tag_suggestions: result.tag_suggestions} : {}),
+    ...(result.scene_draft ? {scene_draft: result.scene_draft} : {}),
+  };
+}
+
+function groupIntentFacts(elements: IntentParseResponse["intent"]["graph"]["elements"]): Array<{element: IntentParseResponse["intent"]["graph"]["elements"][number]; count: number}> {
+  const grouped = new Map<string, {element: IntentParseResponse["intent"]["graph"]["elements"][number]; count: number}>();
+  for (const element of elements) {
+    const key = `${element.state}\u0000${element.original_text}`;
+    const existing = grouped.get(key);
+    if (existing) existing.count += 1;
+    else grouped.set(key, {element, count: 1});
+  }
+  return [...grouped.values()];
+}
+
+function factTypeLabel(value: string): string {
+  return factLayerMeta.find((item) => item.type === value)?.label || "尚未归层";
+}
+
+function buildLocalParseInfo(payload: WorkbenchResponse & {local_translation?: {engine: string}}, label: string): IntentParseResponse {
+  return {
+    intent: payload.intent,
+    extraction: {summary_zh: label, people_count: 0, subject_mode: "local", content_rating: "unknown", scene_type: "local", truncated_source: false},
+    parser: {name: `本地翻译 · ${payload.local_translation?.engine || "当前译文"}`, source: "v2_local_translation"},
+  };
 }
 
 function targetKey(target: GenerationTarget): string {
   return `${target.remote_profile_id}::${target.workflow_profile_id}`;
 }
 
-function loadRecoveredWorkbench(): {draft: WorkspaceDraft; result: WorkbenchResponse | null; workspaceTitle: string} | null {
+function loadRecoveredWorkbench(): RecoveredWorkbench | null {
   if (import.meta.env.MODE === "test") return null;
   try {
     const value = localStorage.getItem(RECOVERY_KEY);
     if (!value) return null;
-    const parsed = JSON.parse(value) as Partial<{draft: WorkspaceDraft; result: WorkbenchResponse | null; workspaceTitle: string}>;
+    const parsed = JSON.parse(value) as Partial<RecoveredWorkbench>;
     if (!parsed.draft || typeof parsed.workspaceTitle !== "string") return null;
-    return {draft: parsed.draft, result: parsed.result || null, workspaceTitle: parsed.workspaceTitle};
+    const workspace = parsed.workspace
+      && typeof parsed.workspace.id === "string"
+      && typeof parsed.workspace.revision === "number"
+      ? parsed.workspace
+      : null;
+    return {draft: parsed.draft, result: parsed.result || null, workspaceTitle: parsed.workspaceTitle, workspace};
   } catch {
     return null;
   }

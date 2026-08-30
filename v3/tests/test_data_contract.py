@@ -88,7 +88,7 @@ def test_build_query_and_verify_reference_pack(tmp_path: Path) -> None:
     manifest = builder().build(database, manifest_path)
 
     assert manifest.counts.model_dump() == {
-        "tags": 6,
+        "tags": 7,
         "artists": 2,
         "aliases": 2,
         "tag_edges": 6,

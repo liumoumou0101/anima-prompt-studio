@@ -1,12 +1,23 @@
 import {useEffect, useState} from "react";
-import {Link, useParams} from "react-router-dom";
+import {Check, Plus} from "@phosphor-icons/react";
+import {Link, useParams, useSearchParams} from "react-router-dom";
 import {ApiClientError, apiRequest} from "../lib/api";
+import {tagDetailToSearchItem, useTagBasket} from "../lib/tagBasket";
 import type {TagDetail} from "../lib/types";
+import {TagBasket} from "../components/TagBasket";
 import {NsfwBadge, TagBadge} from "../components/TagBadge";
 import {ErrorState, LoadingState} from "../components/States";
 
 export function TagDetailPage() {
   const {name = ""} = useParams();
+  const [searchParams] = useSearchParams();
+  const sourceGroup = searchParams.get("group") || "";
+  const sourceUngrouped = searchParams.get("source") === "ungrouped";
+  const sourceArtist = searchParams.get("source") === "artist" ? searchParams.get("artist") || "" : "";
+  const backTarget = sourceGroup ? `/tags/groups/${encodeURIComponent(sourceGroup)}` : sourceUngrouped ? "/tags/ungrouped" : sourceArtist ? `/artists/${encodeURIComponent(sourceArtist)}` : "/tags";
+  const backLabel = sourceGroup ? "返回完整分组" : sourceUngrouped ? "返回独立标签库" : sourceArtist ? "返回画师场景分析" : "返回标签超市";
+  const relatedSuffix = sourceGroup ? `?group=${encodeURIComponent(sourceGroup)}` : sourceUngrouped ? "?source=ungrouped" : sourceArtist ? `?source=artist&artist=${encodeURIComponent(sourceArtist)}` : "";
+  const basket = useTagBasket();
   const [detail, setDetail] = useState<TagDetail | null>(null);
   const [error, setError] = useState<ApiClientError | null>(null);
   const [runId, setRunId] = useState(0);
@@ -25,8 +36,8 @@ export function TagDetailPage() {
   if (!detail) return <div className="page"><LoadingState label="正在读取标签详情…" /></div>;
 
   return (
-    <div className="page detail-page">
-      <Link className="back-link" to="/tags">← 返回标签搜索</Link>
+    <div className={`page detail-page${basket.selected.length ? " has-selection" : ""}`}>
+      <Link className="back-link" to={backTarget}>← {backLabel}</Link>
       <header className="detail-hero">
         <div className="detail-title-block">
           <div className="detail-badges"><TagBadge category={detail.category_name} /><NsfwBadge value={detail.nsfw} />{detail.deprecated && <span className="safety-badge">Deprecated</span>}</div>
@@ -34,7 +45,7 @@ export function TagDetailPage() {
           <code>{detail.name}</code>
           <p className="detail-cn">{detail.cn_name || "暂无中文名称"}</p>
         </div>
-        <div className="detail-metric"><strong>{formatNumber(detail.post_count)}</strong><span>Danbooru posts</span><small>快照热度，不是画质分</small></div>
+        <div className="detail-action-column"><div className="detail-metric"><strong>{formatNumber(detail.post_count)}</strong><span>Danbooru posts</span><small>快照热度，不是画质分</small></div><button type="button" className={basket.selectedNames.has(detail.name) ? "detail-basket-button is-selected" : "detail-basket-button"} onClick={() => basket.toggle(tagDetailToSearchItem(detail))}>{basket.selectedNames.has(detail.name) ? <><Check />已加入标签篮</> : <><Plus />加入标签篮</>}</button></div>
       </header>
       <div className="detail-layout">
         <div className="detail-main">
@@ -45,7 +56,7 @@ export function TagDetailPage() {
           <section className="content-card">
             <SectionTitle index="02" title="相关标签" subtitle={`${detail.related.length} 个高置信关系`} />
             {detail.related.length ? <div className="related-list">{detail.related.map((tag) => (
-              <Link key={tag.id} className="related-item" to={`/tags/${encodeURIComponent(tag.name)}`}>
+              <Link key={tag.id} className="related-item" to={`/tags/${encodeURIComponent(tag.name)}${relatedSuffix}`}>
                 <div><strong>{tag.render_name}</strong><span>{tag.cn_name || tag.name}</span></div>
                 <div className="relation-score"><span style={{"--score": tag.display_score} as React.CSSProperties} /><small>{Math.round(tag.display_score * 100)}%</small></div>
               </Link>
@@ -63,13 +74,14 @@ export function TagDetailPage() {
           </section>
           <section className="content-card compact-card">
             <SectionTitle index="C" title="标签组" />
-            <div className="group-list">{detail.groups.length ? detail.groups.map((group) => <div key={group.id}><strong>{group.cn_name || group.name}</strong><code>{group.name}</code></div>) : <span className="muted">未加入标签组</span>}</div>
+            <div className="group-list">{detail.groups.length ? detail.groups.map((group) => <Link key={group.id} to={`/tags/groups/${encodeURIComponent(group.name)}`}><strong>{group.cn_name || group.name}</strong><code>{group.name}</code></Link>) : <span className="muted">未加入标签组</span>}</div>
           </section>
           <section className="preview-placeholder">
             <span>PREVIEW OFFLINE</span><strong>在线图片预览尚未启用</strong><p>本地标签、说明与推荐不受影响。</p>
           </section>
         </aside>
       </div>
+      <TagBasket selected={basket.selected} onToggle={basket.toggle} onClear={basket.clear} />
     </div>
   );
 }

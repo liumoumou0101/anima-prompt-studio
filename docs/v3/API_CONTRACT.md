@@ -4,7 +4,7 @@
 
 基础路径：`/api/v3`
 
-当前实现端点：`/health`、`/session/exchange`、`/bootstrap`、`/tags/search`、`/tags/{canonical_name}`、`/related-tags`、`/artists/recommend`、`/intent/parse`、`/workbench/candidates`、`/prompt-candidates`、`/generation-requests/preview`、`/generation-targets`、`/generation-runs` 提交/列表/查询/排队取消/恢复、`/artist-comparisons` 批量画师对照、`/gallery/assets` 列表/原图/缩略图和 `/workspaces` CRUD。其余端点按后续任务继续实现，未实现能力不会返回伪造成功响应。
+当前实现端点：`/health`、`/session/exchange`、`/bootstrap`、`/tags/search`、`/tags/{canonical_name}`、`/related-tags`、`/artists/search`、`/artists/{canonical_name}`、`/artists/recommend`、`/intent/parse`、`/workbench/candidates`、`/prompt-candidates`、`/generation-requests/preview`、`/generation-targets`、`/generation-runs` 提交/列表/查询/排队取消/恢复、`/artist-comparisons` 批量画师对照、`/gallery/assets` 列表/原图/缩略图和 `/workspaces` CRUD。其余端点按后续任务继续实现，未实现能力不会返回伪造成功响应。
 
 ## 1. 通用规则
 
@@ -155,7 +155,11 @@ HTTP 500 的 `message` 不返回本地绝对路径、凭据、远程命令或堆
 
 ### `GET /artists/search`
 
-支持名称、中文名、别名和擅长标签搜索。
+已实现 canonical 名、`@render name` 和空格形式搜索，并返回历史作品量、关联线索数和代表性非敏感通用标签。当前数据包没有画师中文名/别名字段，因此不会伪造这两类检索能力。
+
+### `GET /artists/{canonical_name}`
+
+返回画师基本信息及最多 50 条画师—标签共现线索。每条线索包含 NPMI 特征关联、画师作品覆盖率、历史共现数、敏感属性和场景维度；这些指标用于安排测试，不得称为画质分。
 
 ### `POST /artists/recommend`
 
@@ -191,14 +195,25 @@ HTTP 500 的 `message` 不返回本地绝对路径、凭据、远程命令或堆
 
 ```json
 {
-  "source_text": "一位未知角色站在雨中",
+  "source_text": "一位未知角色站在雨中，不要文字和水印",
+  "excluded_text": "签名",
   "model_profile": "anima_aesthetic_v1",
   "translated_text": "An unknown character stands in the rain",
-  "selected_tags": ["rain"]
+  "selected_tags": ["rain"],
+  "fact_owners": {},
+  "confirmed_relations": []
 }
 ```
 
-`translated_text` 省略时由本地翻译生成；传入时会原样复用，便于用户在不重新翻译或解析的情况下确认/取消 `selected_tags` 并重新编译。响应中的 `scene_draft` 按 `confirmed`、`suggestions` 和 `unresolved` 展示证据状态：原文精确命中与用户选择才进入 Literal；译文索引与共现结果只进入建议池。若没有安全标签命中，Literal 使用可追踪的 `local_prose_baseline` 保留译文，而不是返回 422 或擅自补充标签。
+`translated_text` 省略时由本地翻译生成；传入时会原样复用，便于用户编辑画面计划或确认/取消 `selected_tags` 后只重新映射和渲染。显式的“不要/避免/排除”等原文片段会在翻译前分流，`excluded_text` 可补充或修正排除事实；两者均按排除优先，不能进入正向提示词。
+
+响应中的 `scene_draft` 按 `confirmed`、`exclusions`、`suggestions` 和 `unresolved` 展示证据状态：原文精确命中与用户选择才进入 Literal；译文索引与共现结果只进入建议池；部分命中不会再宣称整句已理解。像“文字”这种没有唯一 canonical 的广义排除概念，会透明展开成多个可审阅负向标签，并标记为概念展开而非精确命中。若没有安全正向标签命中，Literal 使用可追踪的 `local_prose_baseline` 保留译文，而不是返回 422 或擅自补充标签。
+
+每个 `SceneDraftItem` 同时返回 `fact_type`。本地入口只根据参考数据中唯一对应的标签组标记角色/主体、外观、服装、动作、场景、构图或风格；缺少分组或存在跨层歧义时返回 `other`。Literal renderer 使用同一事实类型排序已有标签，同层保持原始证据顺序；该步骤不会添加原文未出现的质量词、构图词或增强标签。
+
+`scene_draft.entities` 只包含由 character 类别或明确人物/传说生物标签组支持的可见实体锚点。可归属事实分别返回 `owner_entity_id` 与 `suggested_owner_entity_id`：前者是用户已确认结果，后者只是单实体情况下的界面建议。客户端通过 `fact_owners: {element_id: entity_id}` 确认或取消归属；服务端只接受当前草稿仍存在的实体，归属变化不会重新调用翻译模型，也不会改变 Literal 提示词文本。
+
+`scene_draft.relations` 返回当前可建立的显式关系及 `suggested | confirmed` 状态。首版只在服装事实已经通过 `fact_owners` 归属到实体后，建议 `wearing`；客户端还必须通过 `confirmed_relations: [{source_entity_id, target_element_id, relation: "wearing"}]` 单独确认。确认后的关系进入 `ConstraintGraph.edges` 并生成或更新 Hybrid，未确认关系不影响任何候选，Literal 在两种状态下都不变。关系引用失效时服务端丢弃该关系并返回风险说明，不把它迁移给其他事实或实体。
 
 ### `POST /intent/parse`（已实现）
 

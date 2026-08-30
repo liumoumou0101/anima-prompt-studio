@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
@@ -77,11 +78,20 @@ class TranslationRequest(ApiModel):
     direction: Literal["zh_en", "en_zh"] = "zh_en"
 
 
+class LocalNaturalRelationInput(ApiModel):
+    source_entity_id: str = Field(pattern=r"^entity_[A-Za-z0-9._-]+$", max_length=240)
+    target_element_id: str = Field(pattern=r"^e_[A-Za-z0-9._-]+$", max_length=200)
+    relation: Literal["wearing"]
+
+
 class LocalNaturalCandidateRequest(ApiModel):
     source_text: str = Field(min_length=1, max_length=10_000)
+    excluded_text: str = Field(default="", max_length=10_000)
     model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)
     translated_text: str | None = Field(default=None, min_length=1, max_length=20_000)
     selected_tags: list[str] = Field(default_factory=list, max_length=40)
+    fact_owners: dict[str, str] = Field(default_factory=dict, max_length=100)
+    confirmed_relations: list[LocalNaturalRelationInput] = Field(default_factory=list, max_length=100)
 
     @field_validator("selected_tags")
     @classmethod
@@ -95,6 +105,16 @@ class LocalNaturalCandidateRequest(ApiModel):
                 normalized.append(tag)
         return normalized
 
+    @field_validator("fact_owners")
+    @classmethod
+    def fact_owners_use_stable_ids(cls, values: dict[str, str]) -> dict[str, str]:
+        for fact_id, entity_id in values.items():
+            if re.fullmatch(r"e_[A-Za-z0-9._-]+", fact_id) is None:
+                raise ValueError("fact_owners 的 key 必须是稳定 element ID。")
+            if re.fullmatch(r"entity_[A-Za-z0-9._-]+", entity_id) is None:
+                raise ValueError("fact_owners 的 value 必须是稳定 entity ID。")
+        return values
+
 
 class IntentCandidateRequest(ApiModel):
     intent: IntentDocument
@@ -104,10 +124,21 @@ class IntentCandidateRequest(ApiModel):
 class WorkspaceDraft(ApiModel):
     positive_text: str = Field(default="", max_length=10_000)
     excluded_text: str = Field(default="", max_length=10_000)
-    model_profile: str = Field(default="anima_base_v1", min_length=1, max_length=100)
+    model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)
     input_mode: Literal["concepts", "natural"] = "concepts"
     natural_text: str = Field(default="", max_length=50_000)
     selected_tags: list[str] = Field(default_factory=list, max_length=40)
+
+
+class SceneEntitySnapshot(ApiModel):
+    """A visible entity anchor backed by a reviewed character or subject tag."""
+
+    id: str = Field(pattern=r"^entity_[A-Za-z0-9._-]+$", max_length=240)
+    label: str = Field(min_length=1, max_length=500)
+    canonical_tag: str = Field(min_length=1, max_length=200)
+    source_element_id: str = Field(pattern=r"^e_[A-Za-z0-9._-]+$", max_length=200)
+    source_start: int | None = Field(default=None, ge=0)
+    source_end: int | None = Field(default=None, ge=1)
 
 
 class SceneDraftItem(ApiModel):
@@ -116,16 +147,32 @@ class SceneDraftItem(ApiModel):
     id: str = Field(min_length=1, max_length=200)
     text: str = Field(min_length=1, max_length=500)
     canonical_tag: str | None = Field(default=None, max_length=200)
-    source: Literal["source_exact", "translation_exact", "user_selected", "unresolved"]
+    source: Literal["source_exact", "source_excluded", "translation_exact", "user_selected", "unresolved"]
+    fact_type: IntentElementType = IntentElementType.OTHER
+    owner_entity_id: str | None = Field(default=None, pattern=r"^entity_[A-Za-z0-9._-]+$", max_length=240)
+    suggested_owner_entity_id: str | None = Field(default=None, pattern=r"^entity_[A-Za-z0-9._-]+$", max_length=240)
     reason: str = Field(min_length=1, max_length=500)
     source_start: int | None = Field(default=None, ge=0)
     source_end: int | None = Field(default=None, ge=1)
 
 
+class SceneRelationSnapshot(ApiModel):
+    id: str = Field(pattern=r"^c_[A-Za-z0-9._-]+$", max_length=240)
+    source_entity_id: str = Field(pattern=r"^entity_[A-Za-z0-9._-]+$", max_length=240)
+    target_element_id: str = Field(pattern=r"^e_[A-Za-z0-9._-]+$", max_length=200)
+    relation: Literal["wearing"]
+    state: Literal["suggested", "confirmed"]
+    phrase: str = Field(min_length=1, max_length=1000)
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class SceneDraftSnapshot(ApiModel):
     source_text: str = Field(min_length=1, max_length=10_000)
     translated_text: str = Field(default="", max_length=20_000)
+    entities: list[SceneEntitySnapshot] = Field(default_factory=list, max_length=20)
+    relations: list[SceneRelationSnapshot] = Field(default_factory=list, max_length=100)
     confirmed: list[SceneDraftItem] = Field(default_factory=list, max_length=100)
+    exclusions: list[SceneDraftItem] = Field(default_factory=list, max_length=100)
     suggestions: list[SceneDraftItem] = Field(default_factory=list, max_length=100)
     unresolved: list[SceneDraftItem] = Field(default_factory=list, max_length=20)
     risk_notes: list[str] = Field(default_factory=list, max_length=20)

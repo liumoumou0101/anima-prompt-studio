@@ -4,7 +4,7 @@ import type {BootstrapResponse} from "../lib/types";
 const nav = [
   {to: "/workbench", glyph: "✦", label: "工作台", enabled: true},
   {to: "/tags", glyph: "#", label: "标签", enabled: true},
-  {to: "/artists", glyph: "@", label: "画师", enabled: false},
+  {to: "/artists", glyph: "@", label: "画师", enabled: true},
   {to: "/generate", glyph: "◈", label: "生成", enabled: true},
   {to: "/gallery", glyph: "▦", label: "画廊", enabled: true},
 ];
