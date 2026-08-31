@@ -1326,6 +1326,13 @@ def create_api_runtime(
             raise ApiError(503, "gallery_not_configured", "画廊尚未连接 V2 图片目录。")
         return service.move_to_trash(payload.paths)
 
+    @app.post(f"{API_PREFIX}/gallery/assets/delete", dependencies=[Depends(require_session)])
+    def delete_gallery_assets_permanently(payload: GalleryPathsRequest) -> dict[str, object]:
+        service = app.state.gallery_service
+        if service is None:
+            raise ApiError(503, "gallery_not_configured", "画廊尚未连接 V2 图片目录。")
+        return service.delete_permanently(payload.paths)
+
     @app.get(f"{API_PREFIX}/gallery/trash", dependencies=[Depends(require_session)])
     def list_gallery_trash(limit: int = Query(default=500, ge=1, le=1000)) -> dict[str, object]:
         service = app.state.gallery_service

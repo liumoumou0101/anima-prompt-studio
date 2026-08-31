@@ -381,7 +381,7 @@ class RemoteConnectionTestRequest(ApiModel):
 
 
 class GalleryPathsRequest(ApiModel):
-    paths: list[str] = Field(min_length=1, max_length=100)
+    paths: list[str] = Field(min_length=1, max_length=1000)
 
 
 class GalleryStateRequest(GalleryPathsRequest):

@@ -34,6 +34,14 @@ def make_gallery(tmp_path: Path) -> tuple[Path, Path, Path]:
                     "lane": "hybrid",
                     "versions": {"data_pack": "pack-r1", "algorithm": "hybrid-lane-v2"},
                 },
+                "artist_comparison": {
+                    "id": "comparison-source",
+                    "artist": "harusa1107",
+                    "rendered_artist": "@harusa1107",
+                    "position": 3,
+                    "total": 10,
+                    "seed": 42,
+                },
             },
         },
         "artifacts": [{"local_path": str(image)}],
@@ -64,6 +72,7 @@ def test_v2_gallery_adapter_indexes_manifest_and_preserves_v3_candidate_trace(
     assert asset["negative_prompt"] == "text, watermark"
     assert asset["candidate"]["lane"] == "hybrid"
     assert asset["candidate"]["versions"]["data_pack"] == "pack-r1"
+    assert asset["artist_comparison"]["rendered_artist"] == "@harusa1107"
     assert asset["generation_params"] == {"steps": 28, "cfg": 6.5, "seed": 42, "width": 1024, "height": 1536}
     assert service.resolve_content(asset["path"]) == image.resolve()
     assert service.shutdown(timeout=2) is True
@@ -106,6 +115,9 @@ def test_gallery_state_and_recoverable_trash_respect_active_process_lock(tmp_pat
     blocked = service.move_to_trash([relative])
     assert blocked["moved"] == []
     assert "正在处理" in blocked["failed"][0]["error"]
+    blocked_delete = service.delete_permanently([relative])
+    assert blocked_delete["deleted"] == []
+    assert "正在处理" in blocked_delete["failed"][0]["error"]
     assert image.is_file()
 
     repository = SQLiteRepository(database)
@@ -145,9 +157,28 @@ def test_gallery_adapter_permanently_deletes_only_validated_trash_assets(tmp_pat
     assert not image.exists()
 
 
+def test_gallery_adapter_batch_delete_removes_live_files_but_never_outside_paths(tmp_path: Path) -> None:
+    database, root, image = make_gallery(tmp_path)
+    second = image.with_name("second.webp")
+    second.write_bytes(b"second-image")
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"outside")
+    service = V2GalleryReadService(database, root)
+    paths = [image.relative_to(root).as_posix(), second.relative_to(root).as_posix(), "../outside.png"]
+
+    result = service.delete_permanently(paths)
+
+    assert result["deleted"] == sorted(paths[:2])
+    assert len(result["failed"]) == 1
+    assert not image.exists()
+    assert not second.exists()
+    assert outside.is_file()
+
+
 class FakeProcessManager:
     def __init__(self) -> None:
         self.submitted: list[tuple[str, str, int]] = []
+        self.assets: list[dict] = []
 
     def configuration_payload(self):
         return {"available": True, "regenAvailable": True, "scale": 1.5}
@@ -157,10 +188,12 @@ class FakeProcessManager:
 
     def submit(self, _source, relative, _asset):
         self.submitted.append(("upscale", relative, 1))
+        self.assets.append(_asset)
         return {"id": "job-upscale", "state": "queued", "operation": "gallery_upscale_1_5x"}
 
     def submit_regenerate(self, _source, relative, _asset, count):
         self.submitted.append(("regenerate", relative, count))
+        self.assets.append(_asset)
         return {"id": "job-regen", "state": "queued", "operation": "gallery_txt2img_more"}
 
     def cancel(self, job_id):
@@ -187,6 +220,9 @@ def test_gallery_process_adapter_submits_both_reused_v2_operations(tmp_path: Pat
     assert service.submit_process([relative], "upscale")["jobs"][0]["id"] == "job-upscale"
     assert service.submit_process([relative], "regenerate", 3)["jobs"][0]["id"] == "job-regen"
     assert manager.submitted == [("upscale", relative, 1), ("regenerate", relative, 3)]
+    assert manager.assets[1]["parameters"]["integration_metadata"]["candidate"]["id"] == "candidate_hybrid"
+    assert manager.assets[1]["parameters"]["integration_metadata"]["artist_comparison"]["rendered_artist"] == "@harusa1107"
+    assert manager.assets[1]["parameters"]["negative_prompt"] == "text, watermark"
     assert service.process_action("job-1", "cancel")["job"]["state"] == "canceled"
     assert service.process_action("job-1", "retry")["job"]["state"] == "queued"
     assert service.process_action("", "clear_completed") == {"cleared": 2}

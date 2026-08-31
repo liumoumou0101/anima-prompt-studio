@@ -1462,6 +1462,8 @@ def test_gallery_api_lists_and_streams_only_files_inside_output_root(
     image = output_root / "项目" / "batch" / "one.png"
     image.parent.mkdir(parents=True)
     image.write_bytes(b"gallery-image")
+    direct_delete_image = image.with_name("direct-delete.png")
+    direct_delete_image.write_bytes(b"delete-me")
     outside = tmp_path / "outside.png"
     outside.write_bytes(b"outside")
     v2_database = tmp_path / "v2-gallery.db"
@@ -1484,7 +1486,7 @@ def test_gallery_api_lists_and_streams_only_files_inside_output_root(
     assert unauthorized_list.status_code == 401
     listed = client.get("/api/v3/gallery/assets", headers={"X-Anima-Session": token})
     assert listed.status_code == 200
-    asset = listed.json()["items"][0]
+    asset = next(item for item in listed.json()["items"] if item["name"] == "one.png")
     assert asset["project"] == "项目"
 
     # The exchange cookie is scoped only to image content so native <img> requests work
@@ -1496,6 +1498,15 @@ def test_gallery_api_lists_and_streams_only_files_inside_output_root(
     assert thumbnail.status_code == 200
     assert thumbnail.content == b"gallery-image"
     write_headers = {"X-Anima-Session": token, "Origin": ORIGIN}
+    direct_asset = next(item for item in listed.json()["items"] if item["name"] == "direct-delete.png")
+    direct_deleted = client.post(
+        "/api/v3/gallery/assets/delete",
+        json={"paths": [direct_asset["path"]]},
+        headers=write_headers,
+    )
+    assert direct_deleted.status_code == 200
+    assert direct_deleted.json()["deleted"] == [direct_asset["path"]]
+    assert not direct_delete_image.exists()
     state = client.post(
         "/api/v3/gallery/assets/state",
         json={"paths": [asset["path"]], "state": "kept"},

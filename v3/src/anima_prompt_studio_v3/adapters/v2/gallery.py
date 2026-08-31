@@ -9,6 +9,7 @@ from anima_prompt_studio.repositories import SQLiteRepository
 from anima_prompt_studio.services.gallery_assets import (
     IMAGE_SUFFIXES,
     TRASH_DIR_NAME,
+    delete_gallery_images_permanently,
     delete_images_permanently,
     move_images_to_trash,
     resolve_gallery_image,
@@ -162,6 +163,37 @@ class V2GalleryReadService:
             "failed": failed,
         }
 
+    def delete_permanently(self, relative_paths: list[str]) -> dict[str, object]:
+        requested = list(dict.fromkeys(Path(path).as_posix() for path in relative_paths if path))
+        locked = self._locked_process_paths()
+        valid: list[tuple[str, Path]] = []
+        failed: list[dict[str, str]] = []
+        for relative in requested:
+            if relative.casefold() in locked:
+                failed.append({"path": relative, "error": "图片正在处理或等待处理，不能永久删除"})
+                continue
+            resolved = resolve_gallery_image(relative, self.output_root)
+            if resolved is None:
+                failed.append({"path": relative, "error": "图片不存在、越界或不在画廊中"})
+                continue
+            valid.append((relative, resolved))
+        for _, path in valid:
+            self.thumbnail_cache.purge(path)
+        deleted, delete_failed = delete_gallery_images_permanently([path for _, path in valid], self.output_root)
+        deleted_keys = {str(path.resolve()).casefold() for path in deleted}
+        deleted_originals = sorted(
+            relative for relative, path in valid
+            if str(path.resolve()).casefold() in deleted_keys
+        )
+        failed.extend({"path": str(path), "error": error} for path, error in delete_failed)
+        if deleted_originals:
+            repository = SQLiteRepository(self.database)
+            try:
+                repository.set_gallery_asset_states(self.output_root, deleted_originals, "")
+            finally:
+                repository.close()
+        return {"deleted": deleted_originals, "failed": failed}
+
     def list_trash(self, *, limit: int = 500) -> dict[str, object]:
         trash_root = self.output_root / TRASH_DIR_NAME
         items: list[dict[str, object]] = []
@@ -208,10 +240,15 @@ class V2GalleryReadService:
 
     def delete_from_trash(self, relative_paths: list[str]) -> dict[str, object]:
         requested = list(dict.fromkeys(Path(path).as_posix() for path in relative_paths if path))
-        resolved = [
-            path for relative in requested
-            if (path := resolve_gallery_trash_image(relative, self.output_root)) is not None
-        ]
+        resolved: list[Path] = []
+        for relative in requested:
+            path = resolve_gallery_trash_image(relative, self.output_root)
+            if path is None:
+                continue
+            parts = Path(relative).parts
+            aliases = (self.output_root.joinpath(*parts[1:]),) if len(parts) > 1 else ()
+            self.thumbnail_cache.purge(path, aliases=aliases)
+            resolved.append(path)
         deleted, failed = delete_images_permanently(resolved, self.output_root)
         trash_root = self.output_root / TRASH_DIR_NAME
         return {
@@ -305,7 +342,18 @@ class V2GalleryReadService:
                 "prompt": item["positive_prompt"],
                 "width": item["width"],
                 "height": item["height"],
-                "parameters": {},
+                "parameters": {
+                    "generation_params": dict(item.get("generation_params") or {}),
+                    "negative_prompt": item.get("negative_prompt") or "",
+                    "integration_metadata": {
+                        "candidate": dict(item.get("candidate") or {}),
+                        **(
+                            {"artist_comparison": dict(item["artist_comparison"])}
+                            if isinstance(item.get("artist_comparison"), dict)
+                            else {}
+                        ),
+                    },
+                },
             }
             try:
                 if operation == "regenerate":

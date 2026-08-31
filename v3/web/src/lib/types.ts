@@ -253,9 +253,11 @@ export interface ArtistComparisonInfo {
   id: string;
   artist: string;
   rendered_artist: string;
-  position: number;
-  total: number;
-  seed: number;
+  position?: number;
+  total?: number;
+  seed?: number;
+  derived_from?: "gallery_regenerate";
+  source_comparison_id?: string;
 }
 
 export interface ArtistComparisonSubmission {
