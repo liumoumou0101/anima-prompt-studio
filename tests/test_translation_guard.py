@@ -200,6 +200,36 @@ def test_real_marian_strap_dress_variants_are_replaced_not_duplicated():
         assert "skirt with a strap" not in result
 
 
+def test_possessive_garter_dress_variants_are_replaced_not_duplicated():
+    cases = (
+        "A young girl in a garter's dress.",
+        "A young girl in a garter’s dress.",
+        "A young girl in a garter dress.",
+        "A young girl in a hanging dress.",
+    )
+    for translated in cases:
+        result = TranslationService._guard_visual_terms(
+            "一个年轻女孩，穿着吊带裙，做提裙礼",
+            translated,
+        ).lower()
+        assert result.count("spaghetti-strap dress") == 1
+        assert not re.search(r"\bgarters?(?:['’]s)?\b", result)
+        assert "hanging dress" not in result
+
+
+def test_spaghetti_strap_dress_gets_an_article_after_wearing_or_in():
+    cases = (
+        "A young girl wearing spaghetti-strap dress.",
+        "A young girl in spaghetti-strap dress.",
+    )
+    for translated in cases:
+        result = TranslationService._guard_visual_terms(
+            "一个年轻女孩穿着吊带裙",
+            translated,
+        ).lower()
+        assert "a spaghetti-strap dress" in result
+
+
 def test_real_garter_belt_and_stockings_are_not_changed_by_dress_guard():
     result = TranslationService._guard_visual_terms(
         "女孩穿着吊带袜和吊袜带",

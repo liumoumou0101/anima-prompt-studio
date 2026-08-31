@@ -117,6 +117,8 @@ class PromptCompiler:
         n = job.composition.people_count
         mix = job.semantic_frame.final_attributes.get("people_mix", "")
         genders = [slot.gender_tag for slot in job.character_slots[:n] if slot.gender_tag]
+        if not genders:
+            genders = [item.gender_tag for item in job.resolved_characters[:n] if item.gender_tag]
         source = job.authoritative_text() or job.translated_en
         female_source, male_source = self._gender_signals(job, source)
         if not mix:
@@ -364,8 +366,6 @@ class PromptCompiler:
         quality_tags = self.effective_quality_tags(job)
         scene_mode = job.effective_subject_mode() == SubjectMode.SCENE
         tags = [] if scene_mode else list(self._people_tags(job))
-        # Official ANIMA order puts artist tags before general visual tags.
-        tags += [a if a.startswith("@") else f"@{a}" for a in job.artist_selection]
         source_text = job.authoritative_text()
         if job.uses_english_authority():
             positive_crowd = re.search(r"\b(?:crowd|group of people|background people)\b", source_text, re.I)
@@ -375,6 +375,11 @@ class PromptCompiler:
             negative_crowd = re.search(r"背景.{0,6}(?:没有|没|无|不要).{0,4}(?:其他人|人物|人群)", source_text)
         if not scene_mode and job.composition.people_count == 1 and (not positive_crowd or negative_crowd):
             tags.append("solo")
+        if not scene_mode:
+            # Official ANIMA order: count -> character -> copyright -> artist -> general.
+            tags += [item.character_tag for item in job.resolved_characters]
+            tags += [item.copyright_tag for item in job.resolved_characters if item.copyright_tag]
+        tags += [a if a.startswith("@") else f"@{a}" for a in job.artist_selection]
         tags += [x.tag for x in matched if x.category != "count" and not self._is_count_tag(x.tag)]
         tags += [tag for item in job.enhancements if item.enabled for tag in item.tags]
         normalized = [tag.replace("_", " ") for tag in tags]

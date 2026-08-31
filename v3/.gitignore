@@ -1,0 +1,14 @@
+.venv/
+.local/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.coverage
+htmlcov/
+node_modules/
+web/dist/
+*.tsbuildinfo
+*.tmp

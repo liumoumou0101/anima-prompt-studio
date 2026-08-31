@@ -3,9 +3,10 @@ from __future__ import annotations
 import re
 
 from anima_prompt_studio.domain.models import (
-    CompositionFieldState, ItemState, LoRAProfile, PromptJob, SemanticWarning, SubjectMode, WarningLevel,
+    CharacterCard, CompositionFieldState, ItemState, LoRAProfile, PromptJob, SemanticWarning, SubjectMode, WarningLevel,
 )
 from .canonical_prose import CanonicalProseBuilder
+from .character_resolution import CharacterResolver
 from .config_service import ConfigService
 from .concept_resolver import ConceptResolver
 from .composition_recommender import CompositionRecommendationService
@@ -46,15 +47,32 @@ class PromptPipeline:
         self.diff = SemanticDiffService()
         self.compiler = PromptCompiler(self.configs)
         self.prompt_complexity = PromptComplexityService()
+        self.character_resolver = CharacterResolver(self.matcher.database)
+        self.character_cards: list[CharacterCard] = []
 
-    def translate(self, job: PromptJob, known_entities: list[tuple[str, str]] | None = None) -> PromptJob:
+    def translate(
+        self,
+        job: PromptJob,
+        known_entities: list[tuple[str, str]] | None = None,
+        character_cards: list[CharacterCard] | None = None,
+    ) -> PromptJob:
+        if character_cards is not None:
+            self.set_character_cards(character_cards)
+            if not character_cards:
+                job.resolved_characters = []
+        cards = self.character_cards
+        if job.original_zh:
+            job.normalized_zh = self.preprocessor.normalize(job.original_zh)
+        self._refresh_resolved_characters(job, cards)
         if job.translation_state == ItemState.LOCKED and job.translated_en:
             return self.recompile(job)
         job.translation_state = ItemState.AUTO
-        job.normalized_zh = self.preprocessor.normalize(job.original_zh)
+        character_entities = [(item.source_text, "character") for item in job.resolved_characters]
         job.composition_context = self.composition_context.extract(job)
         job.resolved_concepts = self.concepts.resolve(job.normalized_zh)
-        protected, job.protected_entities = self.protector.protect(job.normalized_zh, known_entities or [])
+        protected, job.protected_entities = self.protector.protect(
+            job.normalized_zh, [*(known_entities or []), *character_entities],
+        )
         job.semantic_frame = self.semantic_frames.resolve(job.normalized_zh, job.protected_entities)
         job.semantic_frame = self.visual_semantics.enrich(job.semantic_frame, job.normalized_zh)
         job.composition.people_count = job.semantic_frame.people_count if job.semantic_frame.people_count is not None else 1
@@ -67,6 +85,9 @@ class PromptPipeline:
         translated = self.translation.zh_to_en(translation_input)
         translated = self.visual_semantics.restore(translated, visual_replacements)
         job.translated_en = self.protector.restore(translated, job.protected_entities)
+        job.translated_en = self.character_resolver.replace_source_names(
+            job.translated_en, job.resolved_characters,
+        )
         job.translated_en = self.visual_semantics.ensure_translation(job.translated_en, job.semantic_frame)
         job.translated_en = self.translation.guard_artist_intent(job.normalized_zh, job.translated_en)
         job.translated_en = self.concepts.apply_translation(job.normalized_zh, job.translated_en, job.resolved_concepts)
@@ -80,6 +101,7 @@ class PromptPipeline:
         return self.recompile(job)
 
     def recompile(self, job: PromptJob, people_count_override: int | None = None) -> PromptJob:
+        self._refresh_resolved_characters(job)
         protected, entities = self.protector.protect(job.translated_en, [(x.original, x.entity_type) for x in job.protected_entities])
         job.back_translated_zh = self.protector.restore(self.translation.en_to_zh(protected), entities)
         source_zh = job.normalized_zh or job.original_zh
@@ -185,6 +207,19 @@ class PromptPipeline:
     def set_lora_profiles(self, profiles: list[LoRAProfile]) -> None:
         self.lora_resolver.set_profiles(profiles)
 
+    def set_character_cards(self, cards: list[CharacterCard]) -> None:
+        self.character_cards = [card.model_copy(deep=True) for card in cards]
+
+    def _refresh_resolved_characters(
+        self, job: PromptJob, cards: list[CharacterCard] | None = None,
+    ) -> None:
+        available_cards = self.character_cards if cards is None else cards
+        if not available_cards:
+            return
+        selected_ids = {slot.character_id for slot in job.character_slots if slot.character_id}
+        source = job.normalized_zh or job.original_zh
+        job.resolved_characters = self.character_resolver.resolve(source, available_cards, selected_ids)
+
     @staticmethod
     def _merge_auto_character_slots(job: PromptJob, scoped_slots) -> None:
         for index, candidate in enumerate(scoped_slots):
@@ -282,6 +317,7 @@ class PromptPipeline:
 
     def compile_current_state(self, job: PromptJob) -> PromptJob:
         """Compile UI-owned state without translation or semantic re-analysis."""
+        self._refresh_resolved_characters(job)
         return self._compile_preserving_authored_prompt(job)
 
     def _compile_preserving_authored_prompt(self, job: PromptJob) -> PromptJob:

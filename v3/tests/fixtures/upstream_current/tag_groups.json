@@ -1,0 +1,15 @@
+{
+  "tag_to_groups": {
+    "maid": ["tag_group:attire"],
+    "frilled_apron": ["tag_group:attire"],
+    "blonde_hair": ["tag_group:colors"]
+  },
+  "group_to_tags": {
+    "tag_group:attire": ["maid", "frilled_apron", "not_in_filtered_snapshot"],
+    "tag_group:colors": ["blonde_hair"]
+  },
+  "group_cn_names": {
+    "tag_group:attire": "服装",
+    "tag_group:colors": "颜色"
+  }
+}

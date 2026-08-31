@@ -12,9 +12,13 @@ def make_database(path):
         INSERT INTO tags VALUES('pleated_skirt','pleated skirt',0,100000,0,'2020-01-01');
         INSERT INTO tags VALUES('school_uniform','school uniform',0,200000,0,'2020-01-01');
         INSERT INTO tags VALUES('skirt','skirt',0,300000,0,'2020-01-01');
+        INSERT INTO tags VALUES('keqing_(genshin_impact)','keqing (genshin impact)',4,50000,0,'2020-01-01');
+        INSERT INTO tags VALUES('genshin_impact','genshin impact',3,900000,0,'2020-01-01');
         INSERT INTO aliases VALUES('schoolwear','school_uniform');
         INSERT INTO tag_search VALUES('pleated skirt','pleated_skirt');
         INSERT INTO tag_search VALUES('school uniform','school_uniform');
+        INSERT INTO tag_search VALUES('keqing genshin impact','keqing_(genshin_impact)');
+        INSERT INTO tag_search VALUES('genshin impact','genshin_impact');
     """)
     connection.close()
 
@@ -29,3 +33,16 @@ def test_fts_search(tmp_path):
     path = tmp_path / "tags.db"; make_database(path)
     result = TagDatabase(path).search("pleat")
     assert result[0]["output_name"] == "pleated skirt"
+
+
+def test_search_can_filter_character_and_copyright_categories(tmp_path):
+    path = tmp_path / "tags.db"; make_database(path)
+    db = TagDatabase(path)
+    characters = db.search("keqing", categories={4})
+    assert characters == [{
+        "canonical_name": "keqing_(genshin_impact)",
+        "output_name": "keqing (genshin impact)",
+        "category": 4,
+        "post_count": 50000,
+    }]
+    assert db.search("keqing", categories={3}) == []

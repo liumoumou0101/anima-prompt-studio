@@ -4,6 +4,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from anima_prompt_studio.services.ai_extract_service import AIExtractService, ExtractedPrompt
 from anima_prompt_studio.services.ai_prompt_service import AIClient
+from anima_prompt_studio.services.character_resolution import CharacterRecognitionService
 
 
 class AIExtractWorker(QObject):
@@ -41,6 +42,27 @@ class AIModelListWorker(QObject):
     def run(self) -> None:
         try:
             self.succeeded.emit(self.client.list_models())
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        finally:
+            self.done.emit()
+
+
+class CharacterRecognitionWorker(QObject):
+    succeeded = Signal(object)
+    failed = Signal(str)
+    done = Signal()
+
+    def __init__(self, *, service: CharacterRecognitionService, client: AIClient, source_text: str) -> None:
+        super().__init__()
+        self.service = service
+        self.client = client
+        self.source_text = source_text
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.succeeded.emit(self.service.recognize(self.source_text, self.client))
         except Exception as exc:
             self.failed.emit(str(exc))
         finally:

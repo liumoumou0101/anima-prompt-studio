@@ -71,7 +71,7 @@ class TagDatabase:
     def _table_exists(connection: sqlite3.Connection, name: str) -> bool:
         return connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
 
-    def search(self, query: str, limit: int = 50) -> list[dict]:
+    def search(self, query: str, limit: int = 50, categories: set[int] | None = None) -> list[dict]:
         if not self.available or not query.strip():
             return []
         connection = sqlite3.connect(f"file:{self.path.as_posix()}?mode=ro", uri=True)
@@ -80,10 +80,32 @@ class TagDatabase:
             safe = " ".join(re.findall(r"[\w]+", query.lower()))
             if not safe:
                 return []
+            category_sql = ""
+            parameters: list[object] = [safe + "*"]
+            if categories:
+                ordered_categories = sorted(categories)
+                category_sql = " AND t.category IN (" + ",".join("?" for _ in ordered_categories) + ")"
+                parameters.extend(ordered_categories)
+            parameters.append(limit * 3)
             rows = connection.execute(
-                "SELECT t.output_name, t.category, t.post_count FROM tag_search s JOIN tags t ON t.name=s.canonical WHERE tag_search MATCH ? ORDER BY bm25(tag_search), t.post_count DESC LIMIT ?",
-                (safe + "*", limit),
+                "SELECT t.name AS canonical_name, t.output_name, t.category, t.post_count "
+                "FROM tag_search s JOIN tags t ON t.name=s.canonical "
+                "WHERE tag_search MATCH ? AND t.is_deprecated=0" + category_sql +
+                " ORDER BY bm25(tag_search), t.post_count DESC LIMIT ?",
+                parameters,
             ).fetchall()
-            return [dict(row) for row in rows]
+            # The FTS table also contains aliases, so one canonical tag can be
+            # returned multiple times. Keep the best-ranked occurrence.
+            unique: list[dict] = []
+            seen: set[str] = set()
+            for row in rows:
+                item = dict(row)
+                if item["canonical_name"] in seen:
+                    continue
+                seen.add(item["canonical_name"])
+                unique.append(item)
+                if len(unique) >= limit:
+                    break
+            return unique
         finally:
             connection.close()

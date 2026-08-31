@@ -121,6 +121,18 @@ class CharacterSlot(BaseModel):
     locked: bool = False
 
 
+class ResolvedCharacter(BaseModel):
+    """A locally verified character reference used by the ANIMA compiler."""
+
+    source_text: str
+    display_name: str
+    character_tag: str
+    copyright_tag: str | None = None
+    gender_tag: str = "1girl"
+    card_id: str | None = None
+    confidence: float = Field(default=1.0, ge=0, le=1)
+
+
 class ArtistProfile(BaseModel):
     id: str
     display_name: str
@@ -348,6 +360,7 @@ class PromptJob(BaseModel):
     excluded_tags: list[str] = Field(default_factory=list)
     locked_tags: list[str] = Field(default_factory=list)
     character_slots: list[CharacterSlot] = Field(default_factory=list)
+    resolved_characters: list[ResolvedCharacter] = Field(default_factory=list)
     artist_selection: list[str] = Field(default_factory=list)
     artist_selection_sources: dict[str, Literal["manual", "text_derived", "locked"]] = Field(default_factory=dict)
     lora_selection: list[LoRASelection] = Field(default_factory=list)
@@ -366,13 +379,16 @@ class PromptJob(BaseModel):
     workflow_template_id: str | None = None
     user_rating: int | None = None
     notes: str = ""
+    # Backward-compatible bridge metadata for newer frontends/adapters. V2
+    # services treat this as opaque and persist it with execution snapshots.
+    integration_metadata: dict[str, Any] = Field(default_factory=dict)
 
     def touch(self) -> None:
         self.updated_at = utc_now()
 
     def task_package(self) -> dict[str, Any]:
         return {
-            "schema_version": "1.4",
+            "schema_version": "1.5",
             "job_id": self.id,
             "model_profile": self.model_profile_id,
             "positive_prompt": self.positive_prompt,
@@ -385,6 +401,10 @@ class PromptJob(BaseModel):
             "characters": (
                 [] if self.effective_subject_mode() == SubjectMode.SCENE
                 else [x.model_dump() for x in self.character_slots[:self.composition.people_count]]
+            ),
+            "resolved_characters": (
+                [] if self.effective_subject_mode() == SubjectMode.SCENE
+                else [x.model_dump() for x in self.resolved_characters]
             ),
             "artists": self.artist_selection,
             "artist_sources": {
@@ -401,6 +421,7 @@ class PromptJob(BaseModel):
                 "back_translated_zh": self.back_translated_zh,
             },
             "workflow_template_id": self.workflow_template_id,
+            "integration_metadata": self.integration_metadata,
         }
 
     def effective_subject_mode(self) -> SubjectMode:

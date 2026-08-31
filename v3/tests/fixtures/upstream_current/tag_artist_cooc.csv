@@ -1,0 +1,4 @@
+tag,artist,artist_post_count,cooc_count,frequency,pmi,npmi
+maid,sample_artist_a,700,400,0.08,2.0,0.50
+twintails,sample_artist_a,700,250,0.05,1.8,0.45
+frilled_apron,sample_artist_b,800,300,0.06,2.1,0.55

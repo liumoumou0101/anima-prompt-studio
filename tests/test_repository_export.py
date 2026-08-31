@@ -38,7 +38,7 @@ def test_json_export(tmp_path):
     )
     path = ExportService().export_task(job, tmp_path / "job.json")
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["schema_version"] == "1.4"
+    assert data["schema_version"] == "1.5"
     assert data["generation_preset"] == "quality"
     assert data["quality_profile"] == "portrait_detail"
     assert data["composition"]["mode"] == "smart"

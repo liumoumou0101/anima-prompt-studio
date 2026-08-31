@@ -278,13 +278,21 @@ class TranslationService:
         # Apply only when the Chinese source names the complete dress concept;
         # standalone 吊带袜/吊袜带 must keep their legitimate garter meaning.
         bad_patterns = (
-            r"\b(?:a\s+)?long\s+garters?\b" if is_long_dress else r"\b(?:a\s+)?garters?\s+dress\b",
+            r"\b(?:a\s+)?long\s+garters?(?:['’]s)?(?:\s+dress)?\b"
+            if is_long_dress else r"\b(?:a\s+)?garters?(?:['’]s)?\s+dress\b",
             r"\b(?:a\s+)?(?:long\s+)?suspender\s+dress\b",
             r"\b(?:a\s+)?long\s+skirt\s+with\s+(?:a\s+)?straps?\s+on\s+(?:her|his|the)\s+shoulders?\b",
             r"\b(?:a\s+)?hanging\s+dress\b",
         )
         for pattern in bad_patterns:
             translated = re.sub(pattern, f"a {canonical}", translated, flags=re.I)
+
+        translated = re.sub(
+            r"\b(wearing|wears|in)\s+(?!(?:a|an|the)\s)((?:long\s+)?spaghetti[- ]strap dress)\b",
+            r"\1 a \2",
+            translated,
+            flags=re.I,
+        )
 
         has_strap_dress = bool(re.search(
             r"\bspaghetti[- ]straps?\b.{0,24}\bdress\b|\bdress\b.{0,24}\bspaghetti[- ]straps?\b",

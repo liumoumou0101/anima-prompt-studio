@@ -1,0 +1,38 @@
+{
+  "repository": "https://github.com/SuzumiyaAkizuki/DanbooruSearchOnline",
+  "commit": "0636f762694fc436b4ac472cf59b85d172eaaac4",
+  "path": "origin_database",
+  "observed_at": "2026-08-25",
+  "files": [
+    {
+      "name": "cooccurrence_clean.parquet",
+      "size": 13382870,
+      "sha256": "d44f06476cf10b9a2ce465e735e14862755e3742870455eefd3aa7718bb785b7"
+    },
+    {
+      "name": "tag_aliases.parquet",
+      "size": 1904381,
+      "sha256": "4b2f386dafa4f93d3d4df6396074661c86a2645bebc9c3305a9ff779c52f3ea1"
+    },
+    {
+      "name": "tag_aliases_metadata.json",
+      "size": 245,
+      "sha256": "51d216791850e19b10dd7023c76ada806e74b36eebb896c5e6f1373f9996feb6"
+    },
+    {
+      "name": "tag_artist_cooc.parquet",
+      "size": 15667171,
+      "sha256": "38091fa297747368080480c1bb8b468950ddd58d3ef7e7176b5b8621649671a8"
+    },
+    {
+      "name": "tag_groups.json",
+      "size": 1336789,
+      "sha256": "bfe7529f70ba8d367667b879f7db0d4302978aa8f7c2ff72273014533d6bee96"
+    },
+    {
+      "name": "tags_enhanced.csv",
+      "size": 7759785,
+      "sha256": "9b494660aa3e7ab45ea440b6c16223634c33be54a7e03f58749842ecbfec77fe"
+    }
+  ]
+}

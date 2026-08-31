@@ -1,0 +1,11 @@
+{
+  "id": "anima_aesthetic_v1",
+  "display_name": "ANIMA Aesthetic",
+  "family": "anima",
+  "variant": "aesthetic",
+  "positive_prefix": [],
+  "negative_prompt": ["worst quality", "low quality", "artist name", "blurry", "jpeg artifacts", "chromatic aberration"],
+  "negative_prompt_mode": "enabled",
+  "tag_separator": ", ",
+  "renderer_version": "anima-renderer-v1"
+}

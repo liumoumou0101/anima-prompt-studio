@@ -8758,6 +8758,9 @@
       "long dress",
       "spaghetti strap"
     ],
+    "suppresses_tags": [
+      "skirt"
+    ],
     "category": "clothing",
     "priority": 91,
     "ensure_en": [
@@ -8790,6 +8793,9 @@
     "tags": [
       "dress",
       "spaghetti strap"
+    ],
+    "suppresses_tags": [
+      "skirt"
     ],
     "category": "clothing",
     "priority": 90,

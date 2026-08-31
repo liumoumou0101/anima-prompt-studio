@@ -1,5 +1,50 @@
 [
   {
+    "id": "curtsy",
+    "type": "动作",
+    "priority": 145,
+    "triggers": [
+      "做提裙礼",
+      "行提裙礼",
+      "提裙礼",
+      "屈膝行礼",
+      "行屈膝礼",
+      "屈膝礼"
+    ],
+    "content": "She performs a graceful curtsy while lightly holding both sides of her skirt.",
+    "canonical_phrases": [
+      "performs a graceful curtsy",
+      "performing a graceful curtsy",
+      "graceful curtsy",
+      "curtsies",
+      "curtsy"
+    ],
+    "emit_tags_when_canonical": true,
+    "tags": [
+      "curtsey",
+      "skirt hold"
+    ],
+    "suppress_tags": [],
+    "suppress_patterns": [],
+    "natural_replacements": [],
+    "composition_recommendations": {
+      "shot": [
+        [
+          "全身",
+          100,
+          "全身景别可完整显示屈膝、裙摆和双手动作"
+        ]
+      ],
+      "angle": [
+        [
+          "三分之四",
+          75,
+          "三分之四视角能同时显示礼仪姿态和提裙手势"
+        ]
+      ]
+    }
+  },
+  {
     "id": "crouching",
     "type": "动作",
     "priority": 140,

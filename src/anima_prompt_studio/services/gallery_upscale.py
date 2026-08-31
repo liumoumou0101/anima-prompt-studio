@@ -830,6 +830,22 @@ class GalleryUpscaleManager:
         with self._lock:
             return {job.source_path for job in self._jobs.values() if not job.terminal}
 
+    def shutdown(self, *, cancel_queued: bool = True, timeout: float = 10.0) -> bool:
+        """Stop accepting work and end the queue thread after any active call returns."""
+        with self._condition:
+            if cancel_queued:
+                for job in self._jobs.values():
+                    if job.state == "queued":
+                        job.state = "canceled"
+                        job.message = "应用退出，排队任务已取消"
+                        job.queue_position = 0
+                        job.updated_at = utc_now()
+                        self._persist_locked(job)
+            self._stopping = True
+            self._condition.notify_all()
+        self._worker.join(timeout)
+        return not self._worker.is_alive()
+
     def _connection_reason(self) -> str:
         if self._remote_profile is None:
             return "请先在主窗口配置并连接云显卡。"

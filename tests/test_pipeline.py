@@ -87,6 +87,67 @@ def test_builtin_pipeline_understands_spaghetti_strap_dress_variants():
         assert expected_tags <= {item.tag for item in job.matched_tags}
 
 
+def test_curtsy_with_spaghetti_strap_dress_preserves_complete_action():
+    pipeline = PromptPipeline()
+    job = PromptJob(original_zh="一个年轻女孩，穿着吊带裙，做提裙礼")
+    pipeline.compiler.apply_model_defaults(job)
+    pipeline.translate(job)
+
+    lower_translation = job.translated_en.lower()
+    tags, _, prose = job.positive_prompt.partition("\n\n")
+    tag_set = set(tags.split(", "))
+    assert "wearing a spaghetti-strap dress" in lower_translation
+    assert "curtsy" in lower_translation
+    assert "holding both sides of her skirt" in lower_translation
+    assert not re.search(r"[\u4e00-\u9fff]", job.translated_en)
+    assert {"dress", "spaghetti strap", "curtsey", "skirt hold"} <= tag_set
+    assert "curtsy" not in tag_set
+    assert "skirt" not in tag_set
+    assert "skirt lift" not in tag_set
+    assert "upskirt" not in tag_set
+    assert "curtsy" in prose.lower()
+    assert job.composition.shot == "全身"
+    assert job.composition.angle == "三分之四"
+
+
+def test_external_translation_drift_is_repaired_without_duplicate_dress_sentence():
+    class CurtsyDriftEngine:
+        name = "curtsy-drift"
+
+        def zh_to_en(self, _text):
+            return "A young girl in a garter's dress."
+
+        def en_to_zh(self, text):
+            return text
+
+    from anima_prompt_studio.services.translation_service import TranslationService
+
+    pipeline = PromptPipeline(translation=TranslationService(CurtsyDriftEngine()))
+    job = PromptJob(original_zh="一个年轻女孩，穿着吊带裙，做提裙礼")
+    pipeline.compiler.apply_model_defaults(job)
+    pipeline.translate(job)
+
+    lower_translation = job.translated_en.lower()
+    _, _, prose = job.positive_prompt.partition("\n\n")
+    assert lower_translation.count("spaghetti-strap dress") == 1
+    assert "garter" not in lower_translation
+    assert "curtsy" in prose.lower()
+    assert "holding both sides of her skirt" in prose.lower()
+
+
+def test_curtsy_synonyms_do_not_fall_back_to_skirt_lift():
+    for phrase in ("提裙礼", "做提裙礼", "行提裙礼", "屈膝礼", "屈膝行礼", "行屈膝礼"):
+        pipeline = PromptPipeline()
+        job = PromptJob(original_zh=f"一个女孩穿着连衣裙，{phrase}")
+        pipeline.compiler.apply_model_defaults(job)
+        pipeline.translate(job)
+        tag_section = set(job.positive_prompt.partition("\n\n")[0].split(", "))
+        assert "curtsey" in tag_section
+        assert "curtsy" not in tag_section
+        assert "skirt lift" not in tag_section
+        assert "upskirt" not in tag_section
+
+
 def test_score_tag_keeps_required_underscore():
     pipeline, job = make_job()
     pipeline.switch_model(job, "anima_base_v1")
@@ -191,7 +252,7 @@ def test_task_package_only_exports_active_character_slots():
 def test_task_package_has_schema_and_source():
     _, job = make_job()
     package = job.task_package()
-    assert package["schema_version"] == "1.4"
+    assert package["schema_version"] == "1.5"
     assert package["composition"]["shot"]
     assert package["source"]["original_zh"] == job.original_zh
     assert "canonical_prose" in package and "subject_mode" in package and "excluded_concepts" in package
