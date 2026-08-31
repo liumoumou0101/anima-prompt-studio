@@ -12,6 +12,7 @@ const profiles = [
 ];
 const RECOVERY_KEY = "anima-v3-workbench-recovery";
 const GENERATION_TARGET_KEY = "anima-v3-generation-target";
+const PREFERRED_REMOTE_KEY = "anima-v3-preferred-remote";
 const defaultGenerationSettings: WorkbenchGenerationSettings = {preset_id: "balanced", aspect: "portrait", seed: -1, batch_size: 1};
 const aspectSizes: Record<WorkbenchGenerationSettings["aspect"], {width: number; height: number} | null> = {
   portrait: {width: 896, height: 1152},
@@ -60,6 +61,13 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   const [generationTargets, setGenerationTargets] = useState<GenerationTarget[]>([]);
   const [selectedTarget, setSelectedTarget] = useState(() => {
     try { return localStorage.getItem(GENERATION_TARGET_KEY) || ""; } catch { return ""; }
+  });
+  const [preferredRemoteId, setPreferredRemoteId] = useState(() => {
+    try {
+      return localStorage.getItem(PREFERRED_REMOTE_KEY)
+        || (localStorage.getItem(GENERATION_TARGET_KEY) || "").split("::")[0]
+        || "";
+    } catch { return ""; }
   });
   const [generationBusy, setGenerationBusy] = useState<string | null>(null);
   const [generationNotice, setGenerationNotice] = useState<string | null>(null);
@@ -124,24 +132,47 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   useEffect(() => {
     if (!remoteEnabled) return;
     apiRequest<GenerationTargetListResponse>("/api/v3/generation-targets")
-      .then((payload) => setGenerationTargets(payload.items))
+      .then((payload) => {
+        setGenerationTargets(payload.items);
+        if (payload.preferred_remote_profile_id) {
+          setPreferredRemoteId(payload.preferred_remote_profile_id);
+          try { localStorage.setItem(PREFERRED_REMOTE_KEY, payload.preferred_remote_profile_id); } catch { /* Best-effort preference. */ }
+        }
+      })
       .catch((caught) => setGenerationNotice((caught as ApiClientError).message));
   }, [remoteEnabled]);
 
   useEffect(() => {
-    if (!compatibleTargets.some((target) => targetKey(target) === selectedTarget)) {
-      const ready = compatibleTargets.filter((target) => target.host_fingerprint_ready);
-      const preferred = ready.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name)) || ready[0] || compatibleTargets[0];
-      setSelectedTarget(preferred ? targetKey(preferred) : "");
+    const current = compatibleTargets.find((target) => targetKey(target) === selectedTarget);
+    const preferredTargets = preferredRemoteId
+      ? compatibleTargets.filter((target) => target.remote_profile_id === preferredRemoteId)
+      : [];
+    if (preferredTargets.length && current?.remote_profile_id !== preferredRemoteId) {
+      const preferred = preferredTargets.find((target) => target.workflow_profile_id === selectedWorkflowId)
+        || preferredTargets.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name))
+        || preferredTargets[0];
+      setSelectedTarget(targetKey(preferred));
+      return;
     }
-  }, [compatibleTargets, selectedTarget]);
+    if (!current) {
+      const ready = compatibleTargets.filter((target) => target.host_fingerprint_ready);
+      const fallback = ready.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name)) || ready[0] || compatibleTargets[0];
+      setSelectedTarget(fallback ? targetKey(fallback) : "");
+    }
+  }, [compatibleTargets, preferredRemoteId, selectedRemoteId, selectedTarget, selectedWorkflowId]);
 
   function selectRemoteConnection(remoteProfileId: string) {
     const options = compatibleTargets.filter((target) => target.remote_profile_id === remoteProfileId);
     const preferred = options.find((target) => target.workflow_profile_id === selectedWorkflowId)
       || options.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name))
       || options[0];
+    setPreferredRemoteId(remoteProfileId);
+    try { localStorage.setItem(PREFERRED_REMOTE_KEY, remoteProfileId); } catch { /* Best-effort preference. */ }
     setSelectedTarget(preferred ? targetKey(preferred) : "");
+    void apiRequest<{remote_profile_id: string}>("/api/v3/settings/default-remote-profile", {
+      method: "PUT",
+      body: JSON.stringify({remote_profile_id: remoteProfileId}),
+    }).catch((caught) => setGenerationNotice(`默认云主机保存失败：${(caught as ApiClientError).message}`));
   }
 
   useEffect(() => {

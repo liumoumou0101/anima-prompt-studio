@@ -323,11 +323,38 @@ def test_v3_settings_reuses_v2_remote_profile_store_without_exposing_credentials
     )
     assert unavailable.status_code == 409
     assert unavailable.json()["error"]["code"] == "ssh_host_key_unconfirmed"
+    created = client.post(
+        "/api/v3/settings/remote-profiles",
+        json={
+            "display_name": "新增默认云主机",
+            "ssh_host": "preferred.example",
+            "ssh_port": 23,
+            "ssh_user": "root",
+            "auth_type": "agent",
+            "enabled": True,
+        },
+        headers=write_auth,
+    )
+    assert created.status_code == 201
     repository = SQLiteRepository(v2_database)
     try:
         profile = repository.get_remote_profile("existing")
         assert profile.ssh_host == "new.example"
         assert profile.known_host_fingerprint == ""
+        assert repository.get_setting("last_remote_profile_id") == created.json()["id"]
+    finally:
+        repository.close()
+
+    selected = client.put(
+        "/api/v3/settings/default-remote-profile",
+        json={"remote_profile_id": "existing"},
+        headers=write_auth,
+    )
+    assert selected.status_code == 200
+    assert selected.json() == {"remote_profile_id": "existing"}
+    repository = SQLiteRepository(v2_database)
+    try:
+        assert repository.get_setting("last_remote_profile_id") == "existing"
     finally:
         repository.close()
 

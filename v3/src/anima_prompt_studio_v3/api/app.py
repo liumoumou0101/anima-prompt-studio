@@ -78,6 +78,7 @@ from .models import (
     IntentParseRequest,
     LocalNaturalCandidateRequest,
     PrivateKeyPassphraseRequest,
+    PreferredRemoteProfileRequest,
     RemoteConnectionTestRequest,
     RemoteProfileSettingsRequest,
     RemoteHostFingerprintRequest,
@@ -1061,7 +1062,42 @@ def create_api_runtime(
         queue = app.state.generation_queue
         if queue is None:
             raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
-        return {"items": queue.targets()}
+        preferred_remote_profile_id = ""
+        database = app.state.v2_database
+        if database is not None:
+            from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+            repository = SQLiteRepository(database)
+            try:
+                preferred_remote_profile_id = str(repository.get_setting("last_remote_profile_id", "") or "")
+            finally:
+                repository.close()
+        return {
+            "items": queue.targets(),
+            "preferred_remote_profile_id": preferred_remote_profile_id or None,
+        }
+
+    @app.put(
+        f"{API_PREFIX}/settings/default-remote-profile",
+        dependencies=[Depends(require_session)],
+    )
+    def set_default_remote_profile(
+        payload: PreferredRemoteProfileRequest,
+        database: Path = Depends(require_v2_settings_database),
+    ) -> dict[str, object]:
+        from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+
+        repository = SQLiteRepository(database)
+        try:
+            try:
+                profile = repository.get_remote_profile(payload.remote_profile_id)
+            except KeyError as exc:
+                raise ApiError(404, "remote_profile_not_found", "云主机配置不存在。") from exc
+            if not profile.enabled:
+                raise ApiError(409, "remote_profile_disabled", "不能将已停用的云主机设为默认连接。")
+            repository.set_setting("last_remote_profile_id", profile.id)
+            return {"remote_profile_id": profile.id}
+        finally:
+            repository.close()
 
     @app.get(f"{API_PREFIX}/settings/remote-profiles", dependencies=[Depends(require_session)])
     def list_remote_profiles_for_settings(
@@ -1567,6 +1603,8 @@ def _save_remote_profile_settings(database: Path, payload: RemoteProfileSettings
                 changes["known_host_fingerprint"] = ""
             profile = existing.model_copy(update=changes)
         repository.save_remote_profile(profile)
+        if existing is None and profile.enabled:
+            repository.set_setting("last_remote_profile_id", profile.id)
 
         entered_password = payload.password.get_secret_value() if payload.password is not None else ""
         if entered_password and payload.remember_password:

@@ -494,6 +494,7 @@ export interface GenerationTarget {
 
 export interface GenerationTargetListResponse {
   items: GenerationTarget[];
+  preferred_remote_profile_id?: string | null;
 }
 
 export interface TranslationResponse {

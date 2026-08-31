@@ -505,6 +505,7 @@ it("keeps same-named connections distinct and submits to the selected cloud host
       intent: {source_text: "女仆", source_language: "zh", graph: {elements: []}},
       candidates: [candidate], validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1",
     }), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({remote_profile_id: "remote-2"}), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({
       id: "run-1", state: "draft", progress: 0, available_actions: ["cancel_queued"],
     }), {status: 202}));
@@ -523,13 +524,60 @@ it("keeps same-named connections distinct and submits to the selected cloud host
   expect(screen.getByLabelText("远程工作流")).toHaveValue("workflow-1");
   fireEvent.click(screen.getByRole("button", {name: "远程生图"}));
 
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-  const request = JSON.parse(String(fetchMock.mock.calls[2][1]?.body));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+  expect(fetchMock.mock.calls[2][0]).toBe("/api/v3/settings/default-remote-profile");
+  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({remote_profile_id: "remote-2"});
+  const request = JSON.parse(String(fetchMock.mock.calls[3][1]?.body));
   expect(request.remote_profile_id).toBe("remote-2");
   expect(request.workflow_profile_id).toBe("workflow-1");
   expect(request.candidate.id).toBe("candidate_literal");
   expect(request.settings).toEqual({preset_id: "balanced", width: 896, height: 1152, seed: -1, batch_size: 1});
-  expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get("Idempotency-Key")).toMatch(/^web-/);
+  expect(new Headers(fetchMock.mock.calls[3][1]?.headers).get("Idempotency-Key")).toMatch(/^web-/);
+});
+
+it("keeps the database-preferred cloud host while changing model workflows", async () => {
+  localStorage.setItem("anima-v3-generation-target", "remote-1::aesthetic");
+  const target = (remote: string, workflow: string, model: string) => ({
+    remote_profile_id: remote,
+    remote_display_name: remote === "remote-2" ? "固定云显卡" : "旧云显卡",
+    remote_ssh_host: remote === "remote-2" ? "203.0.113.12" : "203.0.113.10",
+    remote_ssh_port: 23,
+    workflow_profile_id: workflow,
+    workflow_display_name: workflow,
+    workflow_kind: "txt2img_basic",
+    compatible_model_profiles: [model],
+    host_fingerprint_ready: true,
+    auth_type: "agent",
+    private_key_passphrase_configured: false,
+  });
+  const targets = [
+    target("remote-1", "aesthetic", "anima_aesthetic_v1"),
+    target("remote-1", "base", "anima_base_v1"),
+    target("remote-2", "aesthetic", "anima_aesthetic_v1"),
+    target("remote-2", "base", "anima_base_v1"),
+  ];
+  const response = new Response(JSON.stringify({
+    intent: {source_text: "女仆", source_language: "zh", graph: {elements: []}},
+    candidates: [candidate], validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1",
+  }), {status: 200});
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: targets, preferred_remote_profile_id: "remote-2"}), {status: 200}))
+    .mockResolvedValueOnce(response)
+    .mockResolvedValueOnce(response.clone());
+
+  render(<MemoryRouter><WorkbenchPage remoteEnabled /></MemoryRouter>);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  fireEvent.change(screen.getByLabelText("希望画面中出现"), {target: {value: "女仆"}});
+  fireEvent.click(screen.getByRole("button", {name: "生成候选"}));
+  await screen.findByRole("heading", {name: "高保真基准"});
+  expect(screen.getByLabelText("云主机连接")).toHaveValue("remote-2");
+  expect(screen.getByLabelText("远程工作流")).toHaveValue("aesthetic");
+
+  fireEvent.change(screen.getByLabelText("模型配置"), {target: {value: "anima_base_v1"}});
+  fireEvent.click(screen.getByRole("button", {name: "生成候选"}));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  expect(screen.getByLabelText("云主机连接")).toHaveValue("remote-2");
+  expect(screen.getByLabelText("远程工作流")).toHaveValue("base");
 });
 
 it("locks one candidate and submits separate fixed-seed jobs for selected artists", async () => {
