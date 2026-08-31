@@ -25,6 +25,8 @@ V3 实现位于仓库顶层 [../../v3/README.md](../../v3/README.md)，使用独
 | [UPSTREAM_SNAPSHOT.md](UPSTREAM_SNAPSHOT.md) | 开发起点采用的上游 commit 与许可检查快照 |
 | [DEVELOPMENT_ROADMAP.md](DEVELOPMENT_ROADMAP.md) | 实施顺序、交付物、退出条件和首批任务 |
 | [DECISIONS.md](DECISIONS.md) | 已确定的架构决策记录 |
+| [SESSION_HANDOFF_2026-09-01.md](SESSION_HANDOFF_2026-09-01.md) | 最新开发交接、已提交修复和下一个任务 |
+| [audits/2026-09-01-anime-illustration-quality/REPORT.md](audits/2026-09-01-anime-illustration-quality/REPORT.md) | 20 张失败族 + 8 张受控 A/B 的真实二次元插画质量诊断 |
 
 ## 权威顺序
 
