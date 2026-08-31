@@ -120,6 +120,18 @@ def test_build_query_and_verify_reference_pack(tmp_path: Path) -> None:
             store.connection.execute("INSERT INTO metadata VALUES('bad','write')")
 
 
+def test_generic_only_artist_seeds_are_withheld(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from anima_prompt_studio_v3.data import store as store_module
+
+    database = tmp_path / "reference.db"
+    builder().build(database, tmp_path / "data-pack.json")
+    monkeypatch.setattr(store_module, "GENERIC_ARTIST_SEED_TAGS", frozenset({"maid"}))
+    with ReferenceDataStore(database) as store:
+        assert store.recommend_artists(["maid"]) == []
+        ranked = store.recommend_artists(["maid", "twintails"])
+        assert ranked
+        assert "twintails" in ranked[0]["sources"]
+
 def test_wrong_upstream_schema_is_rejected_without_partial_pack(tmp_path: Path) -> None:
     database = tmp_path / "reference.db"
     manifest_path = tmp_path / "data-pack.json"

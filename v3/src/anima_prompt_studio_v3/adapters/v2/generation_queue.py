@@ -493,6 +493,8 @@ def build_v2_generation_queue(
             {
                 "remote_profile_id": profile.id,
                 "remote_display_name": profile.display_name,
+                "remote_ssh_host": profile.ssh_host,
+                "remote_ssh_port": profile.ssh_port,
                 "workflow_profile_id": workflow.id,
                 "workflow_display_name": workflow.display_name,
                 "workflow_kind": workflow.workflow_kind,

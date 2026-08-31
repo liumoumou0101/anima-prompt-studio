@@ -417,6 +417,14 @@ body::before {
 .composer-side textarea { min-height: 82px; }
 .natural-mode-hint { margin: 0 0 8px; padding: 12px; border: 1px solid #323847; color: var(--muted); background: #0d1016; font-size: 12px; line-height: 1.55; }
 .workbench-composer select { height: 42px; padding: 0 12px; }
+.generation-spec { display: grid; gap: 7px; margin: 4px 0 6px; padding: 10px 11px; border: 1px solid #323847; background: #0d1016; }
+.generation-spec strong { color: #aaa3d5; font: 600 9px/1 "Cascadia Code", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.generation-spec label { margin: 4px 0 0; }
+.generation-spec input { height: 38px; padding: 0 10px; border: 1px solid #353b49; color: #e9eaf0; background: #0d1016; }
+.generation-spec small { color: #6f7788; font-size: 9px; line-height: 1.4; }
+.suppressed-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid #4a455c; color: #a9a2c7; background: #16141f; font-size: 10px; }
+.suppressed-summary button { min-height: 28px; padding: 0 9px; border: 1px solid #655c82; color: #ddd8ff; background: #28233a; cursor: pointer; }
+.suppressed-summary button:disabled { opacity: .4; cursor: wait; }
 .workbench-composer textarea:focus, .workbench-composer select:focus { border-color: #756da7; box-shadow: 0 0 0 3px rgba(169,154,245,.08); }
 .workbench-composer textarea::placeholder { color: #5e6575; }
 .intent-review { margin-top: 14px; padding: 18px 20px; border: 1px solid #403b5d; background: rgba(32, 29, 47, .72); }
@@ -440,6 +448,16 @@ body::before {
 .scene-draft-prose textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
 .scene-draft-prose > button { justify-self: end; min-height: 32px; padding: 0 12px; border: 1px solid #625b83; color: #ddd8ff; background: #28233a; cursor: pointer; }
 .scene-draft-prose > button:disabled { opacity: .4; cursor: default; }
+.scene-draft-backtranslation { display: grid; gap: 8px; padding: 9px 10px; border: 1px solid #3d3a28; background: rgba(42, 36, 18, .35); }
+.scene-draft-backtranslation strong { color: #e3d5a4; }
+.scene-draft-backtranslation p { margin: 0; color: #efe7c9; font-size: 12px; line-height: 1.65; }
+.scene-draft-backtranslation ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.scene-draft-backtranslation li { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 8px; align-items: baseline; padding: 6px 7px; border: 1px solid #4a4330; background: rgba(16, 14, 10, .55); }
+.scene-draft-backtranslation code { color: #d8dce8; font-size: 10px; line-height: 1.5; }
+.scene-draft-backtranslation span { color: #f0e2a8; font-size: 11px; line-height: 1.5; }
+.scene-draft-backtranslation small { color: #9a9170; font-size: 9px; }
+.scene-draft-ambiguous { display: grid; gap: 7px; padding: 8px 9px; border: 1px solid #4a3d28; background: rgba(46, 34, 16, .35); }
+.scene-draft-ambiguous > span { color: #e4c48a; font-size: 11px; }
 .scene-draft-group { display: grid; gap: 8px; }
 .scene-draft-layers { display: grid; gap: 10px; padding: 11px 12px; border: 1px solid rgba(106, 125, 169, .35); background: rgba(20, 25, 36, .52); }
 .scene-draft-layers > div:first-child { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 5px 12px; }
@@ -473,7 +491,10 @@ body::before {
 .scene-relation-review button[aria-pressed="true"] { border-color: #8c79c7; color: #ece7ff; background: #30294a; }
 .scene-relation-review button:disabled { opacity: .45; cursor: wait; }
 .scene-draft-group ul { display: grid; gap: 6px; padding: 0; margin: 0; list-style: none; }
-.scene-draft-group li { display: grid; grid-template-columns: minmax(90px, auto) auto minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 7px 9px; border: 1px solid #383e4b; background: #151923; }
+.scene-draft-group li { display: grid; grid-template-columns: minmax(90px, auto) auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 7px 9px; border: 1px solid #383e4b; background: #151923; }
+.scene-draft-group li button { min-height: 24px; padding: 0 8px; border: 1px solid #5a4450; color: #e3b4be; background: #2a171d; font-size: 9px; cursor: pointer; }
+.scene-draft-group li button:disabled { opacity: .4; cursor: wait; }
+.scene-draft-group.is-suppressed li { border-color: #4a455c; background: #16141f; }
 .scene-draft-group li span { color: #dedff0; font-size: 11px; }
 .scene-draft-group li code { color: #aebae0; font-size: 10px; }
 .scene-draft-group li small { min-width: 0; color: #788194; font-size: 9px; line-height: 1.4; }
@@ -596,6 +617,9 @@ body::before {
 .generate-button:disabled { opacity: .38; cursor: not-allowed; }
 .workbench-results { margin-top: 18px; }
 .validation-strip { min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 15px; border: 1px solid #2b4339; color: #8d968f; background: #111a17; font-size: 10px; }
+.validation-strip.is-warning { border-color: #5a4a2c; color: #cbb892; background: #1a160f; }
+.validation-strip.is-warning strong { color: #e6d09a; }
+.artist-empty { margin: 12px 0 0; color: #9aa1b1; font-size: 12px; }
 .validation-strip .status-dot { flex: 0 0 auto; margin: 0; }
 .validation-strip strong { color: #a8dfc7; font-size: 11px; }
 .validation-strip span:last-child { overflow: hidden; margin-left: auto; text-overflow: ellipsis; white-space: nowrap; }
@@ -604,6 +628,9 @@ body::before {
 .generation-submit-bar strong { color: #d2ccef; font-size: 11px; }
 .generation-submit-bar span { color: #747b8c; font-size: 9px; }
 .generation-submit-bar select { min-width: 250px; height: 36px; padding: 0 10px; border: 1px solid #45405e; color: #d1d4dd; background: #101219; font-size: 10px; }
+.generation-target-field { display: grid; gap: 4px; min-width: 210px; }
+.generation-target-field > span { color: #969daf; font: 600 8px/1 "Cascadia Code", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.generation-target-field select { width: 100%; min-width: 0; }
 .candidate-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .artist-suggestion-pool { margin-top: 16px; padding: 18px; border: 1px solid var(--line); background: rgba(20, 23, 32, .82); }
 .artist-suggestion-pool header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -648,8 +675,18 @@ body::before {
 .prompt-block button:hover { color: white; background: #222633; }
 .prompt-block code { display: block; min-height: 76px; padding: 14px 15px; overflow-wrap: anywhere; color: #d8dbe4; font-size: 11px; line-height: 1.7; white-space: pre-wrap; }
 .prompt-block--negative code { color: #c5abb1; }
+.prompt-zh { display: grid; gap: 4px; margin: 0; padding: 8px 12px 10px; list-style: none; border-top: 1px solid #292e3a; background: rgba(42, 36, 18, .28); }
+.prompt-zh li { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 8px; align-items: baseline; }
+.prompt-zh code { min-height: 0; padding: 0; color: #9aa3b6; font-size: 10px; line-height: 1.45; }
+.prompt-zh span { color: #efe7c9; font-size: 11px; line-height: 1.45; }
+.scene-plan-zh { margin: 6px 0 0; color: #efe7c9; font-size: 12px; line-height: 1.6; }
+.intent-review details p + .scene-plan-zh { margin-top: 4px; }
 .candidate-tokens { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 14px; }
-.candidate-tokens span { padding: 5px 7px; border: 1px solid #313743; color: #9ea5b4; background: #11141b; font: 9px/1 "Cascadia Code", monospace; }
+.candidate-tokens span, .candidate-tokens button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 7px; border: 1px solid #313743; color: #9ea5b4; background: #11141b; font: 9px/1 "Cascadia Code", monospace; }
+.candidate-tokens button { cursor: pointer; }
+.candidate-tokens button small { color: #c7929c; font-size: 10px; }
+.candidate-tokens button:hover:not(:disabled) { border-color: #6a4450; color: #f0d5db; background: #26171b; }
+.candidate-tokens button:disabled { opacity: .45; cursor: wait; }
 .candidate-tokens .is-automatic { border-color: #34516a; color: #91bce0; background: #14202b; }
 .candidate-tokens .is-locked { border-color: #5e5682; color: var(--accent-bright); background: #211e30; }
 .candidate-tokens .is-artist { border-color: #664b35; color: #e4b58d; background: #271d16; }

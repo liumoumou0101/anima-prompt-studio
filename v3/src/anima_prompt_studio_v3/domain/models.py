@@ -276,6 +276,7 @@ class CandidateVersions(DomainModel):
 class CandidateTag(DomainModel):
     name: str
     rendered: str = Field(min_length=1)
+    cn_name: str | None = Field(default=None, max_length=240)
     state: CandidateTagState
     source: TagSource
     source_element_ids: list[ElementId] = Field(default_factory=list)

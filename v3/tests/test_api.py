@@ -21,6 +21,7 @@ from anima_prompt_studio_v3.api import LocalApiServer, SessionManager, create_ap
 from anima_prompt_studio_v3.api.app import (
     _LocalExclusionEvidence,
     _LocalIndexMatch,
+    _back_translate_scene_plan,
     _confirmed_source_matches,
     _local_exclusion_concept_matches,
 )
@@ -315,6 +316,13 @@ def test_v3_settings_reuses_v2_remote_profile_store_without_exposing_credentials
     )
     assert updated.status_code == 200
     assert updated.json()["host_fingerprint_confirmed"] is False
+    unavailable = client.post(
+        "/api/v3/settings/remote-profiles/existing/test-connection",
+        json={},
+        headers=write_auth,
+    )
+    assert unavailable.status_code == 409
+    assert unavailable.json()["error"]["code"] == "ssh_host_key_unconfirmed"
     repository = SQLiteRepository(v2_database)
     try:
         profile = repository.get_remote_profile("existing")
@@ -322,6 +330,81 @@ def test_v3_settings_reuses_v2_remote_profile_store_without_exposing_credentials
         assert profile.known_host_fingerprint == ""
     finally:
         repository.close()
+
+
+def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
+    reference_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
+    from anima_prompt_studio.services.remote import comfy_client, ssh_tunnel
+
+    v2_database = tmp_path / "v2.db"
+    repository = SQLiteRepository(v2_database)
+    try:
+        repository.save_remote_profile(RemoteProfile(
+            id="v3-ready",
+            display_name="V3 新连接",
+            ssh_host="new.example",
+            ssh_user="root",
+            auth_type=RemoteAuthType.AGENT,
+            known_host_fingerprint="SHA256:confirmed",
+        ))
+    finally:
+        repository.close()
+
+    events: list[str] = []
+
+    class FakeTunnel:
+        base_url = "http://127.0.0.1:45678"
+
+        def __init__(self, profile) -> None:
+            assert profile.id == "v3-ready"
+
+        def open(self, credentials):
+            events.append("ssh")
+            return self
+
+        def close(self) -> None:
+            events.append("close")
+
+    class FakeComfyClient:
+        def __init__(self, base_url: str) -> None:
+            assert base_url == FakeTunnel.base_url
+
+        def validate_environment(self):
+            events.append("comfy")
+            return type("Report", (), {
+                "devices": ["NVIDIA Test GPU"],
+                "queue_running": 1,
+                "queue_pending": 2,
+            })()
+
+    monkeypatch.setattr(ssh_tunnel, "SshTunnel", FakeTunnel)
+    monkeypatch.setattr(comfy_client, "ComfyUIClient", FakeComfyClient)
+    runtime = create_api_runtime(reference_db, v2_database=v2_database)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchanged = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    response = client.post(
+        "/api/v3/settings/remote-profiles/v3-ready/test-connection",
+        json={},
+        headers={"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "devices": ["NVIDIA Test GPU"],
+        "queue_running": 1,
+        "queue_pending": 2,
+        "comfy_endpoint": "127.0.0.1:8188",
+    }
+    assert events == ["ssh", "comfy", "close"]
 
 
 def test_session_manager_revoke_invalidates_token() -> None:
@@ -876,6 +959,128 @@ def test_local_natural_candidate_applies_only_explicitly_selected_suggestions(
     assert [item["canonical_tag"] for item in payload["scene_draft"]["confirmed"]] == ["maid"]
     assert payload["scene_draft"]["confirmed"][0]["source"] == "user_selected"
     assert payload["intent"]["scene_plan_en"]
+    assert "text" in payload["scene_draft"]["back_translation"]
+    assert "segments" in payload["scene_draft"]["back_translation"]
+
+
+def test_local_natural_candidate_keeps_suppressed_tags_from_returning(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+    source_text = "博丽灵梦穿女仆装"
+
+    first = client.post(
+        "/api/v3/local-natural/candidates",
+        json={"source_text": source_text, "model_profile": "anima_aesthetic_v1"},
+        headers=headers,
+    )
+    assert first.status_code == 200
+    first_payload = first.json()
+    confirmed = [item["canonical_tag"] for item in first_payload["scene_draft"]["confirmed"]]
+    assert "hakurei_reimu" in confirmed
+    assert "maid" in confirmed
+    assert first_payload["scene_draft"]["back_translation"]["segments"]
+
+    removed = client.post(
+        "/api/v3/local-natural/candidates",
+        json={
+            "source_text": source_text,
+            "translated_text": first_payload["scene_draft"]["translated_text"],
+            "suppressed_tags": ["hakurei_reimu"],
+            "model_profile": "anima_aesthetic_v1",
+        },
+        headers=headers,
+    )
+    assert removed.status_code == 200
+    removed_payload = removed.json()
+    confirmed_after = [item["canonical_tag"] for item in removed_payload["scene_draft"]["confirmed"]]
+    assert "hakurei_reimu" not in confirmed_after
+    assert "maid" in confirmed_after
+    assert [item["canonical_tag"] for item in removed_payload["scene_draft"]["suppressed"]] == ["hakurei_reimu"]
+    assert "hakurei reimu" not in removed_payload["candidates"][0]["positive_prompt"]
+    leftover_notes = [note for note in removed_payload["scene_draft"]["risk_notes"] if "已移除的标签仍出现" in note]
+    assert leftover_notes
+
+
+def test_structured_english_tags_use_bilingual_local_review_and_suppression(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+    request = {
+        "source_text": "maid，hakurei_reimu",
+        "source_language": "mixed",
+        "model_profile": "anima_aesthetic_v1",
+        "elements": [
+            {"id": "e_positive_1", "text": "maid", "state": "required"},
+            {"id": "e_positive_2", "text": "hakurei_reimu", "state": "required"},
+        ],
+    }
+
+    first = client.post("/api/v3/workbench/candidates", json=request, headers=headers)
+    assert first.status_code == 200
+    first_payload = first.json()
+    assert first_payload["scene_draft"]["translated_text"] == "maid，hakurei_reimu"
+    assert first_payload["scene_draft"]["scene_plan_enabled"] is False
+    assert first_payload["scene_draft"]["back_translation"]["segments"] == []
+    assert first_payload["intent"]["scene_plan_en"] is None
+    labels = {item["canonical_tag"]: item["cn_name"] for item in first_payload["scene_draft"]["confirmed"]}
+    assert labels["maid"] == "女仆"
+    assert labels["hakurei_reimu"] == "博丽灵梦"
+    candidate_labels = {item["name"]: item["cn_name"] for item in first_payload["candidates"][0]["tags"]}
+    assert candidate_labels["maid"] == "女仆"
+    assert candidate_labels["hakurei_reimu"] == "博丽灵梦"
+
+    removed = client.post(
+        "/api/v3/workbench/candidates",
+        json={**request, "translated_text": first_payload["scene_draft"]["translated_text"], "suppressed_tags": ["maid"]},
+        headers=headers,
+    )
+    assert removed.status_code == 200
+    removed_payload = removed.json()
+    assert "maid" not in removed_payload["candidates"][0]["positive_prompt"]
+    assert [item["canonical_tag"] for item in removed_payload["scene_draft"]["suppressed"]] == ["maid"]
+    assert removed_payload["scene_draft"]["unresolved"] == []
+
+
+def test_back_translation_uses_one_scene_call_instead_of_one_call_per_segment() -> None:
+    class CountingTranslator:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def translate(self, text: str, *, direction: str):
+            self.calls.append(text)
+            return type("Translation", (), {"translated_text": f"中：{text}", "engine_name": "test"})()
+
+    translator = CountingTranslator()
+    payload = _back_translate_scene_plan(
+        translator,
+        "A mermaid swims. Blue light crosses the water. Wide angle composition.",
+        negative="worst quality, blurry",
+    )
+
+    assert len(translator.calls) == 2
+    assert payload["segments"] == [{
+        "en": "A mermaid swims. Blue light crosses the water. Wide angle composition.",
+        "zh": "中：A mermaid swims. Blue light crosses the water. Wide angle composition.",
+    }]
 
 
 def test_workbench_explicit_relation_adds_hybrid_and_bad_profile_is_stable(reference_db: Path) -> None:
@@ -953,7 +1158,14 @@ def test_workspace_crud_persists_separately_and_rejects_stale_revision(
     assert created.status_code == 201
     workspace = created.json()
     assert workspace["revision"] == 1
-    assert workspace["draft"] == draft
+    assert workspace["draft"]["positive_text"] == draft["positive_text"]
+    assert workspace["draft"]["suppressed_tags"] == []
+    assert workspace["draft"]["generation_settings"] == {
+        "preset_id": "balanced",
+        "aspect": "portrait",
+        "seed": -1,
+        "batch_size": 1,
+    }
     assert workspace["candidate_snapshot"]["candidates"][0]["positive_prompt"] == "score_7, maid, twintails"
     assert workspace["candidate_snapshot"]["artist_suggestions"][0]["name"] == "sample_artist_a"
     assert workspace_db.is_file()

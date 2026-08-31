@@ -147,6 +147,7 @@ export type CandidateLane = "literal" | "conservative" | "artist" | "hybrid";
 export interface CandidateTag {
   name: string;
   rendered: string;
+  cn_name?: string | null;
   state: "locked" | "required" | "user_selected" | "suggested" | "automatic";
   source: "user" | "exact" | "alias" | "translation" | "semantic" | "cooccurrence" | "artist";
   source_element_ids: string[];
@@ -288,13 +289,34 @@ export interface SceneDraftItem {
   id: string;
   text: string;
   canonical_tag: string | null;
-  source: "source_exact" | "source_excluded" | "translation_exact" | "user_selected" | "unresolved";
+  source: "source_exact" | "source_excluded" | "translation_exact" | "user_selected" | "unresolved" | "suppressed";
   fact_type?: "subject" | "character" | "appearance" | "clothing" | "action" | "object" | "scene" | "composition" | "style" | "quality" | "relation" | "other";
   owner_entity_id?: string | null;
   suggested_owner_entity_id?: string | null;
   reason: string;
   source_start: number | null;
   source_end: number | null;
+  cn_name?: string | null;
+}
+
+export interface SceneDraftAmbiguousOption {
+  canonical_tag: string;
+  render_name: string;
+  cn_name: string | null;
+  match_kind: string;
+  post_count: number;
+}
+
+export interface SceneDraftAmbiguousGroup {
+  text: string;
+  options: SceneDraftAmbiguousOption[];
+}
+
+export interface SceneDraftBackTranslation {
+  text: string;
+  engine: string;
+  segments: Array<{en: string; zh: string}>;
+  negative_text?: string;
 }
 
 export interface SceneEntity {
@@ -319,12 +341,16 @@ export interface SceneRelation {
 export interface SceneDraft {
   source_text: string;
   translated_text: string;
+  scene_plan_enabled?: boolean;
   entities?: SceneEntity[];
   relations?: SceneRelation[];
   confirmed: SceneDraftItem[];
   exclusions: SceneDraftItem[];
   suggestions: SceneDraftItem[];
   unresolved: SceneDraftItem[];
+  suppressed?: SceneDraftItem[];
+  ambiguous?: SceneDraftAmbiguousGroup[];
+  back_translation?: SceneDraftBackTranslation;
   risk_notes: string[];
 }
 
@@ -396,6 +422,13 @@ export interface IntentParseResponse {
   parser: {name: string; source: "v2_ai_extract" | "v2_local_translation"};
 }
 
+export interface WorkbenchGenerationSettings {
+  preset_id: "fast" | "balanced" | "quality";
+  aspect: "portrait" | "landscape" | "square" | "model_default";
+  seed: number;
+  batch_size: number;
+}
+
 export interface WorkspaceDraft {
   positive_text: string;
   excluded_text: string;
@@ -403,6 +436,8 @@ export interface WorkspaceDraft {
   input_mode?: "concepts" | "natural";
   natural_text?: string;
   selected_tags?: string[];
+  suppressed_tags?: string[];
+  generation_settings?: WorkbenchGenerationSettings;
 }
 
 export interface WorkspaceRecord {
@@ -446,6 +481,8 @@ export interface GenerationRunListResponse {
 export interface GenerationTarget {
   remote_profile_id: string;
   remote_display_name: string;
+  remote_ssh_host?: string;
+  remote_ssh_port?: number;
   workflow_profile_id: string;
   workflow_display_name: string;
   workflow_kind: string;

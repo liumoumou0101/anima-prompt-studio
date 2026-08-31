@@ -78,6 +78,7 @@ from .models import (
     IntentParseRequest,
     LocalNaturalCandidateRequest,
     PrivateKeyPassphraseRequest,
+    RemoteConnectionTestRequest,
     RemoteProfileSettingsRequest,
     RemoteHostFingerprintRequest,
     RelatedTagsRequest,
@@ -301,9 +302,15 @@ def create_api_runtime(
                 bundle = HybridLaneGenerator(store).add_hybrid(bundle, profile)
                 validation = CandidateValidator(store).validate_or_raise(bundle, profile)
                 literal = bundle.candidates[0]
+                candidates = []
+                for item in bundle.candidates:
+                    candidate = item.model_dump(mode="json")
+                    for tag in candidate["tags"]:
+                        tag["cn_name"] = _tag_cn_name(store.get_tag(str(tag["name"])))
+                    candidates.append(candidate)
                 return {
                     "intent": bundle.intent.model_dump(mode="json"),
-                    "candidates": [item.model_dump(mode="json") for item in bundle.candidates],
+                    "candidates": candidates,
                     "validation": validation.model_dump(mode="json"),
                     "tag_suggestions": store.related_tags(
                         [tag.name for tag in literal.tags],
@@ -657,9 +664,13 @@ def create_api_runtime(
             positive_text = "，".join(
                 item.text for item in payload.elements if item.state != IntentState.EXCLUDED
             )
+            contains_cjk = _contains_cjk(positive_text)
             if payload.translated_text:
                 translated_text = payload.translated_text
                 translation_engine = "当前工作台译文"
+            elif not contains_cjk:
+                translated_text = positive_text
+                translation_engine = "英文原文与本地标签索引"
             else:
                 try:
                     translated = translator.translate(positive_text, direction="zh_en")
@@ -673,9 +684,18 @@ def create_api_runtime(
                     translated_text,
                     store,
                     selected_tags=payload.selected_tags,
+                    suppressed_tags=payload.suppressed_tags,
+                    include_scene_plan=contains_cjk,
                 )
                 intent = _apply_workbench_exclusions(intent, payload, store, scene_draft)
+                _attach_cn_names(store, scene_draft)
             response = candidate_response(intent, payload.model_profile, database)
+            if contains_cjk:
+                scene_draft["back_translation"] = _back_translate_scene_plan(
+                    translator,
+                    translated_text,
+                    negative=_candidate_negative_prompt(response),
+                )
             response["local_translation"] = {
                 "translated_text": translated_text,
                 "engine": translation_engine,
@@ -768,12 +788,18 @@ def create_api_runtime(
                 translated_text,
                 store,
                 selected_tags=payload.selected_tags,
+                suppressed_tags=payload.suppressed_tags,
                 fact_owners=payload.fact_owners,
                 confirmed_relations=[item.model_dump() for item in payload.confirmed_relations],
                 explicit_excluded_text=payload.excluded_text,
                 evidence=evidence,
             )
             response = candidate_response(intent, payload.model_profile, database)
+        scene_draft["back_translation"] = _back_translate_scene_plan(
+            translator,
+            translated_text,
+            negative=_candidate_negative_prompt(response),
+        )
         response["local_translation"] = {
             "translated_text": translated_text,
             "engine": translation_engine,
@@ -1043,7 +1069,7 @@ def create_api_runtime(
     ) -> dict[str, object]:
         """Expose V2 connection metadata without ever exposing a secret."""
         from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
-        from anima_prompt_studio.services.remote.credential_store import CredentialStore
+        from anima_prompt_studio.services.remote.credential_store import CredentialStore, CredentialStoreError
 
         repository = SQLiteRepository(database)
         try:
@@ -1129,6 +1155,49 @@ def create_api_runtime(
             return _remote_profile_settings_response(profile.model_copy(update={"known_host_fingerprint": actual}), CredentialStore())
         finally:
             repository.close()
+
+    @app.post(
+        f"{API_PREFIX}/settings/remote-profiles/{{profile_id}}/test-connection",
+        dependencies=[Depends(require_session)],
+    )
+    def test_remote_profile_connection(
+        profile_id: str,
+        payload: RemoteConnectionTestRequest,
+        database: Path = Depends(require_v2_settings_database),
+    ) -> dict[str, object]:
+        """Validate SSH authentication, the tunnel and the remote ComfyUI API."""
+        from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteCredentials
+        from anima_prompt_studio.services.remote.comfy_client import ComfyUIClient
+        from anima_prompt_studio.services.remote.credential_store import CredentialStore
+        from anima_prompt_studio.services.remote.ssh_tunnel import SshTunnel
+
+        profile = _get_v2_remote_profile(database, profile_id)
+        if not profile.known_host_fingerprint.strip():
+            raise ApiError(409, "ssh_host_key_unconfirmed", "请先检测并确认 SSH 主机指纹。")
+        password = payload.password.get_secret_value() if payload.password is not None else ""
+        if profile.auth_type == RemoteAuthType.PASSWORD and not password:
+            try:
+                password = CredentialStore().read_password(profile.id)
+            except CredentialStoreError as exc:
+                raise ApiError(503, "credential_store_unavailable", str(exc), retryable=True) from exc
+        passphrase = payload.passphrase.get_secret_value() if payload.passphrase is not None else ""
+        if profile.auth_type == RemoteAuthType.PASSWORD and not password:
+            raise ApiError(409, "ssh_credentials_missing", "没有可用的 SSH 密码；请填写并保存密码后再测试。")
+        tunnel = SshTunnel(profile)
+        try:
+            tunnel.open(RemoteCredentials(password=password, passphrase=passphrase))
+            report = ComfyUIClient(tunnel.base_url).validate_environment()
+        except Exception as exc:
+            raise ApiError(502, "remote_connection_test_failed", f"远程连接测试失败：{exc}", retryable=True) from exc
+        finally:
+            tunnel.close()
+        return {
+            "ok": True,
+            "devices": report.devices,
+            "queue_running": report.queue_running,
+            "queue_pending": report.queue_pending,
+            "comfy_endpoint": f"{profile.comfy_host}:{profile.comfy_port}",
+        }
 
     @app.post(
         f"{API_PREFIX}/generation-credentials/private-key-passphrase",
@@ -1551,12 +1620,13 @@ def _workbench_uses_local_mapping(payload: WorkbenchCandidateRequest, translator
     users to memorize canonical Danbooru spelling.  Explicit canonical input and
     graph relations retain the original low-level API path.
     """
-    return bool(
-        translator is not None
-        and not payload.relations
-        and not any(item.canonical_tag for item in payload.elements)
-        and any("\u3400" <= character <= "\u9fff" for character in payload.source_text)
-    )
+    if payload.relations or any(item.canonical_tag for item in payload.elements):
+        return False
+    return translator is not None or not _contains_cjk(payload.source_text)
+
+
+def _contains_cjk(text: str) -> bool:
+    return any("\u3400" <= character <= "\u9fff" for character in text)
 
 
 def _apply_workbench_exclusions(
@@ -1568,6 +1638,7 @@ def _apply_workbench_exclusions(
     """Map explicit structured exclusions without treating them as positive prose."""
     elements = list(intent.graph.elements)
     unresolved = list(scene_draft["unresolved"])
+    suppressed = {tag.strip().lower().replace(" ", "_") for tag in payload.suppressed_tags}
     for item in payload.elements:
         if item.state != IntentState.EXCLUDED:
             continue
@@ -1585,6 +1656,7 @@ def _apply_workbench_exclusions(
         else:
             exclusion_matches = _local_index_matches(store, _local_lookup_terms(item.text, ""))
             resolved, _ambiguous = _confirmed_source_matches(exclusion_matches)
+        resolved = [match for match in resolved if match.canonical_tag not in suppressed]
         if not resolved:
             unresolved.append(_scene_draft_item(
                 f"u_{item.id}",
@@ -1636,6 +1708,11 @@ _LOCAL_EXCLUSION_CONCEPT_TAGS: dict[str, tuple[str, ...]] = {
     # V3 将它透明展开成可审阅的负向标签，而不是伪装成一次精确命中。
     "文字": ("english_text", "speech_bubble", "signature", "artist_name", "character_name", "copyright_name", "web_address", "watermark"),
     "文本": ("english_text", "speech_bubble", "signature", "artist_name", "character_name", "copyright_name", "web_address", "watermark"),
+}
+
+_LOCAL_SOURCE_GLOSSARY: dict[str, str] = {
+    "人鱼": "mermaid",
+    "美人鱼": "mermaid",
 }
 
 _LOCAL_FACT_TYPE_GROUPS: dict[IntentElementType, frozenset[str]] = {
@@ -1703,10 +1780,12 @@ def _local_natural_intent(
     store: ReferenceDataStore,
     *,
     selected_tags: list[str],
+    suppressed_tags: list[str] | None = None,
     fact_owners: dict[str, str] | None = None,
     confirmed_relations: list[dict[str, str]] | None = None,
     explicit_excluded_text: str = "",
     evidence: _LocalNaturalEvidence | None = None,
+    include_scene_plan: bool = True,
 ) -> tuple[IntentDocument, dict[str, object]]:
     """Build a reviewable local draft without treating every index hit as required.
 
@@ -1726,6 +1805,7 @@ def _local_natural_intent(
         if match.origin == "source" and _match_in_exclusion_evidence(match, evidence.exclusions)
     ]
     source_matches, ambiguous_source_terms = _confirmed_source_matches(source_candidates)
+    source_matches = _merge_glossary_source_matches(evidence.positive_text, source_matches, store)
     excluded_matches, ambiguous_exclusion_terms = _confirmed_source_matches(excluded_candidates)
     excluded_matches.extend(_local_exclusion_concept_matches(store, evidence.exclusions, ""))
     explicit_exclusion_matches: list[_LocalIndexMatch] = []
@@ -1746,10 +1826,15 @@ def _local_natural_intent(
         ambiguous_exclusion_terms.extend(explicit_ambiguous)
 
     excluded_matches = _dedupe_canonical_matches([*excluded_matches, *explicit_exclusion_matches])
+    suppressed = {item.strip().lower().replace(" ", "_") for item in (suppressed_tags or []) if item.strip()}
+    suppressed_source_matches = [match for match in source_matches if match.canonical_tag in suppressed]
+    suppressed_exclusion_matches = [match for match in excluded_matches if match.canonical_tag in suppressed]
+    source_matches = [match for match in source_matches if match.canonical_tag not in suppressed]
+    excluded_matches = [match for match in excluded_matches if match.canonical_tag not in suppressed]
     mapped_exclusion_texts = {match.text for match in excluded_matches}
     ambiguous_exclusion_terms = [item for item in ambiguous_exclusion_terms if item not in mapped_exclusion_texts]
     excluded_tags = {match.canonical_tag for match in excluded_matches}
-    selected = list(dict.fromkeys(selected_tags))
+    selected = [tag for tag in dict.fromkeys(selected_tags) if tag not in suppressed]
     requested_fact_owners = fact_owners or {}
     requested_relation_keys = {
         (str(item["source_entity_id"]), str(item["target_element_id"]), str(item["relation"]))
@@ -1797,11 +1882,12 @@ def _local_natural_intent(
             continue
         element_id = f"e_local_selected_{index}"
         rendered = str(detail["render_name"])
+        label = _tag_cn_name(detail) or rendered
         fact_type = _local_fact_type_from_detail(detail)
         entity_id = _local_entity_id(element_id) if _local_entity_anchor(detail) else None
         elements.append(IntentElement(
             id=element_id,
-            original_text=rendered,
+            original_text=label,
             canonical_tag=tag,
             entity_id=entity_id,
             type=fact_type,
@@ -1811,14 +1897,15 @@ def _local_natural_intent(
         ))
         confirmed.append(_scene_draft_item(
             element_id,
-            rendered,
+            label,
             tag,
             "user_selected",
             "用户从建议池确认加入",
             fact_type=fact_type,
+            cn_name=_tag_cn_name(detail),
         ))
         if entity_id is not None:
-            entities.append(_scene_entity_item(entity_id, element_id, rendered, tag))
+            entities.append(_scene_entity_item(entity_id, element_id, label, tag))
 
     for index, match in enumerate(excluded_matches, 1):
         element_id = f"e_local_excluded_{index}"
@@ -1878,8 +1965,21 @@ def _local_natural_intent(
     translation_matches = [
         match
         for match in _confirmed_translation_matches(matches)
-        if match.canonical_tag not in confirmed_tags and match.canonical_tag not in selected_set
+        if match.canonical_tag not in confirmed_tags
+        and match.canonical_tag not in selected_set
+        and match.canonical_tag not in suppressed
+        and match.canonical_tag not in excluded_tags
     ]
+    ambiguous_groups = _ambiguous_source_groups(
+        source_candidates,
+        store,
+        confirmed_tags={match.canonical_tag for match in source_matches} | selected_set | excluded_tags | suppressed,
+    )
+    leftover_suppressed = (
+        _suppressed_terms_left_in_text(translated_text, suppressed, store)
+        if include_scene_plan
+        else []
+    )
     suggestions = [
         _scene_draft_item(
             f"s_local_translation_{index}",
@@ -1965,7 +2065,7 @@ def _local_natural_intent(
 
     unresolved: list[dict[str, object]] = []
     has_uncovered_source = _has_uncovered_source_evidence(evidence.positive_text, source_matches)
-    if has_uncovered_source:
+    if include_scene_plan and has_uncovered_source:
         unresolved.append(_scene_draft_item(
             "u_local_scene",
             evidence.positive_text,
@@ -1978,7 +2078,7 @@ def _local_natural_intent(
             ),
         ))
 
-    if not source_matches and evidence.positive_text:
+    if include_scene_plan and not source_matches and evidence.positive_text:
         elements.append(IntentElement(
             id="e_local_scene",
             original_text="local scene description",
@@ -1988,7 +2088,7 @@ def _local_natural_intent(
             provenance=ElementProvenance(kind=ProvenanceKind.TRANSLATION, detail="local_prose_baseline"),
             notes=["local_prose_baseline"],
         ))
-    elif has_uncovered_source:
+    elif include_scene_plan and has_uncovered_source:
         elements.append(IntentElement(
             id="e_local_unresolved_scene",
             original_text=evidence.positive_text,
@@ -2001,24 +2101,32 @@ def _local_natural_intent(
 
     intent = IntentDocument(
         source_text=source_text.strip(),
-        source_language="zh",
+        source_language="zh" if _contains_cjk(source_text) else "en",
         translated_text=translated_text.strip(),
-        scene_plan_en=translated_text.strip() or None,
+        scene_plan_en=(translated_text.strip() or None) if include_scene_plan else None,
         scene_negative_en=[match.canonical_tag.replace("_", " ") for match in excluded_matches],
         graph=ConstraintGraph(elements=elements, edges=relation_edges),
     )
     scene_draft = {
         "source_text": source_text.strip(),
         "translated_text": translated_text.strip(),
+        "scene_plan_enabled": include_scene_plan,
         "entities": entities,
         "relations": relations,
         "confirmed": confirmed,
         "exclusions": exclusions,
         "suggestions": suggestions,
         "unresolved": unresolved,
+        "suppressed": _suppressed_scene_items(
+            [*suppressed_source_matches, *suppressed_exclusion_matches],
+            suppressed - {match.canonical_tag for match in [*suppressed_source_matches, *suppressed_exclusion_matches]},
+            store,
+        ),
+        "ambiguous": ambiguous_groups,
+        "back_translation": {"text": "", "engine": "", "segments": [], "negative_text": ""},
         "risk_notes": [
             *(
-                [f"{', '.join(f'“{item}”' for item in ambiguous_source_terms[:3])} 可关联多条标签；已只确认唯一的主标签，其余仅通过建议池提供。"]
+                [f"{', '.join(f'“{item}”' for item in ambiguous_source_terms[:3])} 可关联多条标签；已只确认唯一的主标签，其余请在待确认或一对多列表中点选。"]
                 if ambiguous_source_terms
                 else []
             ),
@@ -2047,9 +2155,15 @@ def _local_natural_intent(
                 if stale_relation_assignments
                 else []
             ),
+            *(
+                [f"已移除的标签仍出现在英文画面计划中：{', '.join(leftover_suppressed[:4])}。请直接改英文，否则 Hybrid 仍可能带上它们。"]
+                if leftover_suppressed
+                else []
+            ),
             "当前仅自动确认唯一的主标签或英文 canonical/alias 命中；人物归属、复杂动作、空间关系和构图仍需人工检查。",
         ],
     }
+    _attach_cn_names(store, scene_draft)
     return intent, scene_draft
 
 
@@ -2322,6 +2436,237 @@ def _spans_overlap(left: _LocalIndexMatch, right: _LocalIndexMatch) -> bool:
     return left.start < right.end and right.start < left.end
 
 
+def _merge_glossary_source_matches(
+    positive_text: str,
+    source_matches: list[_LocalIndexMatch],
+    store: ReferenceDataStore,
+) -> list[_LocalIndexMatch]:
+    extra: list[_LocalIndexMatch] = []
+    existing = {match.canonical_tag for match in source_matches}
+    for phrase, canonical in _LOCAL_SOURCE_GLOSSARY.items():
+        if canonical in existing:
+            continue
+        detail = store.get_tag(canonical)
+        if detail is None:
+            continue
+        start = 0
+        while True:
+            index = positive_text.find(phrase, start)
+            if index < 0:
+                break
+            extra.append(_LocalIndexMatch(
+                text=phrase,
+                origin="source",
+                canonical_tag=canonical,
+                match_kind="cn_name",
+                post_count=int(detail["post_count"]),
+                start=index,
+                end=index + len(phrase),
+            ))
+            start = index + len(phrase)
+    if not extra:
+        return source_matches
+    merged: list[_LocalIndexMatch] = []
+    for match in sorted(
+        [*source_matches, *extra],
+        key=lambda item: (-len(item.text), _match_priority(item), -(item.post_count), item.canonical_tag),
+    ):
+        if any(_spans_overlap(match, existing_match) for existing_match in merged):
+            continue
+        merged.append(match)
+    merged.sort(key=lambda item: (item.start if item.start is not None else 0, -len(item.text), item.canonical_tag))
+    return _dedupe_canonical_matches(merged)
+
+
+def _ambiguous_source_groups(
+    matches: list[_LocalIndexMatch],
+    store: ReferenceDataStore,
+    *,
+    confirmed_tags: set[str],
+) -> list[dict[str, object]]:
+    by_occurrence: dict[tuple[str, int | None, int | None], list[_LocalIndexMatch]] = {}
+    for match in matches:
+        if match.origin != "source":
+            continue
+        by_occurrence.setdefault((match.text, match.start, match.end), []).append(match)
+    groups: list[dict[str, object]] = []
+    seen_texts: set[str] = set()
+    for (text, _start, _end), candidates in by_occurrence.items():
+        unique = [
+            item for item in _unique_canonical_matches(candidates)
+            if item.canonical_tag not in confirmed_tags
+        ]
+        if len(unique) < 2 or text in seen_texts:
+            continue
+        options: list[dict[str, object]] = []
+        for item in unique[:8]:
+            detail = store.get_tag(item.canonical_tag)
+            if detail is None:
+                continue
+            options.append({
+                "canonical_tag": item.canonical_tag,
+                "render_name": str(detail["render_name"]),
+                "cn_name": detail.get("cn_name"),
+                "match_kind": item.match_kind,
+                "post_count": item.post_count,
+            })
+        if len(options) < 2:
+            continue
+        seen_texts.add(text)
+        groups.append({"text": text, "options": options})
+        if len(groups) >= 20:
+            break
+    return groups
+
+
+def _suppressed_scene_items(
+    matches: list[_LocalIndexMatch],
+    leftover_tags: set[str],
+    store: ReferenceDataStore,
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for index, match in enumerate(matches, 1):
+        if match.canonical_tag in seen:
+            continue
+        seen.add(match.canonical_tag)
+        items.append(_scene_draft_item(
+            f"e_local_suppressed_{index}",
+            match.text,
+            match.canonical_tag,
+            "suppressed",
+            "用户已移除；重编译不会自动恢复",
+            match.start,
+            match.end,
+            _local_fact_type(store, match.canonical_tag),
+        ))
+    for index, tag in enumerate(sorted(leftover_tags), 1):
+        if tag in seen:
+            continue
+        detail = store.get_tag(tag)
+        text = str(detail["cn_name"] or detail["render_name"]) if detail else tag.replace("_", " ")
+        items.append(_scene_draft_item(
+            f"e_local_suppressed_manual_{index}",
+            text,
+            tag,
+            "suppressed",
+            "用户已移除；重编译不会自动恢复",
+            fact_type=_local_fact_type_from_detail(detail) if detail else IntentElementType.OTHER,
+        ))
+    return items
+
+
+def _suppressed_terms_left_in_text(
+    translated_text: str,
+    suppressed: set[str],
+    store: ReferenceDataStore,
+) -> list[str]:
+    haystack = translated_text.lower()
+    leftovers: list[str] = []
+    for tag in suppressed:
+        needles = {tag, tag.replace("_", " ")}
+        detail = store.get_tag(tag)
+        if detail is not None:
+            render_name = str(detail.get("render_name") or "").lower()
+            if render_name:
+                needles.add(render_name)
+            cn_name = str(detail.get("cn_name") or "").strip()
+            if cn_name:
+                needles.add(cn_name.lower())
+        if any(needle and needle in haystack for needle in needles):
+            leftovers.append(tag)
+    return leftovers
+
+
+def _back_translate_scene_plan(
+    translator: object | None,
+    english: str,
+    *,
+    negative: str = "",
+) -> dict[str, object]:
+    text = english.strip()
+    empty = {"text": "", "engine": "", "segments": [], "negative_text": ""}
+    if translator is None or not hasattr(translator, "translate"):
+        return empty
+    engine = ""
+    full_text = ""
+    segments: list[dict[str, str]] = []
+    if text:
+        try:
+            full = translator.translate(text, direction="en_zh")
+            full_text = full.translated_text.strip()
+            engine = full.engine_name
+        except (RuntimeError, ValueError):
+            full_text = ""
+        segments.append({"en": text, "zh": full_text})
+    negative_text = ""
+    if negative.strip():
+        try:
+            negative_result = translator.translate(negative.strip(), direction="en_zh")
+            negative_text = negative_result.translated_text.strip()
+            engine = engine or negative_result.engine_name
+        except (RuntimeError, ValueError):
+            negative_text = ""
+    return {
+        "text": full_text,
+        "engine": engine,
+        "segments": segments,
+        "negative_text": negative_text,
+    }
+
+
+def _candidate_negative_prompt(response: dict[str, object]) -> str:
+    candidates = response.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return ""
+    first = candidates[0]
+    if not isinstance(first, dict):
+        return ""
+    return str(first.get("negative_prompt") or "")
+
+
+def _tag_cn_name(detail: dict[str, object] | None) -> str | None:
+    if not detail:
+        return None
+    cn_name = str(detail.get("cn_name") or "").strip()
+    if cn_name:
+        return cn_name
+    terms = detail.get("cn_terms") or []
+    if isinstance(terms, list):
+        for item in terms:
+            value = str(item or "").strip()
+            if value:
+                return value
+    return None
+
+
+def _attach_cn_names(store: ReferenceDataStore, scene_draft: dict[str, object]) -> None:
+    groups = [
+        scene_draft.get("confirmed"),
+        scene_draft.get("exclusions"),
+        scene_draft.get("suggestions"),
+        scene_draft.get("suppressed"),
+    ]
+    for group in groups:
+        if not isinstance(group, list):
+            continue
+        for item in group:
+            if not isinstance(item, dict) or item.get("cn_name"):
+                continue
+            tag = item.get("canonical_tag")
+            if not isinstance(tag, str) or not tag:
+                continue
+            cn_name = _tag_cn_name(store.get_tag(tag))
+            if cn_name:
+                item["cn_name"] = cn_name
+    for entity in scene_draft.get("entities") or []:
+        if not isinstance(entity, dict) or not str(entity.get("label") or "").isascii():
+            continue
+        cn_name = _tag_cn_name(store.get_tag(str(entity.get("canonical_tag") or "")))
+        if cn_name:
+            entity["label"] = cn_name
+
+
 def _scene_draft_item(
     item_id: str,
     text: str,
@@ -2331,6 +2676,7 @@ def _scene_draft_item(
     source_start: int | None = None,
     source_end: int | None = None,
     fact_type: IntentElementType = IntentElementType.OTHER,
+    cn_name: str | None = None,
 ) -> dict[str, object]:
     return {
         "id": item_id,
@@ -2343,6 +2689,7 @@ def _scene_draft_item(
         "reason": reason,
         "source_start": source_start,
         "source_end": source_end,
+        "cn_name": cn_name,
     }
 
 

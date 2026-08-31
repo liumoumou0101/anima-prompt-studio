@@ -11,6 +11,32 @@ from typing import Any, Iterable
 from .contracts import DATA_CONTRACT, DataContractError
 
 
+GENERIC_ARTIST_SEED_TAGS = frozenset({
+    "1girl",
+    "1boy",
+    "1other",
+    "solo",
+    "multiple_girls",
+    "2girls",
+    "3girls",
+    "looking_at_viewer",
+    "smile",
+    "open_mouth",
+    "standing",
+    "sitting",
+    "swimming",
+    "navel",
+    "breasts",
+    "simple_background",
+    "white_background",
+    "cowboy_shot",
+    "upper_body",
+    "full_body",
+    "outdoors",
+    "indoors",
+})
+
+
 ARTIST_CONTEXT_GROUPS: dict[str, frozenset[str]] = {
     "composition": frozenset({"image_composition", "focus_tags", "lighting", "backgrounds"}),
     "setting": frozenset({
@@ -445,6 +471,7 @@ class ReferenceDataStore:
         post_counts: dict[str, int] = {}
         versions: dict[str, str] = {}
         for seed_name, seed_id in resolved.items():
+            weight = 0.2 if seed_name in GENERIC_ARTIST_SEED_TAGS else 1.0
             rows = self.connection.execute(
                 """SELECT a.name,a.render_name,a.post_count,e.cooc_count,e.npmi,e.score_version
                    FROM artist_tag_cooccurrence e JOIN artists a ON a.id=e.artist_id
@@ -453,14 +480,22 @@ class ReferenceDataStore:
             ).fetchall()
             for row in rows:
                 name = row["name"]
-                scores[name] += row["npmi"] if row["npmi"] is not None else math.log1p(row["cooc_count"])
+                scores[name] += weight * (row["npmi"] if row["npmi"] is not None else math.log1p(row["cooc_count"]))
                 counts[name] += row["cooc_count"]
                 sources[name].append(seed_name)
                 post_counts[name] = row["post_count"]
                 versions[name] = row["score_version"]
         for name, hit_sources in sources.items():
             scores[name] *= 1.0 + 0.3 * (len(set(hit_sources)) - 1)
-        ordered = sorted(scores, key=lambda name: (scores[name], counts[name]), reverse=True)[:limit]
+        ranked = sorted(scores, key=lambda name: (scores[name], counts[name]), reverse=True)
+        ordered: list[str] = []
+        for name in ranked:
+            unique_sources = set(sources[name])
+            if unique_sources <= GENERIC_ARTIST_SEED_TAGS and len(unique_sources) < 2:
+                continue
+            ordered.append(name)
+            if len(ordered) >= limit:
+                break
         scale = max((abs(scores[name]) for name in ordered), default=1.0) or 1.0
         return [
             {

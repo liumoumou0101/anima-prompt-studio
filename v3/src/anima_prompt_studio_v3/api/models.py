@@ -13,6 +13,17 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+def _canonical_tag_list(values: list[str], *, field_name: str) -> list[str]:
+    normalized: list[str] = []
+    for value in values:
+        tag = value.strip().lower().replace(" ", "_")
+        if not tag or any(character.isspace() for character in tag):
+            raise ValueError(f"{field_name} 必须是非空 canonical tag。")
+        if tag not in normalized:
+            normalized.append(tag)
+    return normalized
+
+
 class SessionExchangeRequest(ApiModel):
     bootstrap_token: str = Field(min_length=20, max_length=256)
 
@@ -53,19 +64,18 @@ class WorkbenchCandidateRequest(ApiModel):
     elements: list[WorkbenchElementInput] = Field(min_length=1, max_length=100)
     relations: list[WorkbenchRelationInput] = Field(default_factory=list, max_length=100)
     selected_tags: list[str] = Field(default_factory=list, max_length=40)
+    suppressed_tags: list[str] = Field(default_factory=list, max_length=80)
     translated_text: str | None = Field(default=None, min_length=1, max_length=20_000)
 
     @field_validator("selected_tags")
     @classmethod
     def selected_tags_are_canonical(cls, values: list[str]) -> list[str]:
-        normalized: list[str] = []
-        for value in values:
-            tag = value.strip().lower().replace(" ", "_")
-            if not tag or any(character.isspace() for character in tag):
-                raise ValueError("selected_tags 必须是非空 canonical tag。")
-            if tag not in normalized:
-                normalized.append(tag)
-        return normalized
+        return _canonical_tag_list(values, field_name="selected_tags")
+
+    @field_validator("suppressed_tags")
+    @classmethod
+    def suppressed_tags_are_canonical(cls, values: list[str]) -> list[str]:
+        return _canonical_tag_list(values, field_name="suppressed_tags")
 
 
 class IntentParseRequest(ApiModel):
@@ -90,20 +100,19 @@ class LocalNaturalCandidateRequest(ApiModel):
     model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)
     translated_text: str | None = Field(default=None, min_length=1, max_length=20_000)
     selected_tags: list[str] = Field(default_factory=list, max_length=40)
+    suppressed_tags: list[str] = Field(default_factory=list, max_length=80)
     fact_owners: dict[str, str] = Field(default_factory=dict, max_length=100)
     confirmed_relations: list[LocalNaturalRelationInput] = Field(default_factory=list, max_length=100)
 
     @field_validator("selected_tags")
     @classmethod
     def selected_tags_are_canonical(cls, values: list[str]) -> list[str]:
-        normalized: list[str] = []
-        for value in values:
-            tag = value.strip().lower().replace(" ", "_")
-            if not tag or any(character.isspace() for character in tag):
-                raise ValueError("selected_tags 必须是非空 canonical tag。")
-            if tag not in normalized:
-                normalized.append(tag)
-        return normalized
+        return _canonical_tag_list(values, field_name="selected_tags")
+
+    @field_validator("suppressed_tags")
+    @classmethod
+    def suppressed_tags_are_canonical(cls, values: list[str]) -> list[str]:
+        return _canonical_tag_list(values, field_name="suppressed_tags")
 
     @field_validator("fact_owners")
     @classmethod
@@ -121,6 +130,13 @@ class IntentCandidateRequest(ApiModel):
     model_profile: str = Field(default="anima_base_v1", min_length=1, max_length=100)
 
 
+class WorkbenchGenerationSettings(ApiModel):
+    preset_id: Literal["fast", "balanced", "quality"] = "balanced"
+    aspect: Literal["portrait", "landscape", "square", "model_default"] = "portrait"
+    seed: int = Field(default=-1, ge=-1)
+    batch_size: int = Field(default=1, ge=1, le=100)
+
+
 class WorkspaceDraft(ApiModel):
     positive_text: str = Field(default="", max_length=10_000)
     excluded_text: str = Field(default="", max_length=10_000)
@@ -128,6 +144,13 @@ class WorkspaceDraft(ApiModel):
     input_mode: Literal["concepts", "natural"] = "concepts"
     natural_text: str = Field(default="", max_length=50_000)
     selected_tags: list[str] = Field(default_factory=list, max_length=40)
+    suppressed_tags: list[str] = Field(default_factory=list, max_length=80)
+    generation_settings: WorkbenchGenerationSettings = Field(default_factory=WorkbenchGenerationSettings)
+
+    @field_validator("selected_tags", "suppressed_tags")
+    @classmethod
+    def workspace_tag_lists_are_canonical(cls, values: list[str]) -> list[str]:
+        return _canonical_tag_list(values, field_name="tags")
 
 
 class SceneEntitySnapshot(ApiModel):
@@ -147,13 +170,14 @@ class SceneDraftItem(ApiModel):
     id: str = Field(min_length=1, max_length=200)
     text: str = Field(min_length=1, max_length=500)
     canonical_tag: str | None = Field(default=None, max_length=200)
-    source: Literal["source_exact", "source_excluded", "translation_exact", "user_selected", "unresolved"]
+    source: Literal["source_exact", "source_excluded", "translation_exact", "user_selected", "unresolved", "suppressed"]
     fact_type: IntentElementType = IntentElementType.OTHER
     owner_entity_id: str | None = Field(default=None, pattern=r"^entity_[A-Za-z0-9._-]+$", max_length=240)
     suggested_owner_entity_id: str | None = Field(default=None, pattern=r"^entity_[A-Za-z0-9._-]+$", max_length=240)
     reason: str = Field(min_length=1, max_length=500)
     source_start: int | None = Field(default=None, ge=0)
     source_end: int | None = Field(default=None, ge=1)
+    cn_name: str | None = Field(default=None, max_length=240)
 
 
 class SceneRelationSnapshot(ApiModel):
@@ -166,6 +190,31 @@ class SceneRelationSnapshot(ApiModel):
     reason: str = Field(min_length=1, max_length=500)
 
 
+class SceneDraftAmbiguousOption(ApiModel):
+    canonical_tag: str = Field(min_length=1, max_length=200)
+    render_name: str = Field(min_length=1, max_length=240)
+    cn_name: str | None = Field(default=None, max_length=240)
+    match_kind: str = Field(min_length=1, max_length=50)
+    post_count: int = Field(default=0, ge=0)
+
+
+class SceneDraftAmbiguousGroup(ApiModel):
+    text: str = Field(min_length=1, max_length=200)
+    options: list[SceneDraftAmbiguousOption] = Field(min_length=1, max_length=8)
+
+
+class SceneDraftBackTranslationSegment(ApiModel):
+    en: str = Field(min_length=1, max_length=2000)
+    zh: str = Field(default="", max_length=2000)
+
+
+class SceneDraftBackTranslation(ApiModel):
+    text: str = Field(default="", max_length=20_000)
+    engine: str = Field(default="", max_length=200)
+    segments: list[SceneDraftBackTranslationSegment] = Field(default_factory=list, max_length=24)
+    negative_text: str = Field(default="", max_length=20_000)
+
+
 class SceneDraftSnapshot(ApiModel):
     source_text: str = Field(min_length=1, max_length=10_000)
     translated_text: str = Field(default="", max_length=20_000)
@@ -175,7 +224,10 @@ class SceneDraftSnapshot(ApiModel):
     exclusions: list[SceneDraftItem] = Field(default_factory=list, max_length=100)
     suggestions: list[SceneDraftItem] = Field(default_factory=list, max_length=100)
     unresolved: list[SceneDraftItem] = Field(default_factory=list, max_length=20)
-    risk_notes: list[str] = Field(default_factory=list, max_length=20)
+    suppressed: list[SceneDraftItem] = Field(default_factory=list, max_length=80)
+    ambiguous: list[SceneDraftAmbiguousGroup] = Field(default_factory=list, max_length=20)
+    back_translation: SceneDraftBackTranslation = Field(default_factory=SceneDraftBackTranslation)
+    risk_notes: list[str] = Field(default_factory=list, max_length=24)
 
 
 class TagSuggestionSnapshot(ApiModel):
@@ -317,6 +369,11 @@ class RemoteProfileSettingsRequest(ApiModel):
 
 class RemoteHostFingerprintRequest(ApiModel):
     fingerprint: str = Field(min_length=8, max_length=512)
+
+
+class RemoteConnectionTestRequest(ApiModel):
+    password: SecretStr | None = Field(default=None, max_length=4096)
+    passphrase: SecretStr | None = Field(default=None, max_length=4096)
 
 
 class GalleryPathsRequest(ApiModel):

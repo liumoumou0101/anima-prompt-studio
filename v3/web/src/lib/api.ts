@@ -56,7 +56,9 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   let response: Response;
   try {
     response = await fetch(path, {...init, headers});
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    if (error instanceof Error && error.name === "AbortError") throw error;
     throw new ApiClientError("无法连接本地服务。请确认应用仍在运行。", "network_error", undefined, true);
   }
   if (response.status === 401) sessionStorage.removeItem(SESSION_KEY);

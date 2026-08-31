@@ -57,6 +57,8 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
   const [saving, setSaving] = useState(false);
   const [fingerprint, setFingerprint] = useState("");
   const [probing, setProbing] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [privateKeyPassphrase, setPrivateKeyPassphrase] = useState("");
 
   const selected = useMemo(() => settings?.items.find((item) => item.id === selectedId) || null, [settings, selectedId]);
   const refresh = useCallback(async () => {
@@ -75,12 +77,16 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
 
   function selectProfile(profile: RemoteProfile) {
     setNotice("");
+    setFingerprint("");
+    setPrivateKeyPassphrase("");
     setSelectedId(profile.id);
     setForm(formFromProfile(profile));
   }
 
   function startNew() {
     setNotice("");
+    setFingerprint("");
+    setPrivateKeyPassphrase("");
     setSelectedId(null);
     setForm(newProfile());
   }
@@ -96,14 +102,15 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
       private_key_path: form.auth_type === "private_key" ? form.private_key_path : "",
     };
     try {
+      const enteredPassword = form.password;
       const saved = await apiRequest<RemoteProfile>(selectedId ? `/api/v3/settings/remote-profiles/${selectedId}` : "/api/v3/settings/remote-profiles", {
         method: selectedId ? "PUT" : "POST",
         body: JSON.stringify(payload),
       });
       await refresh();
       setSelectedId(saved.id);
-      setForm(formFromProfile(saved));
-      setNotice(saved.host_fingerprint_confirmed ? "远程连接已保存。" : "远程连接已保存。首次生成前，请在 V2 的连接检测中确认 SSH 主机指纹。");
+      setForm({...formFromProfile(saved), password: form.remember_password ? "" : enteredPassword});
+      setNotice(saved.host_fingerprint_confirmed ? "远程连接已保存，可以继续执行完整连接测试。" : "远程连接已保存。请在下方检测并确认 SSH 主机指纹。");
     } catch (caught) {
       setError(caught as ApiClientError);
     } finally {
@@ -144,6 +151,28 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
     }
   }
 
+  async function testConnection() {
+    if (!selectedId) return;
+    setTesting(true);
+    setError(null);
+    setNotice("");
+    try {
+      const result = await apiRequest<{ok: true; devices: string[]; queue_running: number; queue_pending: number; comfy_endpoint: string}>(`/api/v3/settings/remote-profiles/${selectedId}/test-connection`, {
+        method: "POST",
+        body: JSON.stringify({
+          ...(form.password ? {password: form.password} : {}),
+          ...(privateKeyPassphrase ? {passphrase: privateKeyPassphrase} : {}),
+        }),
+      });
+      const device = result.devices.length ? result.devices.join("、") : "未返回设备名称";
+      setNotice(`连接正常 · ${device} · ComfyUI ${result.comfy_endpoint} · 队列 ${result.queue_running + result.queue_pending}`);
+    } catch (caught) {
+      setError(caught as ApiClientError);
+    } finally {
+      setTesting(false);
+    }
+  }
+
   if (!remoteEnabled) {
     return <section className="page settings-page"><SettingsHeader count="—" /><EmptyState title="远程设置尚未启用" detail="请从 V3 桌面入口启动，并让它检测到 V2 数据库；V3 会复用其中的云主机、工作流和 Windows 凭据。" /></section>;
   }
@@ -156,7 +185,7 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
         <div className="settings-side-head"><span>REMOTE CONNECTIONS</span><button type="button" className="button button--secondary" onClick={startNew}>＋ 新建</button></div>
         <div className="remote-profile-list">
           {settings.items.map((profile) => <button type="button" key={profile.id} className={`remote-profile-item${profile.id === selectedId ? " is-selected" : ""}`} onClick={() => selectProfile(profile)}>
-            <span className={profile.enabled ? "status-dot is-ready" : "status-dot"} /><span><strong>{profile.display_name}</strong><small>{profile.ssh_user}@{profile.ssh_host}:{profile.ssh_port}</small></span>
+            <span className={profile.enabled && profile.host_fingerprint_confirmed ? "status-dot is-ready" : "status-dot"} /><span><strong>{profile.display_name}</strong><small>{profile.ssh_user}@{profile.ssh_host}:{profile.ssh_port} · {profile.host_fingerprint_confirmed ? "指纹已确认" : "待确认指纹"}</small></span>
           </button>)}
           {!settings.items.length && <p>尚未配置云主机。</p>}
         </div>
@@ -177,10 +206,11 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
           <label>方式<select value={form.auth_type} onChange={(event) => setForm({...form, auth_type: event.target.value as AuthType})}><option value="password">密码</option><option value="private_key">私钥文件</option><option value="agent">SSH Agent</option></select></label>
           {form.auth_type === "password" && <label>SSH 密码<input type="password" placeholder={selected?.has_saved_password ? "留空：保留已保存密码" : "输入后保存到 Windows 凭据管理器"} value={form.password} onChange={(event) => setForm({...form, password: event.target.value})} autoComplete="new-password" /></label>}
           {form.auth_type === "private_key" && <label>私钥路径<input required placeholder="C:\\Users\\you\\.ssh\\id_ed25519" value={form.private_key_path} onChange={(event) => setForm({...form, private_key_path: event.target.value})} /></label>}
+          {form.auth_type === "private_key" && <label>私钥口令（可选，仅本次测试）<input type="password" autoComplete="current-password" value={privateKeyPassphrase} onChange={(event) => setPrivateKeyPassphrase(event.target.value)} /></label>}
           {form.auth_type === "password" && <label className="check-label"><input type="checkbox" checked={form.remember_password} onChange={(event) => setForm({...form, remember_password: event.target.checked})} /> 安全保存密码到 Windows 凭据管理器</label>}
           <label className="check-label"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({...form, enabled: event.target.checked})} /> 在生成列表中启用此连接</label>
         </fieldset>
-        <div className="settings-security"><strong>SSH 指纹保护</strong><p>{selected?.host_fingerprint_confirmed ? "此连接已有已确认的主机指纹。更改地址、端口、用户名、认证方式或私钥后会自动要求重新确认。" : "新建连接尚未确认主机指纹。检测不会自动信任主机；请确认显示的指纹后再保存。"}</p>{selected && <div className="host-key-actions"><button type="button" className="button button--secondary" onClick={() => void probeHostKey()} disabled={probing}>{probing ? "检测中…" : "检测 SSH 指纹"}</button>{fingerprint && <><code>{fingerprint}</code><button type="button" className="button button--secondary" onClick={() => void confirmHostKey()} disabled={probing}>确认并保存指纹</button></>}</div>}</div>
+        <div className="settings-security"><strong>SSH 指纹与连接测试</strong><p>{selected?.host_fingerprint_confirmed ? "主机指纹已确认。更改地址、端口、用户名、认证方式或私钥后会自动要求重新确认。完整测试会继续验证 SSH 登录、隧道和 ComfyUI API。" : "新建连接尚未确认主机指纹。检测不会自动信任主机；请核对显示的指纹后确认保存。"}</p>{selected && <div className="host-key-actions"><button type="button" className="button button--secondary" onClick={() => void probeHostKey()} disabled={probing || testing}>{probing ? "检测中…" : "检测 SSH 指纹"}</button>{fingerprint && <><code>{fingerprint}</code><button type="button" className="button button--secondary" onClick={() => void confirmHostKey()} disabled={probing || testing}>确认并保存指纹</button></>}<button type="button" className="button button--primary" onClick={() => void testConnection()} disabled={!selected.host_fingerprint_confirmed || probing || testing}>{testing ? "正在测试 SSH 与 ComfyUI…" : "测试完整连接"}</button></div>}</div>
       </form>
     </div>}
   </section>;
