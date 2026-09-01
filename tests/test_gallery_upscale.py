@@ -410,6 +410,17 @@ def test_build_gallery_regen_job_requires_prompt_and_keeps_size():
                 "generation_preset": "quality",
                 "quality_profile": "ultimate_general",
                 "negative_prompt": "lowres, blurry",
+                "integration_metadata": {
+                    "candidate": {"id": "candidate_artist", "lane": "artist"},
+                    "artist_comparison": {
+                        "id": "comparison-source",
+                        "artist": "harusa1107",
+                        "rendered_artist": "@harusa1107",
+                        "position": 3,
+                        "total": 10,
+                        "seed": 42,
+                    },
+                },
             },
         },
         workflow_id="01___Base_Quality_T2I",
@@ -427,6 +438,15 @@ def test_build_gallery_regen_job_requires_prompt_and_keeps_size():
     assert job.quality_profile_id == "ultimate_general"
     assert job.negative_prompt == "lowres, blurry"
     assert job.generation_params.seed == -1
+    assert job.integration_metadata["candidate"]["id"] == "candidate_artist"
+    assert job.integration_metadata["artist_comparison"] == {
+        "id": "comparison-source",
+        "artist": "harusa1107",
+        "rendered_artist": "@harusa1107",
+        "derived_from": "gallery_regenerate",
+        "source_comparison_id": "comparison-source",
+    }
+    assert job.integration_metadata["gallery_regeneration"]["source_image"] == ""
 
 
 def test_snapshot_regen_parameters_reads_nested_generation_params():
@@ -435,6 +455,7 @@ def test_snapshot_regen_parameters_reads_nested_generation_params():
             "generation_params": {"steps": 35, "cfg": 4.5, "sampler": "euler", "scheduler": "normal"},
             "generation_preset_id": "balanced",
             "source": {"original_zh": "一个女孩"},
+            "integration_metadata": {"artist_comparison": {"rendered_artist": "@artist"}},
         }
     })
     assert snapshot["steps"] == 35
@@ -443,6 +464,7 @@ def test_snapshot_regen_parameters_reads_nested_generation_params():
     assert snapshot["scheduler"] == "normal"
     assert snapshot["generation_preset_id"] == "balanced"
     assert snapshot["original_zh"] == "一个女孩"
+    assert snapshot["integration_metadata"]["artist_comparison"]["rendered_artist"] == "@artist"
 
 
 class _RegenCoordinator:
@@ -517,6 +539,17 @@ def test_gallery_manager_queues_same_prompt_regen(tmp_path):
                 "scheduler": "beta",
                 "generation_preset_id": "quality",
                 "negative_prompt": "lowres",
+                "integration_metadata": {
+                    "candidate": {"id": "candidate_artist", "lane": "artist"},
+                    "artist_comparison": {
+                        "id": "comparison-source",
+                        "artist": "harusa1107",
+                        "rendered_artist": "@harusa1107",
+                        "position": 3,
+                        "total": 10,
+                        "seed": 42,
+                    },
+                },
             },
         },
         count=2,
@@ -534,6 +567,10 @@ def test_gallery_manager_queues_same_prompt_regen(tmp_path):
     assert queued_job.generation_params.scheduler == "beta"
     assert queued_job.generation_preset_id == "quality"
     assert queued_job.negative_prompt == "lowres"
+    assert queued_job.integration_metadata["artist_comparison"]["rendered_artist"] == "@harusa1107"
+    assert queued_job.integration_metadata["artist_comparison"]["derived_from"] == "gallery_regenerate"
+    assert "position" not in queued_job.integration_metadata["artist_comparison"]
+    assert "total" not in queued_job.integration_metadata["artist_comparison"]
     completed = manager.get(submitted["id"])
     assert completed["resultPath"]
     assert "再出图完成" in completed["message"]

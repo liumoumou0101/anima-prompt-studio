@@ -253,9 +253,11 @@ export interface ArtistComparisonInfo {
   id: string;
   artist: string;
   rendered_artist: string;
-  position: number;
-  total: number;
-  seed: number;
+  position?: number;
+  total?: number;
+  seed?: number;
+  derived_from?: "gallery_regenerate";
+  source_comparison_id?: string;
 }
 
 export interface ArtistComparisonSubmission {
@@ -289,7 +291,7 @@ export interface SceneDraftItem {
   id: string;
   text: string;
   canonical_tag: string | null;
-  source: "source_exact" | "source_excluded" | "translation_exact" | "user_selected" | "unresolved" | "suppressed";
+  source: "source_exact" | "source_excluded" | "translation_exact" | "user_selected" | "unresolved" | "suppressed" | "identity_candidate" | "identity_exclusion" | "exclusion_candidate";
   fact_type?: "subject" | "character" | "appearance" | "clothing" | "action" | "object" | "scene" | "composition" | "style" | "quality" | "relation" | "other";
   owner_entity_id?: string | null;
   suggested_owner_entity_id?: string | null;
@@ -310,6 +312,7 @@ export interface SceneDraftAmbiguousOption {
 export interface SceneDraftAmbiguousGroup {
   text: string;
   options: SceneDraftAmbiguousOption[];
+  side?: "positive" | "excluded";
 }
 
 export interface SceneDraftBackTranslation {
@@ -338,6 +341,25 @@ export interface SceneRelation {
   reason: string;
 }
 
+export interface CompositionChip {
+  axis: "shot" | "gaze" | "camera_height" | "angle";
+  canonical_tag: string;
+  label_zh: string;
+  render_name: string;
+  state: "available" | "suggested" | "confirmed" | "selected" | "excluded";
+  side?: "positive" | "excluded";
+  reason: string;
+  notes?: Partial<Record<"available" | "suggested" | "confirmed" | "selected" | "excluded", string>>;
+}
+
+export interface CompositionPreset {
+  id: string;
+  label_zh: string;
+  tags: string[];
+  note: string;
+  group_zh?: string;
+}
+
 export interface SceneDraft {
   source_text: string;
   translated_text: string;
@@ -350,6 +372,9 @@ export interface SceneDraft {
   unresolved: SceneDraftItem[];
   suppressed?: SceneDraftItem[];
   ambiguous?: SceneDraftAmbiguousGroup[];
+  ambiguous_exclusions?: SceneDraftAmbiguousGroup[];
+  composition_palette?: CompositionChip[];
+  composition_presets?: CompositionPreset[];
   back_translation?: SceneDraftBackTranslation;
   risk_notes: string[];
 }
@@ -380,11 +405,14 @@ export interface PromptCandidate {
   };
 }
 
+export type ArtistRanking = "tag_fit" | "volume" | "balanced";
+
 export interface WorkbenchResponse {
   intent: IntentDocument;
   candidates: PromptCandidate[];
   validation: {valid: boolean; error_count: number};
   artist_suggestions?: ArtistSuggestion[];
+  artist_ranking?: ArtistRanking;
   tag_suggestions?: TagSuggestion[];
   scene_draft?: SceneDraft;
   data_pack_id: string;
@@ -494,6 +522,7 @@ export interface GenerationTarget {
 
 export interface GenerationTargetListResponse {
   items: GenerationTarget[];
+  preferred_remote_profile_id?: string | null;
 }
 
 export interface TranslationResponse {

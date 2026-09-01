@@ -2,8 +2,14 @@ import {useEffect, useMemo, useRef, useState} from "react";
 import type {FormEvent} from "react";
 import {useSearchParams} from "react-router-dom";
 import {apiRequest, ApiClientError} from "../lib/api";
-import type {ArtistComparisonSubmission, ArtistSuggestion, CandidateLane, CandidateTag, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, IntentParseResponse, PromptCandidate, SceneDraft, SceneDraftItem, SceneRelation, TagSuggestion, TranslationResponse, WorkbenchGenerationSettings, WorkbenchResponse, WorkspaceDraft, WorkspaceListResponse, WorkspaceRecord} from "../lib/types";
+import type {ArtistComparisonSubmission, ArtistRanking, ArtistSuggestion, CandidateLane, CandidateTag, CompositionChip, CompositionPreset, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, IntentParseResponse, PromptCandidate, SceneDraft, SceneDraftItem, SceneRelation, TagSuggestion, TranslationResponse, WorkbenchGenerationSettings, WorkbenchResponse, WorkspaceDraft, WorkspaceListResponse, WorkspaceRecord} from "../lib/types";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
+
+const artistRankingLabels: Record<ArtistRanking, string> = {
+  tag_fit: "题材贴合",
+  volume: "投稿量优先",
+  balanced: "题材与投稿量均衡",
+};
 
 const profiles = [
   {id: "anima_base_v1", label: "ANIMA Base"},
@@ -12,6 +18,7 @@ const profiles = [
 ];
 const RECOVERY_KEY = "anima-v3-workbench-recovery";
 const GENERATION_TARGET_KEY = "anima-v3-generation-target";
+const PREFERRED_REMOTE_KEY = "anima-v3-preferred-remote";
 const defaultGenerationSettings: WorkbenchGenerationSettings = {preset_id: "balanced", aspect: "portrait", seed: -1, batch_size: 1};
 const aspectSizes: Record<WorkbenchGenerationSettings["aspect"], {width: number; height: number} | null> = {
   portrait: {width: 896, height: 1152},
@@ -61,6 +68,13 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   const [selectedTarget, setSelectedTarget] = useState(() => {
     try { return localStorage.getItem(GENERATION_TARGET_KEY) || ""; } catch { return ""; }
   });
+  const [preferredRemoteId, setPreferredRemoteId] = useState(() => {
+    try {
+      return localStorage.getItem(PREFERRED_REMOTE_KEY)
+        || (localStorage.getItem(GENERATION_TARGET_KEY) || "").split("::")[0]
+        || "";
+    } catch { return ""; }
+  });
   const [generationBusy, setGenerationBusy] = useState<string | null>(null);
   const [generationNotice, setGenerationNotice] = useState<string | null>(null);
   const [parseInfo, setParseInfo] = useState<IntentParseResponse | null>(() => recovered?.result ? buildLocalParseInfo(recovered.result, "已恢复的工作台快照") : null);
@@ -76,6 +90,9 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   const artistComparisonIdempotency = useRef<{selection: string; comparisonId: string; key: string} | null>(null);
   const artistRecommendAbort = useRef<AbortController | null>(null);
   const artistRecommendRequestId = useRef(0);
+  const compositionTimer = useRef<number | null>(null);
+  const compositionRequestId = useRef(0);
+  const [compositionBusy, setCompositionBusy] = useState(false);
 
   const positiveText = draft.positive_text;
   const excludedText = draft.excluded_text;
@@ -87,7 +104,6 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   const generationSettings = draft.generation_settings || defaultGenerationSettings;
 
   const positiveItems = useMemo(() => splitConcepts(positiveText), [positiveText]);
-  const excludedItems = useMemo(() => splitConcepts(excludedText), [excludedText]);
   const compatibleTargets = useMemo(() => generationTargets.filter((target) => (
     !target.compatible_model_profiles.length || target.compatible_model_profiles.includes(profile)
   )), [generationTargets, profile]);
@@ -124,24 +140,47 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   useEffect(() => {
     if (!remoteEnabled) return;
     apiRequest<GenerationTargetListResponse>("/api/v3/generation-targets")
-      .then((payload) => setGenerationTargets(payload.items))
+      .then((payload) => {
+        setGenerationTargets(payload.items);
+        if (payload.preferred_remote_profile_id) {
+          setPreferredRemoteId(payload.preferred_remote_profile_id);
+          try { localStorage.setItem(PREFERRED_REMOTE_KEY, payload.preferred_remote_profile_id); } catch { /* Best-effort preference. */ }
+        }
+      })
       .catch((caught) => setGenerationNotice((caught as ApiClientError).message));
   }, [remoteEnabled]);
 
   useEffect(() => {
-    if (!compatibleTargets.some((target) => targetKey(target) === selectedTarget)) {
-      const ready = compatibleTargets.filter((target) => target.host_fingerprint_ready);
-      const preferred = ready.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name)) || ready[0] || compatibleTargets[0];
-      setSelectedTarget(preferred ? targetKey(preferred) : "");
+    const current = compatibleTargets.find((target) => targetKey(target) === selectedTarget);
+    const preferredTargets = preferredRemoteId
+      ? compatibleTargets.filter((target) => target.remote_profile_id === preferredRemoteId)
+      : [];
+    if (preferredTargets.length && current?.remote_profile_id !== preferredRemoteId) {
+      const preferred = preferredTargets.find((target) => target.workflow_profile_id === selectedWorkflowId)
+        || preferredTargets.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name))
+        || preferredTargets[0];
+      setSelectedTarget(targetKey(preferred));
+      return;
     }
-  }, [compatibleTargets, selectedTarget]);
+    if (!current) {
+      const ready = compatibleTargets.filter((target) => target.host_fingerprint_ready);
+      const fallback = ready.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name)) || ready[0] || compatibleTargets[0];
+      setSelectedTarget(fallback ? targetKey(fallback) : "");
+    }
+  }, [compatibleTargets, preferredRemoteId, selectedRemoteId, selectedTarget, selectedWorkflowId]);
 
   function selectRemoteConnection(remoteProfileId: string) {
     const options = compatibleTargets.filter((target) => target.remote_profile_id === remoteProfileId);
     const preferred = options.find((target) => target.workflow_profile_id === selectedWorkflowId)
       || options.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name))
       || options[0];
+    setPreferredRemoteId(remoteProfileId);
+    try { localStorage.setItem(PREFERRED_REMOTE_KEY, remoteProfileId); } catch { /* Best-effort preference. */ }
     setSelectedTarget(preferred ? targetKey(preferred) : "");
+    void apiRequest<{remote_profile_id: string}>("/api/v3/settings/default-remote-profile", {
+      method: "PUT",
+      body: JSON.stringify({remote_profile_id: remoteProfileId}),
+    }).catch((caught) => setGenerationNotice(`默认云主机保存失败：${(caught as ApiClientError).message}`));
   }
 
   useEffect(() => {
@@ -149,13 +188,18 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
     try { localStorage.setItem(GENERATION_TARGET_KEY, selectedTarget); } catch { /* Best-effort preference. */ }
   }, [selectedTarget]);
 
-  function editDraft(patch: Partial<WorkspaceDraft>) {
+  useEffect(() => () => {
+    if (compositionTimer.current) window.clearTimeout(compositionTimer.current);
+  }, []);
+
+  function editDraft(patch: Partial<WorkspaceDraft>, options: {preserveResult?: boolean} = {}) {
     const next = {...draft, ...patch};
     if (next.positive_text === draft.positive_text && next.excluded_text === draft.excluded_text && next.model_profile === draft.model_profile && next.input_mode === draft.input_mode && next.natural_text === draft.natural_text && sameStringList(next.selected_tags || [], draft.selected_tags || []) && sameStringList(next.suppressed_tags || [], draft.suppressed_tags || [])) return;
     setPast((items) => [...items.slice(-49), draft]);
     setDraft(next);
     setFuture([]);
     setWorkspaceNotice(null);
+    if (options.preserveResult) return;
     setResult(null);
     setParseInfo(null);
     setTranslation(null);
@@ -260,23 +304,25 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
     setWorkspaceNotice({kind: "success", text: `已打开 revision ${item.revision}`});
   }
 
-  function structuredElements() {
+  function structuredElements(excluded = excludedText) {
+    const excludedConcepts = splitConcepts(excluded);
     return [
       ...positiveItems.map((raw, index) => ({
         id: `e_positive_${index + 1}`,
         text: raw.startsWith("!") ? raw.slice(1).trim() : raw,
         state: raw.startsWith("!") ? "locked" : "required",
       })),
-      ...excludedItems.map((text, index) => ({id: `e_excluded_${index + 1}`, text, state: "excluded"})),
+      ...excludedConcepts.map((text, index) => ({id: `e_excluded_${index + 1}`, text, state: "excluded"})),
     ];
   }
 
-  function structuredCandidateRequest(selected = selectedTags, translatedText?: string, suppressed = suppressedTags) {
+  function structuredCandidateRequest(selected = selectedTags, translatedText?: string, suppressed = suppressedTags, excluded = excludedText) {
+    const excludedConcepts = splitConcepts(excluded);
     return {
-      source_text: [...positiveItems, ...excludedItems.map((item) => `不要 ${item}`)].join("，"),
+      source_text: [...positiveItems, ...excludedConcepts.map((item) => `不要 ${item}`)].join("，"),
       source_language: "mixed",
       model_profile: profile,
-      elements: structuredElements(),
+      elements: structuredElements(excluded),
       selected_tags: selected,
       ...(suppressed.length ? {suppressed_tags: suppressed} : {}),
       ...(translatedText ? {translated_text: translatedText} : {}),
@@ -335,19 +381,20 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
     const sourceText = inputMode === "natural" ? naturalText : positiveText;
     if (!result?.scene_draft || !sourceText.trim()) return;
     const nextTags = selectedTags.includes(tag) ? selectedTags.filter((item) => item !== tag) : [...selectedTags, tag];
+    const nextExcluded = selectedTags.includes(tag) ? excludedText : removeTagFromConcepts(excludedText, tag);
     const translatedText = result.scene_draft.translated_text;
-    editDraft({selected_tags: nextTags});
+    editDraft({selected_tags: nextTags, excluded_text: nextExcluded});
     setLoading(true);
     setError(null);
     try {
       const local = inputMode === "natural"
         ? await apiRequest<WorkbenchResponse & {local_translation: {translated_text: string; engine: string; local_only: boolean}}>("/api/v3/local-natural/candidates", {
           method: "POST",
-          body: JSON.stringify(naturalCandidateRequest({selected_tags: nextTags, translated_text: translatedText})),
+          body: JSON.stringify(naturalCandidateRequest({selected_tags: nextTags, excluded_text: nextExcluded, translated_text: translatedText})),
         })
         : await apiRequest<WorkbenchResponse & {local_translation?: {engine: string}}>("/api/v3/workbench/candidates", {
           method: "POST",
-          body: JSON.stringify(structuredCandidateRequest(nextTags, translatedText)),
+          body: JSON.stringify(structuredCandidateRequest(nextTags, translatedText, suppressedTags, nextExcluded)),
         });
       setLocalParseInfo(local, "复用当前译文并更新用户选择");
       setResult(local);
@@ -356,6 +403,91 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
     } finally {
       setLoading(false);
     }
+  }
+
+  async function toggleExclusionSuggestion(tag: string) {
+    const sourceText = inputMode === "natural" ? naturalText : positiveText;
+    if (!result?.scene_draft || !sourceText.trim()) return;
+    const alreadyExcluded = conceptHasTag(excludedText, tag) || (result.scene_draft.exclusions || []).some((item) => item.canonical_tag === tag);
+    const nextExcluded = alreadyExcluded ? removeTagFromConcepts(excludedText, tag) : appendTagToConcepts(excludedText, tag);
+    const nextSelected = selectedTags.filter((item) => item !== tag);
+    const translatedText = result.scene_draft.translated_text;
+    editDraft({excluded_text: nextExcluded, selected_tags: nextSelected});
+    await recompileCurrentDraft({excluded_text: nextExcluded, selected_tags: nextSelected, translated_text: translatedText}, nextSelected);
+  }
+
+  function displayedCompositionPalette() {
+    return overlayCompositionPalette(result?.scene_draft?.composition_palette || [], selectedTags, excludedText, suppressedTags);
+  }
+
+  function toggleCompositionChip(chip: CompositionChip) {
+    const sourceText = inputMode === "natural" ? naturalText : positiveText;
+    if (!result?.scene_draft || !sourceText.trim()) return;
+    const palette = displayedCompositionPalette();
+    if (!palette.length) return;
+    const current = palette.find((item) => item.canonical_tag === chip.canonical_tag) || chip;
+    const axisTags = palette.filter((item) => item.axis === current.axis).map((item) => item.canonical_tag);
+    let nextSelected = selectedTags.filter((tag) => !axisTags.includes(tag));
+    let nextSuppressed = suppressedTags.filter((tag) => !axisTags.includes(tag) || tag === current.canonical_tag);
+    let nextExcluded = excludedText;
+    if (current.state === "excluded") {
+      nextExcluded = removeTagFromConcepts(excludedText, current.canonical_tag);
+    } else if (current.state === "selected" || current.state === "confirmed") {
+      if (current.state === "confirmed" && !nextSuppressed.includes(current.canonical_tag)) nextSuppressed = [...nextSuppressed, current.canonical_tag];
+    } else {
+      nextSelected = [...nextSelected, current.canonical_tag];
+      nextSuppressed = nextSuppressed.filter((tag) => tag !== current.canonical_tag);
+      for (const item of result.scene_draft.confirmed) {
+        if (item.canonical_tag && axisTags.includes(item.canonical_tag) && item.canonical_tag !== current.canonical_tag && item.source === "source_exact" && !nextSuppressed.includes(item.canonical_tag)) {
+          nextSuppressed = [...nextSuppressed, item.canonical_tag];
+        }
+      }
+      nextExcluded = removeTagFromConcepts(excludedText, current.canonical_tag);
+    }
+    compositionRequestId.current += 1;
+    editDraft({selected_tags: nextSelected, suppressed_tags: nextSuppressed, excluded_text: nextExcluded}, {preserveResult: true});
+    scheduleCompositionRecompile(nextSelected, nextSuppressed, nextExcluded);
+  }
+
+  function applyCompositionPreset(preset: CompositionPreset) {
+    const sourceText = inputMode === "natural" ? naturalText : positiveText;
+    if (!result?.scene_draft || !sourceText.trim()) return;
+    const palette = displayedCompositionPalette();
+    if (!palette.length) return;
+    const chipTags = palette.map((item) => item.canonical_tag);
+    const chipTagSet = new Set(chipTags);
+    const excludedChipTags = new Set(palette.filter((item) => item.state === "excluded").map((item) => item.canonical_tag));
+    const presetTags = preset.id === "none" ? [] : preset.tags.filter((tag) => chipTagSet.has(tag) && !excludedChipTags.has(tag));
+    let nextSelected = selectedTags.filter((tag) => !chipTagSet.has(tag));
+    let nextSuppressed = preset.id === "none"
+      ? suppressedTags.filter((tag) => !chipTagSet.has(tag))
+      : suppressedTags.filter((tag) => !presetTags.includes(tag));
+    let nextExcluded = excludedText;
+    if (preset.id !== "none") {
+      for (const item of result.scene_draft.confirmed) {
+        if (item.canonical_tag && chipTagSet.has(item.canonical_tag) && item.source === "source_exact" && !presetTags.includes(item.canonical_tag) && !nextSuppressed.includes(item.canonical_tag)) {
+          nextSuppressed = [...nextSuppressed, item.canonical_tag];
+        }
+      }
+    }
+    nextSelected = [...nextSelected, ...presetTags];
+    for (const tag of presetTags) nextExcluded = removeTagFromConcepts(nextExcluded, tag);
+    compositionRequestId.current += 1;
+    editDraft({selected_tags: nextSelected, suppressed_tags: nextSuppressed, excluded_text: nextExcluded}, {preserveResult: true});
+    scheduleCompositionRecompile(nextSelected, nextSuppressed, nextExcluded);
+  }
+
+  function scheduleCompositionRecompile(selected: string[], suppressed: string[], excluded: string) {
+    if (compositionTimer.current) window.clearTimeout(compositionTimer.current);
+    const translatedText = result?.scene_draft?.translated_text;
+    compositionTimer.current = window.setTimeout(() => {
+      void recompileCurrentDraft(
+        {selected_tags: selected, excluded_text: excluded, translated_text: translatedText},
+        selected,
+        suppressed,
+        {quiet: true},
+      );
+    }, 400);
   }
 
   async function applySceneDraftTranslation(translatedText: string) {
@@ -409,28 +541,36 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
     }
   }
 
-  async function recompileCurrentDraft(overrides: Record<string, unknown> = {}, selected = selectedTags, suppressed = suppressedTags) {
+  async function recompileCurrentDraft(overrides: Record<string, unknown> = {}, selected = selectedTags, suppressed = suppressedTags, options: {quiet?: boolean} = {}) {
     const sourceText = inputMode === "natural" ? naturalText : positiveText;
     if (!sourceText.trim()) return;
     const translatedText = result?.scene_draft?.translated_text;
-    setLoading(true);
+    const excluded = typeof overrides.excluded_text === "string" ? overrides.excluded_text : excludedText;
+    const requestId = ++compositionRequestId.current;
+    if (!options.quiet) setLoading(true);
+    else setCompositionBusy(true);
     setError(null);
     try {
       const local = inputMode === "natural"
         ? await apiRequest<WorkbenchResponse & {local_translation: {translated_text: string; engine: string; local_only: boolean}}>("/api/v3/local-natural/candidates", {
           method: "POST",
-          body: JSON.stringify(naturalCandidateRequest({translated_text: translatedText, selected_tags: selected, ...(suppressed.length ? {suppressed_tags: suppressed} : {suppressed_tags: []}), ...overrides})),
+          body: JSON.stringify(naturalCandidateRequest({translated_text: translatedText, selected_tags: selected, excluded_text: excluded, ...(suppressed.length ? {suppressed_tags: suppressed} : {suppressed_tags: []}), ...overrides})),
         })
         : await apiRequest<WorkbenchResponse & {local_translation?: {engine: string}}>("/api/v3/workbench/candidates", {
           method: "POST",
-          body: JSON.stringify(structuredCandidateRequest(selected, translatedText, suppressed)),
+          body: JSON.stringify(structuredCandidateRequest(selected, translatedText, suppressed, excluded)),
         });
+      if (requestId !== compositionRequestId.current) return;
       setLocalParseInfo(local, "已按人工修改重新编译；未调用翻译模型");
       setResult(local);
     } catch (caught) {
+      if (requestId !== compositionRequestId.current) return;
       setError(caught as ApiClientError);
     } finally {
-      setLoading(false);
+      if (requestId === compositionRequestId.current) {
+        if (!options.quiet) setLoading(false);
+        setCompositionBusy(false);
+      }
     }
   }
 
@@ -716,7 +856,7 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
           </> : <>
             <label htmlFor="natural-exclusions">明确排除（可选）</label>
             <textarea id="natural-exclusions" value={excludedText} onChange={(event) => editDraft({excluded_text: event.target.value})} placeholder="例如：文字、水印、金发" rows={3} />
-            <p className="natural-mode-hint">描述里的“不要文字和水印”也会识别；这里用于补充或修正，并始终按排除优先。</p>
+            <p className="natural-mode-hint">描述里的“不要文字和水印”也会识别并写入负向提示词。角色/作品和过宽的整类标签需要点选确认，并始终按排除优先。</p>
           </>}
           <label htmlFor="model-profile">模型配置</label>
           <select id="model-profile" value={profile} onChange={(event) => editDraft({model_profile: event.target.value})}>
@@ -758,7 +898,7 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
         <div><strong>已整理 {reviewedFacts.length} 项画面证据</strong><span>{parseInfo.parser.name} · {parseInfo.extraction.summary_zh}</span></div>
         <div className="intent-facts">{reviewedFacts.map(({element, count}) => <span key={`${element.state}:${element.original_text}`} className={element.state === "excluded" ? "is-excluded" : ""}>{element.original_text}<small>{element.state === "excluded" ? `排除${count > 1 ? ` · ${count} 个映射` : ""}` : factTypeLabel(element.type)}</small></span>)}</div>
         {parseInfo.intent.scene_plan_en && <details><summary>查看 Hybrid 英文画面计划</summary><p>{parseInfo.intent.scene_plan_en}</p>{result?.scene_draft?.back_translation?.text && <p className="scene-plan-zh">{result.scene_draft.back_translation.text}</p>}</details>}
-        {result?.scene_draft ? <SceneDraftReview draft={result.scene_draft} relatedSuggestions={result.tag_suggestions || []} selectedTags={selectedTags} busy={loading} onToggle={toggleTagSuggestion} onApplyTranslation={applySceneDraftTranslation} onRemoveItem={removeConfirmedItem} onRestoreTag={restoreCanonicalTag} onAssignFactOwner={inputMode === "natural" ? applyFactOwner : undefined} onToggleRelation={inputMode === "natural" ? applySceneRelation : undefined} chineseLabels={chineseLabels} /> : <p className="intent-review-warning">本地翻译只会把本地索引中的精确匹配加入标签；未命中的画面信息会保留在 Hybrid 英文提示词中，提交前可继续检查候选说明。</p>}
+        {result?.scene_draft ? <SceneDraftReview draft={{...result.scene_draft, composition_palette: displayedCompositionPalette()}} relatedSuggestions={result.tag_suggestions || []} selectedTags={selectedTags} busy={loading} compositionBusy={compositionBusy} onToggle={toggleTagSuggestion} onToggleExclusion={toggleExclusionSuggestion} onToggleComposition={toggleCompositionChip} onApplyPreset={applyCompositionPreset} onApplyTranslation={applySceneDraftTranslation} onRemoveItem={removeConfirmedItem} onRestoreTag={restoreCanonicalTag} onAssignFactOwner={inputMode === "natural" ? applyFactOwner : undefined} onToggleRelation={inputMode === "natural" ? applySceneRelation : undefined} chineseLabels={chineseLabels} /> : <p className="intent-review-warning">本地翻译只会把本地索引中的精确匹配加入标签；未命中的画面信息会保留在 Hybrid 英文提示词中，提交前可继续检查候选说明。</p>}
       </section>}
 
       <div className="workbench-results" aria-live="polite">
@@ -785,6 +925,7 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
             </div>
             <ArtistComparisonPanel
               items={artistComparisonBase ? artistSuggestions : (result.artist_suggestions || [])}
+              ranking={result.artist_ranking}
               base={artistComparisonBase}
               selectedArtists={selectedArtists}
               seed={artistComparisonSeed}
@@ -807,8 +948,9 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   );
 }
 
-function ArtistComparisonPanel({items, base, selectedArtists, seed, remoteEnabled, canSubmit, busy, onToggle, onSelectVisible, onClear, onSeedChange, onSubmit, chineseLabels}: {
+function ArtistComparisonPanel({items, ranking, base, selectedArtists, seed, remoteEnabled, canSubmit, busy, onToggle, onSelectVisible, onClear, onSeedChange, onSubmit, chineseLabels}: {
   items: ArtistSuggestion[];
+  ranking?: ArtistRanking;
   base: PromptCandidate | null;
   selectedArtists: string[];
   seed: number;
@@ -825,7 +967,7 @@ function ArtistComparisonPanel({items, base, selectedArtists, seed, remoteEnable
   const weakEvidence = items.length > 0 && items.every((item) => item.hit_count < 2);
   return (
     <section className="artist-suggestion-pool" aria-label="画师对照">
-      <header><div><strong>画师对照组</strong><span>{base ? "每位画师各自生成一张；只改变 @artist 标签。" : "先在候选卡上选择一条提示词作为画师对照基准。"}</span></div><small>{items.length ? `Top ${items.length}` : "暂无可靠推荐"}</small></header>
+      <header><div><strong>画师对照组</strong><span>{base ? "每位画师各自生成一张；只改变 @artist 标签。" : "先在候选卡上选择一条提示词作为画师对照基准。"}{ranking ? ` 当前排序：${artistRankingLabels[ranking]}。` : ""}</span></div><small>{items.length ? `Top ${items.length}` : "暂无可靠推荐"}</small></header>
       {base && <div className="artist-comparison-base"><span>已锁定基准</span><strong>{base.title}</strong><code>{base.positive_prompt}</code></div>}
       {base && <div className="artist-comparison-controls">
         <span>已选 {selectedArtists.length}/20</span>
@@ -847,12 +989,16 @@ function ArtistComparisonPanel({items, base, selectedArtists, seed, remoteEnable
   );
 }
 
-function SceneDraftReview({draft, relatedSuggestions, selectedTags, busy, onToggle, onApplyTranslation, onRemoveItem, onRestoreTag, onAssignFactOwner, onToggleRelation, chineseLabels}: {
+function SceneDraftReview({draft, relatedSuggestions, selectedTags, busy, compositionBusy = false, onToggle, onToggleExclusion, onToggleComposition, onApplyPreset, onApplyTranslation, onRemoveItem, onRestoreTag, onAssignFactOwner, onToggleRelation, chineseLabels}: {
   draft: SceneDraft;
   relatedSuggestions: TagSuggestion[];
   selectedTags: string[];
   busy: boolean;
+  compositionBusy?: boolean;
   onToggle: (tag: string) => Promise<void>;
+  onToggleExclusion: (tag: string) => Promise<void>;
+  onToggleComposition: (chip: CompositionChip) => void;
+  onApplyPreset: (preset: CompositionPreset) => void;
   onApplyTranslation: (translatedText: string) => Promise<void>;
   onRemoveItem: (item: SceneDraftItem) => Promise<void>;
   onRestoreTag: (tag: string) => Promise<void>;
@@ -863,19 +1009,38 @@ function SceneDraftReview({draft, relatedSuggestions, selectedTags, busy, onTogg
   const [translatedText, setTranslatedText] = useState(draft.translated_text);
   useEffect(() => setTranslatedText(draft.translated_text), [draft.translated_text]);
   const suggestions = new Map<string, {rendered: string; zh: string; reason: string}>();
+  const identitySuggestions = new Map<string, {rendered: string; zh: string; reason: string}>();
+  const identityExclusionSuggestions = new Map<string, {rendered: string; zh: string; reason: string}>();
+  const broadExclusionSuggestions = new Map<string, {rendered: string; zh: string; reason: string}>();
+  const excludedTags = new Set((draft.exclusions || []).map((item) => item.canonical_tag).filter((tag): tag is string => Boolean(tag)));
+  const compositionTags = new Set((draft.composition_palette || []).map((item) => item.canonical_tag));
   const ambiguousTags = new Set((draft.ambiguous || []).flatMap((group) => group.options.map((option) => option.canonical_tag)));
   for (const item of draft.suggestions) {
-    if (item.canonical_tag && ambiguousTags.has(item.canonical_tag)) continue;
-    if (item.canonical_tag) suggestions.set(item.canonical_tag, {rendered: item.canonical_tag.replaceAll("_", " "), zh: item.cn_name || chineseLabels.get(item.canonical_tag) || "", reason: item.reason});
+    if (!item.canonical_tag || compositionTags.has(item.canonical_tag) || item.fact_type === "composition") continue;
+    const entry = {rendered: item.canonical_tag.replaceAll("_", " "), zh: item.cn_name || chineseLabels.get(item.canonical_tag) || "", reason: item.reason};
+    if (item.source === "identity_exclusion") {
+      identityExclusionSuggestions.set(item.canonical_tag, entry);
+      continue;
+    }
+    if (item.source === "exclusion_candidate") {
+      broadExclusionSuggestions.set(item.canonical_tag, entry);
+      continue;
+    }
+    if (item.source === "identity_candidate" || item.fact_type === "character") {
+      identitySuggestions.set(item.canonical_tag, entry);
+      continue;
+    }
+    if (ambiguousTags.has(item.canonical_tag)) continue;
+    suggestions.set(item.canonical_tag, entry);
   }
   for (const item of relatedSuggestions) {
-    if (ambiguousTags.has(item.name)) continue;
+    if (ambiguousTags.has(item.name) || identitySuggestions.has(item.name) || compositionTags.has(item.name)) continue;
     if (!suggestions.has(item.name)) suggestions.set(item.name, {rendered: item.render_name, zh: item.cn_name || chineseLabels.get(item.name) || "", reason: `与 ${item.sources.join("、")} 共现；默认不应用`});
   }
   const back = draft.back_translation;
   return (
     <section className="scene-draft-review" aria-label="Scene Draft">
-      <header><div><strong>Scene Draft</strong><span>原文证据、译文和本地映射分开保存；建议不会自动加入候选。误出的角色或标签可以直接删掉。</span></div></header>
+      <header><div><strong>Scene Draft</strong><span>原文证据、译文和本地映射分开保存；角色卡和作品标签需要单独确认，建议不会自动加入候选。</span></div></header>
       {draft.scene_plan_enabled !== false && <div className="scene-draft-prose">
         <div><strong>可编辑画面计划</strong><span>英文可直接改；周围的中文是回译对照，不会自动改提示词。</span></div>
         <textarea aria-label="可编辑画面计划" value={translatedText} disabled={busy} onChange={(event) => setTranslatedText(event.target.value)} rows={4} />
@@ -894,10 +1059,41 @@ function SceneDraftReview({draft, relatedSuggestions, selectedTags, busy, onTogg
         ) : null}
         <button type="button" disabled={busy || !translatedText.trim() || translatedText.trim() === draft.translated_text.trim()} onClick={() => void onApplyTranslation(translatedText.trim())}>{busy ? "正在重新映射…" : "应用译文修改"}</button>
       </div>}
-      <LayeredDraftGroup items={draft.confirmed} busy={busy} onRemove={onRemoveItem} />
+      <LayeredDraftGroup items={draft.confirmed.filter((item) => item.fact_type !== "composition")} busy={busy} onRemove={onRemoveItem} />
+      <CompositionChipReview palette={draft.composition_palette || []} presets={draft.composition_presets || []} confirmed={draft.confirmed.filter((item) => item.fact_type === "composition")} busy={busy} compositionBusy={compositionBusy} onToggle={onToggleComposition} onApplyPreset={onApplyPreset} onRemove={onRemoveItem} />
       <EntityOwnershipReview draft={draft} busy={busy} onAssign={onAssignFactOwner} />
       <SceneRelationReview draft={draft} busy={busy} onToggle={onToggleRelation} />
       <DraftGroup label="明确排除" items={draft.exclusions || []} empty="当前没有识别到明确排除项。" excluded busy={busy} onRemove={onRemoveItem} />
+      {identityExclusionSuggestions.size > 0 && (
+        <div className="scene-draft-group is-identity is-excluded">
+          <strong>疑似要排除的角色/作品，需确认</strong>
+          <p>这些名字来自角色卡或作品标签，不会自动写入负向提示词。请核对其英文 tag 后再点选排除。</p>
+          <div className="scene-draft-suggestions">{[...identityExclusionSuggestions].map(([tag, item]) => {
+            const selected = excludedTags.has(tag);
+            return <button type="button" key={tag} aria-pressed={selected} disabled={busy} title={item.reason} onClick={() => void onToggleExclusion(tag)}><span>{item.zh || item.rendered}</span><small>{item.zh ? `${item.rendered}${selected ? " · 已排除" : ""}` : `${selected ? "已排除 · " : ""}${item.rendered}`}</small></button>;
+          })}</div>
+        </div>
+      )}
+      {broadExclusionSuggestions.size > 0 && (
+        <div className="scene-draft-group is-excluded">
+          <strong>排除过宽，需确认</strong>
+          <p>排除短语比这些标签更具体，未自动把整类写入负向。点选后才会加入负向提示词。</p>
+          <div className="scene-draft-suggestions">{[...broadExclusionSuggestions].map(([tag, item]) => {
+            const selected = excludedTags.has(tag);
+            return <button type="button" key={tag} aria-pressed={selected} disabled={busy} title={item.reason} onClick={() => void onToggleExclusion(tag)}><span>{item.zh || item.rendered}</span><small>{item.zh ? `${item.rendered}${selected ? " · 已排除" : ""}` : `${selected ? "已排除 · " : ""}${item.rendered}`}</small></button>;
+          })}</div>
+        </div>
+      )}
+      {identitySuggestions.size > 0 && (
+        <div className="scene-draft-group is-identity">
+          <strong>疑似角色/作品，需确认</strong>
+          <p>这些名字来自角色卡或作品标签，可能很生僻，不会自动加入提示词。请核对其英文 tag 后再点选。</p>
+          <div className="scene-draft-suggestions">{[...identitySuggestions].map(([tag, item]) => {
+            const selected = selectedTags.includes(tag);
+            return <button type="button" key={tag} aria-pressed={selected} disabled={busy} title={item.reason} onClick={() => void onToggle(tag)}><span>{item.zh || item.rendered}</span><small>{item.zh ? `${item.rendered}${selected ? " · 已选用" : ""}` : `${selected ? "已选用 · " : ""}${item.rendered}`}</small></button>;
+          })}</div>
+        </div>
+      )}
       {(draft.ambiguous || []).length > 0 && (
         <div className="scene-draft-group">
           <strong>一对多，请点选</strong>
@@ -907,6 +1103,20 @@ function SceneDraftReview({draft, relatedSuggestions, selectedTags, busy, onTogg
               <div className="scene-draft-suggestions">{group.options.map((option) => {
                 const selected = selectedTags.includes(option.canonical_tag);
                 return <button type="button" key={option.canonical_tag} aria-pressed={selected} disabled={busy} onClick={() => void onToggle(option.canonical_tag)}><span>{option.cn_name || option.render_name}</span><small>{selected ? "已选用" : option.render_name}</small></button>;
+              })}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {(draft.ambiguous_exclusions || []).length > 0 && (
+        <div className="scene-draft-group is-excluded">
+          <strong>排除一对多，请点选</strong>
+          {(draft.ambiguous_exclusions || []).map((group) => (
+            <div key={`ex-${group.text}`} className="scene-draft-ambiguous">
+              <span>“{group.text}”可对应多条负向标签</span>
+              <div className="scene-draft-suggestions">{group.options.map((option) => {
+                const selected = excludedTags.has(option.canonical_tag);
+                return <button type="button" key={option.canonical_tag} aria-pressed={selected} disabled={busy} onClick={() => void onToggleExclusion(option.canonical_tag)}><span>{option.cn_name || option.render_name}</span><small>{selected ? "已排除" : option.render_name}</small></button>;
               })}</div>
             </div>
           ))}
@@ -935,6 +1145,113 @@ function SceneDraftReview({draft, relatedSuggestions, selectedTags, busy, onTogg
       )}
       {draft.risk_notes.length > 0 && <ul className="scene-draft-risks">{draft.risk_notes.map((item) => <li key={item}>{item}</li>)}</ul>}
     </section>
+  );
+}
+
+const compositionAxisLabels: Record<CompositionChip["axis"], string> = {
+  shot: "景别",
+  gaze: "视线",
+  camera_height: "机位",
+  angle: "朝向",
+};
+
+function matchedCompositionPresetId(presets: CompositionPreset[], palette: CompositionChip[]): string {
+  const active = new Set(palette.filter((item) => item.state === "selected" || item.state === "confirmed").map((item) => item.canonical_tag));
+  for (const preset of presets) {
+    if (preset.id === "none") continue;
+    if (preset.tags.length === active.size && preset.tags.every((tag) => active.has(tag))) return preset.id;
+  }
+  return active.size ? "custom" : "none";
+}
+
+function overlayCompositionPalette(palette: CompositionChip[], selected: string[], excludedText: string, suppressed: string[]): CompositionChip[] {
+  const selectedSet = new Set(selected);
+  const excludedSet = new Set(splitConcepts(excludedText).map(tagKey));
+  if (selectedSet.has("looking_away")) excludedSet.add("looking_at_viewer");
+  const suppressedSet = new Set(suppressed);
+  return palette.map((chip) => {
+    const tag = chip.canonical_tag;
+    let state = chip.state;
+    let side = chip.side || "positive";
+    if (excludedSet.has(tagKey(tag))) {
+      state = "excluded";
+      side = "excluded";
+    } else if (suppressedSet.has(tag) && (chip.state === "confirmed" || chip.state === "selected")) {
+      state = "available";
+      side = "positive";
+    } else if (selectedSet.has(tag)) {
+      state = "selected";
+      side = "positive";
+    } else if (chip.state === "selected") {
+      state = "available";
+      side = "positive";
+    }
+    const reason = chip.notes?.[state] || chip.reason;
+    return {...chip, state, side, reason};
+  });
+}
+
+function CompositionChipReview({palette, presets, confirmed, busy, compositionBusy = false, onToggle, onApplyPreset, onRemove}: {
+  palette: CompositionChip[];
+  presets: CompositionPreset[];
+  confirmed: SceneDraft["confirmed"];
+  busy: boolean;
+  compositionBusy?: boolean;
+  onToggle: (chip: CompositionChip) => void;
+  onApplyPreset: (preset: CompositionPreset) => void;
+  onRemove: (item: SceneDraftItem) => Promise<void>;
+}) {
+  const axes = (["shot", "gaze", "camera_height", "angle"] as const).map((axis) => ({axis, chips: palette.filter((item) => item.axis === axis)}));
+  const activeNotes = [...new Set(palette.filter((item) => item.state !== "available").map((item) => item.reason))];
+  const activePresetId = matchedCompositionPresetId(presets, palette);
+  const activePreset = presets.find((item) => item.id === activePresetId);
+  const presetGroups = [...new Set(presets.map((item) => item.group_zh || "其他"))];
+  return (
+    <div className="scene-draft-group is-composition">
+      <strong>构图镜头</strong>
+      <p>可先选一个快速构图；没有合适的再点下面的芯片。选项马上亮，页面不跳，提示词在后台更新。</p>
+      {presets.length > 0 && (
+        <label className="composition-preset">
+          <span>快速构图</span>
+          <select aria-label="快速构图" value={activePresetId} disabled={busy && !compositionBusy} onChange={(event) => {
+            const preset = presets.find((item) => item.id === event.target.value);
+            if (preset) onApplyPreset(preset);
+          }}>
+            {presetGroups.map((group) => (
+              <optgroup key={group} label={group}>
+                {presets.filter((item) => (item.group_zh || "其他") === group).map((preset) => (
+                  <option key={preset.id} value={preset.id}>{preset.label_zh}</option>
+                ))}
+              </optgroup>
+            ))}
+            {activePresetId === "custom" && <option value="custom">自定义（已改芯片）</option>}
+          </select>
+          <small>{activePresetId === "custom" ? "当前芯片组合不在预设里，可继续改，或再选一项覆盖。" : (activePreset?.note || "")}</small>
+        </label>
+      )}
+      {!palette.length && <p>当前结果还没有构图芯片。请再点一次「编译并生成候选」。</p>}
+      {axes.map(({axis, chips}) => (
+        <div key={axis} className="composition-axis">
+          <span>{compositionAxisLabels[axis]}</span>
+          <div className="scene-draft-suggestions">{chips.map((chip) => {
+            const pressed = chip.state === "selected" || chip.state === "confirmed" || chip.state === "excluded";
+            return (
+              <button type="button" key={chip.canonical_tag} className={`composition-chip is-${chip.state}${chip.canonical_tag === "looking_at_viewer" && chip.state === "available" ? " is-prior" : ""}`} aria-pressed={pressed} disabled={busy && !compositionBusy} title={chip.reason} onClick={() => onToggle(chip)}>
+                <span>{chip.label_zh}</span>
+                <small>{chip.state === "available" && chip.canonical_tag === "looking_at_viewer" ? "模型常见默认" : chip.render_name}{chip.state === "selected" || chip.state === "confirmed" ? " · 已选用" : chip.state === "excluded" ? " · 已排除" : chip.state === "suggested" ? " · 建议" : ""}</small>
+              </button>
+            );
+          })}</div>
+        </div>
+      ))}
+      {compositionBusy && <p className="composition-updating">正在更新提示词…</p>}
+      {activeNotes.length > 0 && (
+        <ul className="composition-notes" aria-label="当前构图注意">
+          {activeNotes.map((note) => <li key={note}>{note}</li>)}
+        </ul>
+      )}
+      {confirmed.length > 0 && <DraftGroup label="已确认构图" items={confirmed} empty="" busy={busy} onRemove={onRemove} />}
+    </div>
   );
 }
 
@@ -1178,6 +1495,25 @@ function splitConcepts(value: string): string[] {
   return value.split(/[，,;；\n]+/).map((item) => item.trim()).filter(Boolean);
 }
 
+function tagKey(value: string): string {
+  return value.toLowerCase().replaceAll(" ", "_");
+}
+
+function conceptHasTag(value: string, tag: string): boolean {
+  const needle = tagKey(tag);
+  return splitConcepts(value).some((item) => tagKey(item) === needle);
+}
+
+function removeTagFromConcepts(value: string, tag: string): string {
+  const needle = tagKey(tag);
+  return splitConcepts(value).filter((item) => tagKey(item) !== needle).join("，");
+}
+
+function appendTagToConcepts(value: string, tag: string): string {
+  if (conceptHasTag(value, tag)) return value;
+  return [...splitConcepts(value), tag].join("，");
+}
+
 function mergeImportedTags(value: string, importedTags: string[]): string {
   const current = splitConcepts(value);
   const known = new Set(current.map((item) => item.toLowerCase().replaceAll(" ", "_")));
@@ -1224,6 +1560,7 @@ function workspaceCandidateSnapshot(result: WorkbenchResponse | null): Workbench
     validation: result.validation,
     data_pack_id: result.data_pack_id,
     ...(result.artist_suggestions ? {artist_suggestions: result.artist_suggestions} : {}),
+    ...(result.artist_ranking ? {artist_ranking: result.artist_ranking} : {}),
     ...(result.tag_suggestions ? {tag_suggestions: result.tag_suggestions} : {}),
     ...(result.scene_draft ? {scene_draft: result.scene_draft} : {}),
   };

@@ -11,6 +11,17 @@ from typing import Any, Iterable
 from .contracts import DATA_CONTRACT, DataContractError
 
 
+ARTIST_RANKING_TAG_FIT = "tag_fit"
+ARTIST_RANKING_VOLUME = "volume"
+ARTIST_RANKING_BALANCED = "balanced"
+ARTIST_RANKING_MODES = frozenset({
+    ARTIST_RANKING_TAG_FIT,
+    ARTIST_RANKING_VOLUME,
+    ARTIST_RANKING_BALANCED,
+})
+ARTIST_VOLUME_MIN_POSTS = 400
+ARTIST_VOLUME_MIN_SCENE_COOC = 50
+
 GENERIC_ARTIST_SEED_TAGS = frozenset({
     "1girl",
     "1boy",
@@ -461,7 +472,15 @@ class ReferenceDataStore:
             for name in ordered
         ]
 
-    def recommend_artists(self, seed_tags: Iterable[str], *, limit: int = 20) -> list[dict[str, Any]]:
+    def recommend_artists(
+        self,
+        seed_tags: Iterable[str],
+        *,
+        limit: int = 20,
+        ranking: str = ARTIST_RANKING_TAG_FIT,
+    ) -> list[dict[str, Any]]:
+        if ranking not in ARTIST_RANKING_MODES:
+            raise ValueError(f"未知画师排序：{ranking}")
         resolved = self._resolve_tags(seed_tags)
         if not resolved or limit <= 0:
             return []
@@ -470,6 +489,8 @@ class ReferenceDataStore:
         sources: dict[str, list[str]] = defaultdict(list)
         post_counts: dict[str, int] = {}
         versions: dict[str, str] = {}
+        scene_cooc: dict[str, int] = defaultdict(int)
+        render_names: dict[str, str] = {}
         for seed_name, seed_id in resolved.items():
             weight = 0.2 if seed_name in GENERIC_ARTIST_SEED_TAGS else 1.0
             rows = self.connection.execute(
@@ -485,22 +506,30 @@ class ReferenceDataStore:
                 sources[name].append(seed_name)
                 post_counts[name] = row["post_count"]
                 versions[name] = row["score_version"]
+                render_names[name] = "@" + name.replace("_", " ")
+                if seed_name not in GENERIC_ARTIST_SEED_TAGS:
+                    scene_cooc[name] = max(scene_cooc[name], int(row["cooc_count"]))
         for name, hit_sources in sources.items():
             scores[name] *= 1.0 + 0.3 * (len(set(hit_sources)) - 1)
-        ranked = sorted(scores, key=lambda name: (scores[name], counts[name]), reverse=True)
-        ordered: list[str] = []
-        for name in ranked:
+        scored: list[str] = []
+        for name in sorted(scores, key=lambda item: (scores[item], counts[item]), reverse=True):
             unique_sources = set(sources[name])
             if unique_sources <= GENERIC_ARTIST_SEED_TAGS and len(unique_sources) < 2:
                 continue
-            ordered.append(name)
-            if len(ordered) >= limit:
-                break
+            scored.append(name)
+        ordered = _select_artist_ranking(
+            scored,
+            ranking=ranking,
+            post_counts=post_counts,
+            scene_cooc=scene_cooc,
+            scores=scores,
+            limit=limit,
+        )
         scale = max((abs(scores[name]) for name in ordered), default=1.0) or 1.0
         return [
             {
                 "name": name,
-                "render_name": "@" + name.replace("_", " "),
+                "render_name": render_names[name],
                 "post_count": post_counts[name],
                 "raw_score": round(scores[name], 6),
                 "display_score": round(scores[name] / scale, 4),
@@ -647,6 +676,39 @@ class ReferenceDataStore:
             if row is not None:
                 resolved[row["name"]] = row["id"]
         return resolved
+
+
+def _select_artist_ranking(
+    scored: list[str],
+    *,
+    ranking: str,
+    post_counts: dict[str, int],
+    scene_cooc: dict[str, int],
+    scores: dict[str, float],
+    limit: int,
+) -> list[str]:
+    """Apply one of the parallel artist rankings to an already scanned score table."""
+    if ranking == ARTIST_RANKING_TAG_FIT:
+        return scored[:limit]
+    if ranking == ARTIST_RANKING_VOLUME:
+        return [
+            name
+            for name in scored
+            if post_counts[name] >= ARTIST_VOLUME_MIN_POSTS
+            and scene_cooc[name] >= ARTIST_VOLUME_MIN_SCENE_COOC
+        ][:limit]
+    volume_pool = [name for name in scored if scene_cooc[name] >= ARTIST_VOLUME_MIN_SCENE_COOC]
+    volume_order = sorted(volume_pool, key=lambda name: (-post_counts[name], -scores[name], name))
+    volume_rank = {name: index for index, name in enumerate(volume_order, start=1)}
+    npmi_rank = {name: index for index, name in enumerate(scored, start=1)}
+    balanced = []
+    for name in scored:
+        rank_volume = volume_rank.get(name)
+        if rank_volume is None:
+            continue
+        balanced.append((npmi_rank[name] + rank_volume, npmi_rank[name], -post_counts[name], name))
+    balanced.sort()
+    return [name for _sum, _npmi, _posts, name in balanced[:limit]]
 
 
 def _canonical(value: str) -> str:

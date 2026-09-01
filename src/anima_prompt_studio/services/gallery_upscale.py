@@ -84,6 +84,9 @@ def snapshot_regen_parameters(asset: dict[str, Any]) -> dict[str, Any]:
     ):
         if value not in (None, ""):
             snapshot[field_name] = value
+    integration = raw.get("integration_metadata")
+    if isinstance(integration, dict):
+        snapshot["integration_metadata"] = copy.deepcopy(integration)
     return snapshot
 
 
@@ -101,6 +104,20 @@ def build_gallery_regen_job(
     nested = raw
     model_id = str(asset.get("model") or raw.get("model_profile_id") or "anima_base_v1")
     count = max(1, min(int(count), GALLERY_REGEN_MAX_COUNT))
+    integration = copy.deepcopy(raw.get("integration_metadata")) if isinstance(raw.get("integration_metadata"), dict) else {}
+    comparison = integration.get("artist_comparison")
+    if isinstance(comparison, dict) and comparison.get("rendered_artist"):
+        source_comparison_id = str(comparison.get("source_comparison_id") or comparison.get("id") or "")
+        integration["artist_comparison"] = {
+            "id": str(comparison.get("id") or source_comparison_id),
+            "artist": str(comparison.get("artist") or ""),
+            "rendered_artist": str(comparison["rendered_artist"]),
+            "derived_from": "gallery_regenerate",
+            "source_comparison_id": source_comparison_id,
+        }
+    integration["gallery_regeneration"] = {
+        "source_image": str(asset.get("path") or asset.get("name") or ""),
+    }
     job = PromptJob(
         project_name=str(asset.get("project") or "画廊再出图") + "·再出图",
         original_zh=str(raw.get("original_zh") or ""),
@@ -112,6 +129,7 @@ def build_gallery_regen_job(
         quality_profile_id=str(raw.get("quality_profile_id") or "standard"),
         workflow_template_id=workflow_id,
         notes=f"画廊同提示词再出图，源图：{asset.get('path') or asset.get('name') or ''}",
+        integration_metadata=integration,
     )
     PromptCompiler(ConfigService()).apply_model_defaults(job)
     width = int(asset.get("width") or nested.get("width") or job.generation_params.width)

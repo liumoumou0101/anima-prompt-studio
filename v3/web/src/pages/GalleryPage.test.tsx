@@ -107,3 +107,49 @@ it("queues regeneration through the reused gallery process API", async () => {
   const request = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
   expect(request).toEqual({paths: [assets[0].path], operation: "regenerate", count: 1});
 });
+
+it("shows an inherited artist tag on gallery-regenerated images without stale comparison positions", async () => {
+  const regenerated = {
+    ...assets[0],
+    id: "项目/batch/regen.png",
+    path: "项目/batch/regen.png",
+    name: "regen.png",
+    artist_comparison: {
+      id: "comparison-source",
+      artist: "harusa1107",
+      rendered_artist: "@harusa1107",
+      derived_from: "gallery_regenerate",
+      source_comparison_id: "comparison-source",
+    },
+  };
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+    root: "D:/gallery", items: [regenerated], projects: ["雨夜项目"], models: ["anima_base_v1"], trash_count: 0,
+  }), {status: 200}));
+
+  render(<GalleryPage enabled />);
+  expect(await screen.findByText("@harusa1107")).toBeInTheDocument();
+  expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByAltText("regen.png"));
+  expect(screen.getByText("画师 Tag")).toBeInTheDocument();
+  expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
+});
+
+it("selects the current result set and permanently deletes the original image files in one batch", async () => {
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      root: "D:/gallery", items: assets, projects: ["外部图片", "雨夜项目"], models: ["anima_base_v1"], trash_count: 0,
+    }), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({deleted: assets.map((item) => item.path), failed: []}), {status: 200}));
+
+  render(<GalleryPage enabled />);
+  expect(await screen.findByText("2 张")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
+  expect(screen.getByText("已选择 2 项")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "彻底删除"}));
+
+  expect(await screen.findByText("已从磁盘永久删除 2 张图片，无法恢复。")).toBeInTheDocument();
+  expect(fetchMock.mock.calls[1][0]).toBe("/api/v3/gallery/assets/delete");
+  expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({paths: assets.map((item) => item.path)});
+  expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("直接从磁盘删除"));
+});
