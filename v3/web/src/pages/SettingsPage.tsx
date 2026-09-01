@@ -1,6 +1,13 @@
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {ApiClientError, apiRequest} from "../lib/api";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
+import type {ArtistRanking} from "../lib/types";
+
+const rankingOptions: Array<{id: ArtistRanking; label: string; detail: string}> = [
+  {id: "tag_fit", label: "题材贴合", detail: "按标签关联强度排序，专项作者会靠前。"},
+  {id: "volume", label: "投稿量优先", detail: "先留下投稿量 ≥ 400 且该场景共现 ≥ 50 的画师，再按题材排序。"},
+  {id: "balanced", label: "题材与投稿量均衡", detail: "在同时有题材名次和投稿量名次的人里，按两个名次之和重排。"},
+];
 
 type AuthType = "password" | "private_key" | "agent";
 
@@ -59,13 +66,19 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
   const [probing, setProbing] = useState(false);
   const [testing, setTesting] = useState(false);
   const [privateKeyPassphrase, setPrivateKeyPassphrase] = useState("");
+  const [artistRanking, setArtistRanking] = useState<ArtistRanking>("tag_fit");
+  const [rankingBusy, setRankingBusy] = useState(false);
 
   const selected = useMemo(() => settings?.items.find((item) => item.id === selectedId) || null, [settings, selectedId]);
   const refresh = useCallback(async () => {
     setError(null);
     try {
-      const response = await apiRequest<SettingsResponse>("/api/v3/settings/remote-profiles");
+      const [response, ranking] = await Promise.all([
+        apiRequest<SettingsResponse>("/api/v3/settings/remote-profiles"),
+        apiRequest<{ranking: ArtistRanking}>("/api/v3/settings/artist-ranking"),
+      ]);
       setSettings(response);
+      setArtistRanking(ranking.ranking);
       setSelectedId((current) => current && response.items.some((item) => item.id === current) ? current : response.items[0]?.id || null);
     } catch (caught) {
       setError(caught as ApiClientError);
@@ -151,6 +164,24 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
     }
   }
 
+  async function saveArtistRanking(next: ArtistRanking) {
+    setRankingBusy(true);
+    setError(null);
+    setNotice("");
+    try {
+      const saved = await apiRequest<{ranking: ArtistRanking}>("/api/v3/settings/artist-ranking", {
+        method: "PUT",
+        body: JSON.stringify({ranking: next}),
+      });
+      setArtistRanking(saved.ranking);
+      setNotice("画师排序已保存。工作台下次编译或刷新推荐时使用新排序。");
+    } catch (caught) {
+      setError(caught as ApiClientError);
+    } finally {
+      setRankingBusy(false);
+    }
+  }
+
   async function testConnection() {
     if (!selectedId) return;
     setTesting(true);
@@ -180,7 +211,19 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
   return <section className="page settings-page">
     <SettingsHeader count={settings?.items.length ?? "—"} />
     {error && <ErrorState message={error.message} requestId={error.requestId} />}
-    {!settings ? <LoadingState label="正在读取 V2 远程连接配置…" /> : <div className="settings-layout">
+    {!settings ? <LoadingState label="正在读取 V2 远程连接配置…" /> : <>
+    <div className="settings-ranking" aria-label="画师排序">
+      <div><span className="eyebrow">ARTIST RANKING</span><h2>画师推荐排序</h2><p>三种排序并列，只改变推荐名单，不会自动写入提示词。</p></div>
+      <div className="settings-ranking-options">
+        {rankingOptions.map((option) => (
+          <label key={option.id} className={`settings-ranking-option${artistRanking === option.id ? " is-selected" : ""}`}>
+            <input type="radio" name="artist-ranking" value={option.id} checked={artistRanking === option.id} disabled={rankingBusy} onChange={() => void saveArtistRanking(option.id)} />
+            <span><strong>{option.label}</strong><small>{option.detail}</small></span>
+          </label>
+        ))}
+      </div>
+    </div>
+    <div className="settings-layout">
       <aside className="settings-side">
         <div className="settings-side-head"><span>REMOTE CONNECTIONS</span><button type="button" className="button button--secondary" onClick={startNew}>＋ 新建</button></div>
         <div className="remote-profile-list">
@@ -212,7 +255,8 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
         </fieldset>
         <div className="settings-security"><strong>SSH 指纹与连接测试</strong><p>{selected?.host_fingerprint_confirmed ? "主机指纹已确认。更改地址、端口、用户名、认证方式或私钥后会自动要求重新确认。完整测试会继续验证 SSH 登录、隧道和 ComfyUI API。" : "新建连接尚未确认主机指纹。检测不会自动信任主机；请核对显示的指纹后确认保存。"}</p>{selected && <div className="host-key-actions"><button type="button" className="button button--secondary" onClick={() => void probeHostKey()} disabled={probing || testing}>{probing ? "检测中…" : "检测 SSH 指纹"}</button>{fingerprint && <><code>{fingerprint}</code><button type="button" className="button button--secondary" onClick={() => void confirmHostKey()} disabled={probing || testing}>确认并保存指纹</button></>}<button type="button" className="button button--primary" onClick={() => void testConnection()} disabled={!selected.host_fingerprint_confirmed || probing || testing}>{testing ? "正在测试 SSH 与 ComfyUI…" : "测试完整连接"}</button></div>}</div>
       </form>
-    </div>}
+    </div>
+    </>}
   </section>;
 }
 

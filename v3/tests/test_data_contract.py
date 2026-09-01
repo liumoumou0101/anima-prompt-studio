@@ -88,7 +88,7 @@ def test_build_query_and_verify_reference_pack(tmp_path: Path) -> None:
     manifest = builder().build(database, manifest_path)
 
     assert manifest.counts.model_dump() == {
-        "tags": 7,
+        "tags": 24,
         "artists": 2,
         "aliases": 2,
         "tag_edges": 6,
@@ -118,6 +118,19 @@ def test_build_query_and_verify_reference_pack(tmp_path: Path) -> None:
 
         with pytest.raises(sqlite3.OperationalError, match="readonly"):
             store.connection.execute("INSERT INTO metadata VALUES('bad','write')")
+
+
+def test_artist_rankings_are_parallel_views_of_one_scan(tmp_path: Path) -> None:
+    database = tmp_path / "reference.db"
+    builder(CURRENT / "tag_artist_cooc_ranking.csv").build(database, tmp_path / "data-pack.json")
+    with ReferenceDataStore(database) as store:
+        tag_fit = store.recommend_artists(["maid"], ranking="tag_fit")
+        volume = store.recommend_artists(["maid"], ranking="volume")
+        balanced = store.recommend_artists(["maid"], ranking="balanced")
+        assert [item["name"] for item in tag_fit] == ["specialist", "midhigh", "ultra", "bulky"]
+        assert [item["name"] for item in volume] == ["midhigh", "ultra", "bulky"]
+        assert [item["name"] for item in balanced][:1] == ["ultra"]
+        assert "specialist" not in [item["name"] for item in volume]
 
 
 def test_generic_only_artist_seeds_are_withheld(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -48,7 +48,25 @@ from ..core import (
     LiteralGenerationError,
     ModelProfileRegistry,
 )
+from ..core.composition import (
+    COMPOSITION_CHIP_TAGS,
+    COMPOSITION_WEAK_META_TERMS,
+    auto_exclude_gaze_spans,
+    build_composition_palette,
+    clothing_crop_needed,
+    composition_preset_snapshots,
+    coerce_selected_composition,
+    composition_fact_type,
+    composition_phrase_occupiers,
+    composition_prose_conflicts,
+    divert_untrusted_composition_matches,
+    filter_weak_meta_matches,
+    positive_composition_hints,
+    prior_risk_notes,
+    strip_focus_leftover_tags,
+)
 from ..data import DataContractError, ReferenceDataStore
+from ..data.store import ARTIST_RANKING_MODES, ARTIST_RANKING_TAG_FIT
 from ..domain import (
     CandidateArtist,
     CandidateLane,
@@ -65,6 +83,7 @@ from ..domain import (
     SourceSpan,
 )
 from .models import (
+    ArtistRankingSettingsRequest,
     ArtistRecommendRequest,
     GenerationBridgePreviewRequest,
     GalleryPathsRequest,
@@ -130,6 +149,20 @@ TAG_BROWSE_GROUPS = [
     ("legendary_creatures", "幻想生物", "传说生物与非人角色"),
 ]
 LOGGER = logging.getLogger(__name__)
+ARTIST_RANKING_SETTING = "v3_artist_ranking"
+
+
+def _artist_ranking_from_database(database: Path | None) -> str:
+    if database is None or not Path(database).is_file():
+        return ARTIST_RANKING_TAG_FIT
+    from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+
+    repository = SQLiteRepository(database)
+    try:
+        value = str(repository.get_setting(ARTIST_RANKING_SETTING, ARTIST_RANKING_TAG_FIT) or ARTIST_RANKING_TAG_FIT)
+    finally:
+        repository.close()
+    return value if value in ARTIST_RANKING_MODES else ARTIST_RANKING_TAG_FIT
 
 
 class ApiError(Exception):
@@ -313,15 +346,20 @@ def create_api_runtime(
                     "intent": bundle.intent.model_dump(mode="json"),
                     "candidates": candidates,
                     "validation": validation.model_dump(mode="json"),
-                    "tag_suggestions": store.related_tags(
-                        [tag.name for tag in literal.tags],
-                        categories={"general", "meta"},
-                        limit=10,
-                    ),
+                    "tag_suggestions": [
+                        item for item in store.related_tags(
+                            [tag.name for tag in literal.tags],
+                            categories={"general", "meta"},
+                            limit=10,
+                        )
+                        if item["name"] not in COMPOSITION_CHIP_TAGS
+                    ],
                     "artist_suggestions": store.recommend_artists(
                         [tag.name for tag in literal.tags],
                         limit=10,
+                        ranking=_artist_ranking_from_database(app.state.v2_database),
                     ),
+                    "artist_ranking": _artist_ranking_from_database(app.state.v2_database),
                     "data_pack_id": store.pack_id,
                 }
         except LiteralGenerationError as exc:
@@ -613,9 +651,11 @@ def create_api_runtime(
         payload: ArtistRecommendRequest,
         database: Path = Depends(require_reference_db),
     ) -> dict[str, object]:
+        ranking = payload.ranking or _artist_ranking_from_database(app.state.v2_database)
         with ReferenceDataStore(database) as store:
             return {
-                "items": store.recommend_artists(payload.tags, limit=payload.limit),
+                "items": store.recommend_artists(payload.tags, limit=payload.limit, ranking=ranking),
+                "ranking": ranking,
                 "data_pack_id": store.pack_id,
             }
 
@@ -665,6 +705,9 @@ def create_api_runtime(
             positive_text = "，".join(
                 item.text for item in payload.elements if item.state != IntentState.EXCLUDED
             )
+            excluded_text = "，".join(
+                item.text for item in payload.elements if item.state == IntentState.EXCLUDED
+            )
             contains_cjk = _contains_cjk(positive_text)
             if payload.translated_text:
                 translated_text = payload.translated_text
@@ -687,9 +730,8 @@ def create_api_runtime(
                     selected_tags=payload.selected_tags,
                     suppressed_tags=payload.suppressed_tags,
                     include_scene_plan=contains_cjk,
+                    explicit_excluded_text=excluded_text,
                 )
-                intent = _apply_workbench_exclusions(intent, payload, store, scene_draft)
-                _attach_cn_names(store, scene_draft)
             response = candidate_response(intent, payload.model_profile, database)
             if contains_cjk:
                 scene_draft["back_translation"] = _back_translate_scene_plan(
@@ -939,7 +981,8 @@ def create_api_runtime(
                 item["name"]: item
                 for item in store.recommend_artists(
                     [tag.name for tag in payload.candidate.tags],
-                    limit=100,
+                    limit=200,
+                    ranking=ARTIST_RANKING_TAG_FIT,
                 )
             }
         unavailable = [name for name in payload.artist_names if name not in recommended]
@@ -1096,6 +1139,24 @@ def create_api_runtime(
                 raise ApiError(409, "remote_profile_disabled", "不能将已停用的云主机设为默认连接。")
             repository.set_setting("last_remote_profile_id", profile.id)
             return {"remote_profile_id": profile.id}
+        finally:
+            repository.close()
+
+    @app.get(f"{API_PREFIX}/settings/artist-ranking", dependencies=[Depends(require_session)])
+    def get_artist_ranking(database: Path = Depends(require_v2_settings_database)) -> dict[str, object]:
+        return {"ranking": _artist_ranking_from_database(database)}
+
+    @app.put(f"{API_PREFIX}/settings/artist-ranking", dependencies=[Depends(require_session)])
+    def set_artist_ranking(
+        payload: ArtistRankingSettingsRequest,
+        database: Path = Depends(require_v2_settings_database),
+    ) -> dict[str, object]:
+        from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+
+        repository = SQLiteRepository(database)
+        try:
+            repository.set_setting(ARTIST_RANKING_SETTING, payload.ranking)
+            return {"ranking": payload.ranking}
         finally:
             repository.close()
 
@@ -1674,57 +1735,6 @@ def _contains_cjk(text: str) -> bool:
     return any("\u3400" <= character <= "\u9fff" for character in text)
 
 
-def _apply_workbench_exclusions(
-    intent: IntentDocument,
-    payload: WorkbenchCandidateRequest,
-    store: ReferenceDataStore,
-    scene_draft: dict[str, object],
-) -> IntentDocument:
-    """Map explicit structured exclusions without treating them as positive prose."""
-    elements = list(intent.graph.elements)
-    unresolved = list(scene_draft["unresolved"])
-    suppressed = {tag.strip().lower().replace(" ", "_") for tag in payload.suppressed_tags}
-    for item in payload.elements:
-        if item.state != IntentState.EXCLUDED:
-            continue
-        resolved: list[_LocalIndexMatch] = []
-        if item.canonical_tag:
-            detail = store.get_tag(item.canonical_tag)
-            if detail is not None:
-                resolved = [_LocalIndexMatch(
-                    text=item.text,
-                    origin="source",
-                    canonical_tag=str(detail["name"]),
-                    match_kind="canonical",
-                    post_count=int(detail["post_count"]),
-                )]
-        else:
-            exclusion_matches = _local_index_matches(store, _local_lookup_terms(item.text, ""))
-            resolved, _ambiguous = _confirmed_source_matches(exclusion_matches)
-        resolved = [match for match in resolved if match.canonical_tag not in suppressed]
-        if not resolved:
-            unresolved.append(_scene_draft_item(
-                f"u_{item.id}",
-                item.text,
-                None,
-                "unresolved",
-                "未找到可安全写入负向提示词的排除标签；原文仍保留供人工处理。",
-            ))
-            continue
-        for index, match in enumerate(resolved, 1):
-            elements.append(IntentElement(
-                id=item.id if index == 1 else f"{item.id}_{index}",
-                original_text=match.text,
-                canonical_tag=match.canonical_tag,
-                type=item.type,
-                state=IntentState.EXCLUDED,
-                confidence=1.0,
-                provenance=ElementProvenance(kind=ProvenanceKind.EXACT, detail="local_structured_exclusion"),
-            ))
-    scene_draft["unresolved"] = unresolved
-    return intent.model_copy(update={"graph": ConstraintGraph(elements=elements, edges=intent.graph.edges)})
-
-
 @dataclass(frozen=True)
 class _LocalLookupTerm:
     text: str
@@ -1759,6 +1769,8 @@ _LOCAL_SOURCE_GLOSSARY: dict[str, str] = {
     "人鱼": "mermaid",
     "美人鱼": "mermaid",
 }
+_PROTECTED_IDENTITY_CATEGORIES = frozenset({"character", "copyright"})
+_EXPLICIT_IDENTITY_MATCH_KINDS = frozenset({"canonical", "render"})
 
 _LOCAL_FACT_TYPE_GROUPS: dict[IntentElementType, frozenset[str]] = {
     IntentElementType.SUBJECT: frozenset({"character_count", "groups", "people", "legendary_creatures"}),
@@ -1841,21 +1853,36 @@ def _local_natural_intent(
     """
     evidence = evidence or _split_local_natural_evidence(source_text)
     matches = _local_index_matches(store, _local_lookup_terms(source_text, translated_text))
-    source_candidates = [
+    source_candidates = filter_weak_meta_matches([
         match for match in matches
         if match.origin == "source" and not _match_in_exclusion_evidence(match, evidence.exclusions)
-    ]
-    excluded_candidates = [
+    ])
+    excluded_candidates = filter_weak_meta_matches([
         match for match in matches
         if match.origin == "source" and _match_in_exclusion_evidence(match, evidence.exclusions)
-    ]
-    source_matches, ambiguous_source_terms = _confirmed_source_matches(source_candidates)
+    ])
+    source_candidates, diverted_under_shot = divert_untrusted_composition_matches(source_candidates)
+    excluded_candidates, diverted_under_shot_excluded = divert_untrusted_composition_matches(excluded_candidates)
+    exclusion_span_tuples = [(item.text, item.start, item.end) for item in evidence.exclusions]
+    phrase_occupiers = _composition_span_matches(composition_phrase_occupiers(source_text, exclusion_span_tuples))
+    source_matches, ambiguous_source_terms = _confirmed_source_matches(
+        source_candidates,
+        extra_occupiers=phrase_occupiers,
+    )
     source_matches = _merge_glossary_source_matches(evidence.positive_text, source_matches, store)
-    excluded_matches, ambiguous_exclusion_terms = _confirmed_source_matches(excluded_candidates)
+    source_matches, identity_matches = _divert_protected_identity_matches(source_matches, store)
+    excluded_matches, ambiguous_exclusion_terms = _confirmed_source_matches(
+        excluded_candidates,
+        extra_occupiers=phrase_occupiers,
+    )
     excluded_matches.extend(_local_exclusion_concept_matches(store, evidence.exclusions, ""))
+    excluded_matches, identity_exclusion_matches = _divert_protected_identity_matches(excluded_matches, store)
+    explicit_raw: list[_LocalIndexMatch] = []
     explicit_exclusion_matches: list[_LocalIndexMatch] = []
     if explicit_excluded_text.strip():
-        explicit_raw = _local_index_matches(store, _local_lookup_terms(explicit_excluded_text, ""))
+        explicit_raw = filter_weak_meta_matches(
+            _local_index_matches(store, _local_lookup_terms(explicit_excluded_text, ""))
+        )
         explicit_confirmed, explicit_ambiguous = _confirmed_source_matches(explicit_raw)
         explicit_exclusion_matches = [
             _LocalIndexMatch(
@@ -1869,23 +1896,61 @@ def _local_natural_intent(
         ]
         explicit_exclusion_matches.extend(_local_exclusion_concept_matches(store, (), explicit_excluded_text))
         ambiguous_exclusion_terms.extend(explicit_ambiguous)
-
+    explicit_exclusion_matches, explicit_identity_exclusions = _divert_protected_identity_matches(
+        explicit_exclusion_matches,
+        store,
+    )
+    identity_exclusion_matches = _dedupe_canonical_matches(
+        [*identity_exclusion_matches, *explicit_identity_exclusions]
+    )
     excluded_matches = _dedupe_canonical_matches([*excluded_matches, *explicit_exclusion_matches])
+    for span in auto_exclude_gaze_spans(source_text, exclusion_span_tuples):
+        mapped = _composition_auto_exclude_match(span, store)
+        if mapped is not None:
+            excluded_matches.append(mapped)
+    excluded_matches = _dedupe_canonical_matches(excluded_matches)
+    excluded_matches, leftover_exclusion_matches = _demote_partial_exclusion_matches(
+        excluded_matches,
+        evidence.exclusions,
+        explicit_excluded_text,
+    )
     suppressed = {item.strip().lower().replace(" ", "_") for item in (suppressed_tags or []) if item.strip()}
     suppressed_source_matches = [match for match in source_matches if match.canonical_tag in suppressed]
     suppressed_exclusion_matches = [match for match in excluded_matches if match.canonical_tag in suppressed]
     source_matches = [match for match in source_matches if match.canonical_tag not in suppressed]
     excluded_matches = [match for match in excluded_matches if match.canonical_tag not in suppressed]
+    leftover_exclusion_matches = [match for match in leftover_exclusion_matches if match.canonical_tag not in suppressed]
+    identity_exclusion_matches = [match for match in identity_exclusion_matches if match.canonical_tag not in suppressed]
     mapped_exclusion_texts = {match.text for match in excluded_matches}
     ambiguous_exclusion_terms = [item for item in ambiguous_exclusion_terms if item not in mapped_exclusion_texts]
     excluded_tags = {match.canonical_tag for match in excluded_matches}
-    selected = [tag for tag in dict.fromkeys(selected_tags) if tag not in suppressed]
+    positive_exclusion_conflicts = {match.canonical_tag for match in source_matches} & excluded_tags
+    source_matches = [match for match in source_matches if match.canonical_tag not in excluded_tags]
+    selected = coerce_selected_composition([tag for tag in dict.fromkeys(selected_tags) if tag not in suppressed])
+    if "looking_away" in {match.canonical_tag for match in source_matches} | set(selected):
+        gaze_negative = _composition_tag_match("looking_at_viewer", "looking_at_viewer", store)
+        if gaze_negative is not None:
+            excluded_matches = _dedupe_canonical_matches([*excluded_matches, gaze_negative])
+            excluded_tags = {match.canonical_tag for match in excluded_matches}
+            source_matches = [match for match in source_matches if match.canonical_tag not in excluded_tags]
+            selected = [tag for tag in selected if tag not in excluded_tags]
     requested_fact_owners = fact_owners or {}
     requested_relation_keys = {
         (str(item["source_entity_id"]), str(item["target_element_id"]), str(item["relation"]))
         for item in (confirmed_relations or [])
     }
     selected_set = set(selected)
+    covering_exclusion_matches = [
+        *excluded_matches,
+        *identity_exclusion_matches,
+        *leftover_exclusion_matches,
+    ]
+    identity_exclusion_matches = [
+        match for match in identity_exclusion_matches if match.canonical_tag not in excluded_tags
+    ]
+    leftover_exclusion_matches = [
+        match for match in leftover_exclusion_matches if match.canonical_tag not in excluded_tags
+    ]
     elements: list[IntentElement] = []
     confirmed: list[dict[str, object]] = []
     exclusions: list[dict[str, object]] = []
@@ -1980,14 +2045,12 @@ def _local_natural_intent(
             fact_type,
         ))
 
-    for index, item in enumerate(evidence.exclusions, 1):
-        if any(
-            match.start is not None and match.end is not None
-            and item.start <= match.start and match.end <= item.end
-            for match in excluded_matches
-        ):
+    unresolved_exclusion_index = 0
+    for item in evidence.exclusions:
+        if _inline_exclusion_covered(item, covering_exclusion_matches):
             continue
-        element_id = f"e_local_exclusion_unresolved_{index}"
+        unresolved_exclusion_index += 1
+        element_id = f"e_local_exclusion_unresolved_{unresolved_exclusion_index}"
         elements.append(IntentElement(
             id=element_id,
             original_text=item.text,
@@ -2006,8 +2069,28 @@ def _local_natural_intent(
             item.start,
             item.end,
         ))
+    for phrase in _split_exclusion_phrases(explicit_excluded_text):
+        if _explicit_exclusion_phrase_covered(phrase, covering_exclusion_matches, excluded_tags):
+            continue
+        unresolved_exclusion_index += 1
+        element_id = f"e_local_exclusion_unresolved_{unresolved_exclusion_index}"
+        elements.append(IntentElement(
+            id=element_id,
+            original_text=phrase,
+            type=IntentElementType.OTHER,
+            state=IntentState.EXCLUDED,
+            confidence=1.0,
+            provenance=ElementProvenance(kind=ProvenanceKind.EXACT, detail="local_source_unresolved_exclusion"),
+        ))
+        exclusions.append(_scene_draft_item(
+            element_id,
+            phrase,
+            None,
+            "source_excluded",
+            "已识别为排除内容，但尚未找到可安全使用的本地标签",
+        ))
 
-    translation_matches = [
+    translation_candidates = [
         match
         for match in _confirmed_translation_matches(matches)
         if match.canonical_tag not in confirmed_tags
@@ -2015,10 +2098,109 @@ def _local_natural_intent(
         and match.canonical_tag not in suppressed
         and match.canonical_tag not in excluded_tags
     ]
-    ambiguous_groups = _ambiguous_source_groups(
-        source_candidates,
+    translation_matches = [
+        match for match in translation_candidates if not _is_protected_identity_match(match, store)
+    ]
+    identity_matches = [
+        match
+        for match in [*identity_matches, *(
+            item for item in translation_candidates if _is_protected_identity_match(item, store)
+        )]
+        if match.canonical_tag not in selected_set
+        and match.canonical_tag not in suppressed
+        and match.canonical_tag not in excluded_tags
+    ]
+    identity_suggestions = [
+        _scene_draft_item(
+            f"s_local_identity_{index}",
+            match.text,
+            match.canonical_tag,
+            "identity_candidate",
+            "匹配到角色或作品标签；名字可能很生僻，确认前请核对其英文 tag，点选后才会加入候选",
+            match.start,
+            match.end,
+            _local_fact_type(store, match.canonical_tag),
+        )
+        for index, match in enumerate(_dedupe_canonical_matches(identity_matches), 1)
+    ]
+    identity_exclusion_suggestions = [
+        _scene_draft_item(
+            f"s_local_identity_exclusion_{index}",
+            match.text,
+            match.canonical_tag,
+            "identity_exclusion",
+            "匹配到角色或作品标签；不会自动写入负向提示词。请核对其英文 tag 后再点选排除",
+            match.start,
+            match.end,
+            _local_fact_type(store, match.canonical_tag),
+        )
+        for index, match in enumerate(_dedupe_canonical_matches(identity_exclusion_matches), 1)
+    ]
+    leftover_exclusion_suggestions = [
+        _scene_draft_item(
+            f"s_local_exclusion_candidate_{index}",
+            match.text,
+            match.canonical_tag,
+            "exclusion_candidate",
+            "排除短语比该标签更具体，未自动把更宽的标签写入负向；点选后才会排除",
+            match.start,
+            match.end,
+            _local_fact_type(store, match.canonical_tag),
+        )
+        for index, match in enumerate(_dedupe_canonical_matches(leftover_exclusion_matches), 1)
+    ]
+    confirmed_positive_tags = {match.canonical_tag for match in source_matches} | selected_set | excluded_tags | suppressed
+    ambiguous_source_terms = [term for term in ambiguous_source_terms if term not in COMPOSITION_WEAK_META_TERMS]
+    ambiguous_exclusion_terms = [term for term in ambiguous_exclusion_terms if term not in COMPOSITION_WEAK_META_TERMS]
+    ambiguous_groups = _strip_composition_ambiguous_groups(
+        _ambiguous_source_groups(
+            source_candidates,
+            store,
+            confirmed_tags=confirmed_positive_tags,
+        ),
         store,
-        confirmed_tags={match.canonical_tag for match in source_matches} | selected_set | excluded_tags | suppressed,
+        confirmed={match.canonical_tag for match in source_matches} | selected_set,
+    )
+    ambiguous_exclusion_groups = _strip_composition_ambiguous_groups(
+        [
+            {**group, "side": "excluded"}
+            for group in _ambiguous_source_groups(
+                [*excluded_candidates, *explicit_raw],
+                store,
+                confirmed_tags=excluded_tags | suppressed,
+            )
+            if group["text"] not in mapped_exclusion_texts and group["text"] not in COMPOSITION_WEAK_META_TERMS
+        ],
+        store,
+        confirmed=excluded_tags,
+    )
+    composition_confirmed = {match.canonical_tag for match in source_matches if match.canonical_tag in COMPOSITION_CHIP_TAGS}
+    composition_hinted = set(positive_composition_hints(evidence.positive_text, excluded_tags, composition_confirmed))
+    if diverted_under_shot or diverted_under_shot_excluded:
+        composition_hinted.add("from_below")
+    crop_needed = clothing_crop_needed({match.canonical_tag for match in source_matches} | selected_set)
+    composition_palette = build_composition_palette(
+        confirmed_tags=composition_confirmed,
+        selected_tags=selected,
+        excluded_tags=excluded_tags,
+        hinted_tags=composition_hinted,
+        crop_needed=crop_needed,
+    )
+    composition_notes = prior_risk_notes(
+        gaze_present=bool(({match.canonical_tag for match in source_matches} | selected_set) & {"looking_at_viewer", "looking_away"}),
+        looking_away="looking_away" in ({match.canonical_tag for match in source_matches} | selected_set),
+        looking_at_viewer_excluded="looking_at_viewer" in excluded_tags,
+        crop_needed=crop_needed,
+    )
+    if include_scene_plan:
+        composition_notes.extend(composition_prose_conflicts(
+            translated_text,
+            {match.canonical_tag for match in source_matches} | selected_set,
+            excluded_tags,
+        ))
+    general_specific_conflicts = _general_specific_tag_conflicts(
+        {match.canonical_tag for match in source_matches} | selected_set,
+        excluded_tags,
     )
     leftover_suppressed = (
         _suppressed_terms_left_in_text(translated_text, suppressed, store)
@@ -2026,15 +2208,20 @@ def _local_natural_intent(
         else []
     )
     suggestions = [
-        _scene_draft_item(
-            f"s_local_translation_{index}",
-            match.text,
-            match.canonical_tag,
-            "translation_exact",
-            "英文译文直接命中本地标签；需要确认后才会加入候选",
-            fact_type=_local_fact_type(store, match.canonical_tag),
-        )
-        for index, match in enumerate(translation_matches[:12], 1)
+        *identity_suggestions,
+        *identity_exclusion_suggestions,
+        *leftover_exclusion_suggestions,
+        *[
+            _scene_draft_item(
+                f"s_local_translation_{index}",
+                match.text,
+                match.canonical_tag,
+                "translation_exact",
+                "英文译文直接命中本地标签；需要确认后才会加入候选",
+                fact_type=_local_fact_type(store, match.canonical_tag),
+            )
+            for index, match in enumerate(translation_matches[:12], 1)
+        ],
     ]
 
     valid_entity_ids = {str(item["id"]) for item in entities}
@@ -2168,15 +2355,19 @@ def _local_natural_intent(
             store,
         ),
         "ambiguous": ambiguous_groups,
+        "ambiguous_exclusions": ambiguous_exclusion_groups,
+        "composition_palette": composition_palette,
+        "composition_presets": composition_preset_snapshots(),
         "back_translation": {"text": "", "engine": "", "segments": [], "negative_text": ""},
         "risk_notes": [
+            *composition_notes,
             *(
                 [f"{', '.join(f'“{item}”' for item in ambiguous_source_terms[:3])} 可关联多条标签；已只确认唯一的主标签，其余请在待确认或一对多列表中点选。"]
                 if ambiguous_source_terms
                 else []
             ),
             *(
-                [f"排除内容 {', '.join(f'“{item}”' for item in ambiguous_exclusion_terms[:3])} 可关联多条标签；请确认负向结果。"]
+                [f"排除内容 {', '.join(f'“{item}”' for item in ambiguous_exclusion_terms[:3])} 可关联多条标签；请在排除一对多列表中点选后才会写入负向。"]
                 if ambiguous_exclusion_terms
                 else []
             ),
@@ -2186,8 +2377,26 @@ def _local_natural_intent(
                 else []
             ),
             *(
-                ["已选择的建议与明确排除冲突；本次按排除优先，未加入正向候选。"]
-                if selected_set & excluded_tags
+                ["已确认或已选择的标签与明确排除冲突；本次按排除优先，未加入正向候选。"]
+                if positive_exclusion_conflicts or (selected_set & excluded_tags)
+                else []
+            ),
+            *(
+                [
+                    "正向 "
+                    + "、".join(f"{positive.replace('_', ' ')} / 负向 {negative.replace('_', ' ')}" for positive, negative in general_specific_conflicts[:3])
+                    + " 存在包含关系；提交前请确认不会互相抵消。"
+                ]
+                if general_specific_conflicts
+                else []
+            ),
+            *(
+                [
+                    "排除短语 "
+                    + "、".join(f"“{item.text}”" for item in leftover_exclusion_matches[:3])
+                    + " 只命中了更宽的标签，未自动写入负向，避免把更具体的描述升成整类排除。"
+                ]
+                if leftover_exclusion_matches
                 else []
             ),
             *(
@@ -2205,8 +2414,18 @@ def _local_natural_intent(
                 if leftover_suppressed
                 else []
             ),
-            "当前仅自动确认唯一的主标签或英文 canonical/alias 命中；人物归属、复杂动作、空间关系和构图仍需人工检查。",
-        ],
+            *(
+                ["发现疑似角色或作品标签，不会自动加入提示词。这些名字可能很生僻，请核对其英文 tag 后再点选。"]
+                if identity_suggestions
+                else []
+            ),
+            *(
+                ["发现要从画面中排除的疑似角色或作品，不会自动写入负向提示词。请核对其英文 tag 后再点选。"]
+                if identity_exclusion_suggestions
+                else []
+            ),
+            "当前仅自动确认普通标签的唯一主名，或用户直接输入的英文 canonical；角色卡和作品标签需要单独确认。排除词会写入负向提示词。",
+        ][:24],
     }
     _attach_cn_names(store, scene_draft)
     return intent, scene_draft
@@ -2223,7 +2442,8 @@ def _match_in_exclusion_evidence(
 
 def _local_fact_type(store: ReferenceDataStore, canonical_tag: str) -> IntentElementType:
     detail = store.get_tag(canonical_tag)
-    return _local_fact_type_from_detail(detail) if detail is not None else IntentElementType.OTHER
+    fallback = _local_fact_type_from_detail(detail) if detail is not None else IntentElementType.OTHER
+    return composition_fact_type(canonical_tag, fallback)
 
 
 def _local_fact_type_from_detail(detail: dict[str, object]) -> IntentElementType:
@@ -2305,7 +2525,87 @@ def _has_uncovered_source_evidence(
         remaining = remaining.replace(match.text, "", 1)
     remaining = re.sub(r"[，,。；;：:！!？?、()（）\[\]{}\s]+", "", remaining)
     remaining = re.sub(r"^(?:一个|一位|一名|的|和|与|及|在|从|向|穿|着|有)+", "", remaining)
+    for term in sorted(COMPOSITION_WEAK_META_TERMS, key=len, reverse=True):
+        remaining = remaining.replace(term, "")
     return bool(re.search(r"[\u3400-\u9fffA-Za-z0-9]", remaining))
+
+
+def _composition_span_matches(spans: list) -> list[_LocalIndexMatch]:
+    occupiers: list[_LocalIndexMatch] = []
+    for span in spans:
+        if span.start is None or span.end is None:
+            continue
+        occupiers.append(_LocalIndexMatch(
+            text=span.text,
+            origin="source",
+            canonical_tag=span.canonical_tag or "composition_span",
+            match_kind="cn_name",
+            post_count=0,
+            start=span.start,
+            end=span.end,
+        ))
+    return occupiers
+
+
+def _composition_auto_exclude_match(span: object, store: ReferenceDataStore) -> _LocalIndexMatch | None:
+    canonical = str(getattr(span, "canonical_tag", "") or "")
+    detail = store.get_tag(canonical)
+    if detail is None:
+        return None
+    return _LocalIndexMatch(
+        text=str(getattr(span, "text", canonical)),
+        origin="source",
+        canonical_tag=canonical,
+        match_kind="cn_name",
+        post_count=int(detail["post_count"]),
+        start=getattr(span, "start", None),
+        end=getattr(span, "end", None),
+    )
+
+
+def _composition_tag_match(canonical: str, text: str, store: ReferenceDataStore) -> _LocalIndexMatch | None:
+    detail = store.get_tag(canonical)
+    if detail is None:
+        return None
+    return _LocalIndexMatch(
+        text=text,
+        origin="explicit_exclusion",
+        canonical_tag=canonical,
+        match_kind="canonical",
+        post_count=int(detail["post_count"]),
+    )
+
+
+def _strip_composition_ambiguous_groups(
+    groups: list[dict[str, object]],
+    store: ReferenceDataStore,
+    *,
+    confirmed: set[str],
+) -> list[dict[str, object]]:
+    cleaned: list[dict[str, object]] = []
+    for group in groups:
+        text = str(group.get("text") or "")
+        if text in COMPOSITION_WEAK_META_TERMS:
+            continue
+        options = [option for option in list(group.get("options") or []) if isinstance(option, dict)]
+        leftover = [str(option["canonical_tag"]) for option in options]
+        groups_for = {
+            tag: {
+                str(item.get("name") or "").removeprefix("tag_group:")
+                for item in (store.get_tag(tag) or {}).get("groups", [])
+                if isinstance(item, dict)
+            }
+            for tag in leftover
+        }
+        primary = "close-up" if text == "特写" else None
+        kept_tags = set(strip_focus_leftover_tags(primary, leftover, groups_for))
+        if primary == "close-up":
+            continue
+        new_options = [option for option in options if option.get("canonical_tag") in kept_tags]
+        if len(new_options) < 2:
+            continue
+        cleaned.append({**group, "options": new_options})
+    return cleaned
 
 
 @dataclass(frozen=True)
@@ -2413,31 +2713,80 @@ def _local_match_kind(row: object, term: str) -> str:
     return "alias"
 
 
-def _confirmed_source_matches(matches: list[_LocalIndexMatch]) -> tuple[list[_LocalIndexMatch], list[str]]:
+_PRIMARY_MATCH_KINDS = frozenset({"canonical", "render", "alias", "cn_name"})
+
+
+def _source_occurrence_map(
+    matches: list[_LocalIndexMatch],
+) -> dict[tuple[str, int | None, int | None], list[_LocalIndexMatch]]:
+    by_occurrence: dict[tuple[str, int | None, int | None], list[_LocalIndexMatch]] = {}
+    for match in matches:
+        if match.origin == "source":
+            by_occurrence.setdefault((match.text, match.start, match.end), []).append(match)
+    return by_occurrence
+
+
+def _primary_matches(candidates: list[_LocalIndexMatch]) -> tuple[list[_LocalIndexMatch], list[_LocalIndexMatch]]:
+    unique = _unique_canonical_matches(candidates)
+    primaries = _unique_canonical_matches([item for item in unique if item.match_kind in _PRIMARY_MATCH_KINDS])
+    return unique, primaries
+
+
+def _primary_occupying_spans(matches: list[_LocalIndexMatch]) -> list[_LocalIndexMatch]:
+    """Spans whose Chinese text fully hits at least one tag primary name.
+
+    These spans occupy their source range even when the hit is one-to-many.
+    Nested shorter unique hits inside them are splitting byproducts, not more
+    specific answers. Related-word ``cn_term`` hits do not occupy a span.
+    """
+    occupiers: list[_LocalIndexMatch] = []
+    for (_text, start, end), candidates in _source_occurrence_map(matches).items():
+        if start is None or end is None:
+            continue
+        _unique, primaries = _primary_matches(candidates)
+        if primaries:
+            occupiers.append(primaries[0])
+    return occupiers
+
+
+def _nested_in_longer_occupier(match: _LocalIndexMatch, occupiers: list[_LocalIndexMatch]) -> bool:
+    if match.start is None or match.end is None:
+        return False
+    return any(
+        occupier.start is not None
+        and occupier.end is not None
+        and len(occupier.text) > len(match.text)
+        and _spans_overlap(match, occupier)
+        for occupier in occupiers
+    )
+
+
+def _confirmed_source_matches(
+    matches: list[_LocalIndexMatch],
+    extra_occupiers: list[_LocalIndexMatch] | None = None,
+) -> tuple[list[_LocalIndexMatch], list[str]]:
     """Resolve Chinese evidence without promoting every shared keyword to fact.
 
     Chinese search terms in the reference pack intentionally include broad related
     words.  For example, “天使” occurs on named characters, halos, statues and
     the generic ``angel`` tag.  Only a unique canonical/render/alias/CN primary
     name may be confirmed; broad ``cn_terms`` remain discovery metadata.
-    """
-    by_occurrence: dict[tuple[str, int | None, int | None], list[_LocalIndexMatch]] = {}
-    for match in matches:
-        if match.origin == "source":
-            by_occurrence.setdefault((match.text, match.start, match.end), []).append(match)
 
+    A longer span that fully hits a primary name occupies its range even when
+    that hit is ambiguous. Nested shorter unique names inside it are not
+    confirmed automatically. Adjacent independent phrases may both survive.
+    """
+    occupiers = [*_primary_occupying_spans(matches), *(extra_occupiers or [])]
     resolved: list[_LocalIndexMatch] = []
     ambiguous_terms: list[str] = []
-    primary_kinds = {"canonical", "render", "alias", "cn_name"}
-    for (text, _start, _end), candidates in by_occurrence.items():
-        unique = _unique_canonical_matches(candidates)
-        primaries = _unique_canonical_matches([item for item in unique if item.match_kind in primary_kinds])
-        selected: _LocalIndexMatch | None = None
-        if len(primaries) == 1:
-            selected = primaries[0]
-        if len(unique) > 1:
+    for (text, _start, _end), candidates in _source_occurrence_map(matches).items():
+        unique, primaries = _primary_matches(candidates)
+        selected = primaries[0] if len(primaries) == 1 else None
+        span = selected or candidates[0]
+        nested = _nested_in_longer_occupier(span, occupiers)
+        if len(unique) > 1 and not nested:
             ambiguous_terms.append(text)
-        if selected is not None:
+        if selected is not None and not nested:
             resolved.append(selected)
 
     # Prefer the most specific non-overlapping phrase: “堕天使” must win over
@@ -2449,6 +2798,141 @@ def _confirmed_source_matches(matches: list[_LocalIndexMatch]) -> tuple[list[_Lo
         accepted.append(match)
     accepted.sort(key=lambda item: (item.start if item.start is not None else 0, -len(item.text), item.canonical_tag))
     return _dedupe_canonical_matches(accepted), list(dict.fromkeys(ambiguous_terms))
+
+
+def _is_protected_identity_match(match: _LocalIndexMatch, store: ReferenceDataStore) -> bool:
+    """Character/copyright tags auto-enter only when the user typed the English tag."""
+    if match.match_kind in _EXPLICIT_IDENTITY_MATCH_KINDS:
+        return False
+    detail = store.get_tag(match.canonical_tag)
+    return bool(detail) and str(detail.get("category_name") or "") in _PROTECTED_IDENTITY_CATEGORIES
+
+
+def _divert_protected_identity_matches(
+    matches: list[_LocalIndexMatch],
+    store: ReferenceDataStore,
+) -> tuple[list[_LocalIndexMatch], list[_LocalIndexMatch]]:
+    kept: list[_LocalIndexMatch] = []
+    diverted: list[_LocalIndexMatch] = []
+    for match in matches:
+        if _is_protected_identity_match(match, store):
+            diverted.append(match)
+        else:
+            kept.append(match)
+    return kept, diverted
+
+
+_EXCLUSION_PHRASE_SPLIT = re.compile(r"[，,。；;！!？?\n]+")
+_EXCLUSION_REMAINDER_NOISE = re.compile(r"[，,。；;：:！!？?、()（）\[\]{}\s和与及的]+")
+
+
+def _split_exclusion_phrases(text: str) -> list[str]:
+    return [part.strip() for part in _EXCLUSION_PHRASE_SPLIT.split(text) if part.strip()]
+
+
+def _match_key(match: _LocalIndexMatch) -> tuple[str, str, int | None, int | None]:
+    return (match.canonical_tag, match.text, match.start, match.end)
+
+
+def _phrase_uncovered_remainder(phrase: str, matches: list[_LocalIndexMatch]) -> str:
+    remaining = phrase
+    for match in sorted(matches, key=lambda item: -len(item.text)):
+        if match.text and match.text in remaining:
+            remaining = remaining.replace(match.text, "", 1)
+    return _EXCLUSION_REMAINDER_NOISE.sub("", remaining)
+
+
+def _matches_for_inline_exclusion(
+    item: _LocalExclusionEvidence,
+    matches: list[_LocalIndexMatch],
+) -> list[_LocalIndexMatch]:
+    covering: list[_LocalIndexMatch] = []
+    for match in matches:
+        if match.start is not None and match.end is not None:
+            if item.start <= match.start and match.end <= item.end:
+                covering.append(match)
+        elif match.origin != "source" and match.text and match.text in item.text:
+            covering.append(match)
+    return covering
+
+
+def _matches_for_explicit_phrase(phrase: str, matches: list[_LocalIndexMatch]) -> list[_LocalIndexMatch]:
+    return [
+        match for match in matches
+        if match.start is None and match.text and match.text in phrase
+    ]
+
+
+def _demote_partial_exclusion_matches(
+    matches: list[_LocalIndexMatch],
+    inline_exclusions: tuple[_LocalExclusionEvidence, ...],
+    explicit_excluded_text: str,
+) -> tuple[list[_LocalIndexMatch], list[_LocalIndexMatch]]:
+    """Keep auto-exclusions only when the phrase is fully accounted for.
+
+    Nested generics inside a more specific exclusion phrase, such as 袜子 in
+    黑色袜子, must not silently become a whole-class negative tag.
+    """
+    demote_keys: set[tuple[str, str, int | None, int | None]] = set()
+    leftover: list[_LocalIndexMatch] = []
+
+    def consider(phrase: str, covering: list[_LocalIndexMatch]) -> None:
+        if not covering or not _phrase_uncovered_remainder(phrase, covering):
+            return
+        for match in covering:
+            key = _match_key(match)
+            if key in demote_keys:
+                continue
+            demote_keys.add(key)
+            leftover.append(match)
+
+    for item in inline_exclusions:
+        consider(item.text, _matches_for_inline_exclusion(item, matches))
+    for phrase in _split_exclusion_phrases(explicit_excluded_text):
+        consider(phrase, _matches_for_explicit_phrase(phrase, matches))
+    kept = [match for match in matches if _match_key(match) not in demote_keys]
+    return kept, leftover
+
+
+def _inline_exclusion_covered(
+    item: _LocalExclusionEvidence,
+    matches: list[_LocalIndexMatch],
+) -> bool:
+    return bool(_matches_for_inline_exclusion(item, matches))
+
+
+def _explicit_exclusion_phrase_covered(
+    phrase: str,
+    matches: list[_LocalIndexMatch],
+    excluded_tags: set[str],
+) -> bool:
+    if phrase.lower().replace(" ", "_") in excluded_tags:
+        return True
+    return bool(_matches_for_explicit_phrase(phrase, matches)) or any(
+        match.text and match.text in phrase for match in matches
+    )
+
+
+def _tag_tokens(tag: str) -> tuple[str, ...]:
+    return tuple(part for part in tag.split("_") if part)
+
+
+def _is_token_suffix(general: str, specific: str) -> bool:
+    if general == specific:
+        return False
+    general_tokens = _tag_tokens(general)
+    specific_tokens = _tag_tokens(specific)
+    width = len(general_tokens)
+    return bool(width) and len(specific_tokens) > width and specific_tokens[-width:] == general_tokens
+
+
+def _general_specific_tag_conflicts(positives: set[str], negatives: set[str]) -> list[tuple[str, str]]:
+    conflicts: list[tuple[str, str]] = []
+    for positive in sorted(positives):
+        for negative in sorted(negatives):
+            if _is_token_suffix(negative, positive) or _is_token_suffix(positive, negative):
+                conflicts.append((positive, negative))
+    return conflicts
 
 
 def _confirmed_translation_matches(matches: list[_LocalIndexMatch]) -> list[_LocalIndexMatch]:
@@ -2529,14 +3013,12 @@ def _ambiguous_source_groups(
     *,
     confirmed_tags: set[str],
 ) -> list[dict[str, object]]:
-    by_occurrence: dict[tuple[str, int | None, int | None], list[_LocalIndexMatch]] = {}
-    for match in matches:
-        if match.origin != "source":
-            continue
-        by_occurrence.setdefault((match.text, match.start, match.end), []).append(match)
+    occupiers = _primary_occupying_spans(matches)
     groups: list[dict[str, object]] = []
     seen_texts: set[str] = set()
-    for (text, _start, _end), candidates in by_occurrence.items():
+    for (text, _start, _end), candidates in _source_occurrence_map(matches).items():
+        if _nested_in_longer_occupier(candidates[0], occupiers):
+            continue
         unique = [
             item for item in _unique_canonical_matches(candidates)
             if item.canonical_tag not in confirmed_tags

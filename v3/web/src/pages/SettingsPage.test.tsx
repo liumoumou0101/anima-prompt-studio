@@ -24,11 +24,14 @@ beforeEach(() => {
 it("confirms a new host fingerprint and tests SSH plus ComfyUI entirely in V3", async () => {
   const ready = {...profile, host_fingerprint_confirmed: true};
   const settings = (item = profile) => ({items: [item], workflows: [], credential_store_available: true});
+  const ranking = {ranking: "tag_fit"};
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify(settings()), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify(ranking), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({fingerprint: "SHA256:new-host"}), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify(ready), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify(settings(ready)), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify(ranking), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({ok: true, devices: ["NVIDIA Test GPU"], queue_running: 1, queue_pending: 2, comfy_endpoint: "127.0.0.1:8188"}), {status: 200}));
 
   render(<SettingsPage remoteEnabled />);
@@ -42,5 +45,18 @@ it("confirms a new host fingerprint and tests SSH plus ComfyUI entirely in V3", 
   await waitFor(() => expect(screen.getByRole("button", {name: "测试完整连接"})).toBeEnabled());
   fireEvent.click(screen.getByRole("button", {name: "测试完整连接"}));
   expect(await screen.findByText(/连接正常 · NVIDIA Test GPU/)).toHaveTextContent("队列 3");
-  expect(fetchMock.mock.calls[4][0]).toBe("/api/v3/settings/remote-profiles/remote-new/test-connection");
+  expect(fetchMock.mock.calls[6][0]).toBe("/api/v3/settings/remote-profiles/remote-new/test-connection");
+});
+
+it("saves a parallel artist ranking without treating it as a quality upgrade", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [profile], workflows: [], credential_store_available: true}), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ranking: "tag_fit"}), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ranking: "balanced"}), {status: 200}));
+
+  render(<SettingsPage remoteEnabled />);
+  expect(await screen.findByText("画师推荐排序")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("radio", {name: /题材与投稿量均衡/}));
+  expect(await screen.findByText(/画师排序已保存/)).toBeInTheDocument();
+  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).ranking).toBe("balanced");
 });

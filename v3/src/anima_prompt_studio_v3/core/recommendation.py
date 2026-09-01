@@ -15,6 +15,7 @@ from ..domain import (
     PromptCandidate,
     TagSource,
 )
+from .composition import COMPOSITION_CHIP_TAGS
 from .literal import LiteralMapper, render_canonical_tag
 from .profiles import ModelProfile
 
@@ -78,6 +79,8 @@ class RecommendationLaneGenerator:
             if len(additions) >= self.policy.max_tag_additions:
                 break
             if result["name"] in existing_names or result["name"] in excluded:
+                continue
+            if result["name"] in COMPOSITION_CHIP_TAGS:
                 continue
             if result["cooc_count"] < self.policy.min_tag_cooc_count:
                 continue
