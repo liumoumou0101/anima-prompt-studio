@@ -650,6 +650,22 @@ body::before {
 .gallery-jobs article button { min-height: 30px; padding: 0 10px; border: 1px solid #424858; color: #c7cad2; background: #1a1e27; cursor: pointer; }
 .concept-summary { display: flex; justify-content: space-between; gap: 14px; margin-top: 12px; color: #697181; font-size: 10px; }
 .generate-button { min-height: 46px; margin-top: auto; border-color: #8e83d5; color: #14121b; background: var(--accent-bright); font-weight: 700; }
+.composer-main input { width: 100%; height: 42px; margin-bottom: 14px; padding: 0 12px; border: 1px solid #353b49; border-radius: 3px; outline: 0; color: #e9eaf0; background: #0d1016; }
+.composer-main input:focus { border-color: #756da7; box-shadow: 0 0 0 3px rgba(169,154,245,.08); }
+.composer-side .button { min-height: 42px; }
+.direct-preview { margin-top: 16px; padding: 20px 22px; border: 1px solid #403b5d; background: rgba(32, 29, 47, .72); }
+.direct-preview > header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.direct-preview > header strong { color: #e9e5ff; font-size: 14px; }
+.direct-preview > header span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.direct-chinese { margin: 14px 0 0; padding: 12px 14px; border: 1px solid #323847; color: #dfe2ec; background: #0f1219; font-size: 13px; line-height: 1.7; }
+.direct-chinese.is-negative { color: #e9aaa5; border-color: #68413f; }
+.direct-token-table { margin-top: 16px; }
+.direct-token-table strong { color: #aaa3d5; font: 600 9px/1 "Cascadia Code", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.direct-token-table ul { display: grid; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
+.direct-token-table li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 8px 10px; border: 1px solid #2d3240; background: #11141b; }
+.direct-token-table code { color: #c7bcff; font-size: 12px; overflow-wrap: anywhere; }
+.direct-token-table span { color: #e9eaf0; font-size: 13px; }
+.direct-token-table small { color: #858ca0; font-size: 10px; }
 .generate-button:hover:not(:disabled) { background: #d7d0ff; }
 .generate-button:disabled { opacity: .38; cursor: not-allowed; }
 .workbench-results { margin-top: 18px; }
@@ -850,6 +866,9 @@ body::before {
   .content-card { padding: 22px 18px; }
   .related-list { grid-template-columns: 1fr; }
   .workbench-composer { grid-template-columns: 1fr; }
+  .direct-token-table li { grid-template-columns: 1fr; }
+  .direct-preview > header { align-items: stretch; flex-direction: column; }
+  .direct-preview > header .button { min-height: 42px; }
   .composer-main, .composer-side { padding: 18px; }
   .composer-side { border-top: 1px solid var(--line); border-left: 0; }
   .concept-summary { align-items: flex-start; flex-direction: column; gap: 5px; }

@@ -93,6 +93,11 @@ class TranslationRequest(ApiModel):
     direction: Literal["zh_en", "en_zh"] = "zh_en"
 
 
+class DirectPromptPreviewRequest(ApiModel):
+    positive_prompt: str = Field(min_length=1, max_length=20_000)
+    negative_prompt: str = Field(default="", max_length=20_000)
+
+
 class LocalNaturalRelationInput(ApiModel):
     source_entity_id: str = Field(pattern=r"^entity_[A-Za-z0-9._-]+$", max_length=240)
     target_element_id: str = Field(pattern=r"^e_[A-Za-z0-9._-]+$", max_length=200)
@@ -345,6 +350,16 @@ class GenerationBridgePreviewRequest(ApiModel):
 
 
 class GenerationSubmitRequest(GenerationBridgePreviewRequest):
+    remote_profile_id: str = Field(min_length=1, max_length=200)
+    workflow_profile_id: str = Field(min_length=1, max_length=200)
+
+
+class DirectPromptSubmitRequest(ApiModel):
+    positive_prompt: str = Field(min_length=1, max_length=20_000)
+    negative_prompt: str = Field(default="", max_length=20_000)
+    model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)
+    project_name: str = Field(default="英文提示词直出", min_length=1, max_length=200)
+    settings: GenerationBridgeSettings = Field(default_factory=GenerationBridgeSettings)
     remote_profile_id: str = Field(min_length=1, max_length=200)
     workflow_profile_id: str = Field(min_length=1, max_length=200)
 

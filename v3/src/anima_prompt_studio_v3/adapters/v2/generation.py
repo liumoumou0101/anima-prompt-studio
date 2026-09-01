@@ -108,3 +108,52 @@ class CandidateToV2PromptJobAdapter:
             integration_metadata=bridge,
         )
         return V2PreparedGeneration(job=job, checkpoint_logical_name=model.checkpoint_logical_name)
+
+    def prepare_direct(
+        self,
+        *,
+        positive_prompt: str,
+        negative_prompt: str = "",
+        model_profile_id: str = "anima_aesthetic_v1",
+        project_name: str = "英文提示词直出",
+        settings: V2GenerationSettings | None = None,
+    ) -> V2PreparedGeneration:
+        """Pass pasted English prompts through unchanged. Never compiles tags."""
+
+        settings = settings or V2GenerationSettings()
+        model = self.config.get_model(model_profile_id)
+        preset = self.config.get_generation_preset(model.id, settings.preset_id)
+        positive = positive_prompt.strip()
+        if not positive:
+            raise ValueError("英文直出缺少正向提示词。")
+
+        generation_params = GenerationParams(
+            width=settings.width or model.default_width,
+            height=settings.height or model.default_height,
+            steps=preset.steps,
+            cfg=preset.cfg,
+            sampler=preset.sampler,
+            scheduler=preset.scheduler,
+            seed=settings.seed,
+            batch_size=settings.batch_size,
+        )
+        job = PromptJob(
+            project_name=project_name.strip() or "英文提示词直出",
+            original_zh="",
+            translated_en=positive,
+            model_profile_id=model.id,
+            generation_preset_id=settings.preset_id,
+            positive_prompt=positive,
+            negative_prompt=negative_prompt,
+            compiled_prompt_state=ItemState.LOCKED,
+            prompt_origin="user_edited",
+            generation_params=generation_params,
+            workflow_template_id=model.workflow_template_id,
+            notes="外部正向/反向提示词直出；未经过本地翻译和提示词编译器。",
+            integration_metadata={
+                "schema": BRIDGE_SCHEMA,
+                "origin": "direct_prompt",
+                "model_profile": model.id,
+            },
+        )
+        return V2PreparedGeneration(job=job, checkpoint_logical_name=model.checkpoint_logical_name)

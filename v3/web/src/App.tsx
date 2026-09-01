@@ -9,6 +9,7 @@ import {TagSearchPage} from "./pages/TagSearchPage";
 import {TagGroupPage} from "./pages/TagGroupPage";
 import {TagUngroupedPage} from "./pages/TagUngroupedPage";
 import {WorkbenchPage} from "./pages/WorkbenchPage";
+import {DirectPromptPage} from "./pages/DirectPromptPage";
 import {GenerationPage} from "./pages/GenerationPage";
 import {GalleryPage} from "./pages/GalleryPage";
 import {SettingsPage} from "./pages/SettingsPage";
@@ -31,6 +32,7 @@ export default function App() {
         <Route element={<AppShell bootstrap={bootstrap} />}>
           <Route index element={<Navigate to="/workbench" replace />} />
           <Route path="workbench" element={<WorkbenchPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} naturalLanguageEnabled={Boolean(bootstrap.features.local_translation)} localTranslationEnabled={Boolean(bootstrap.features.local_translation)} />} />
+          <Route path="direct" element={<DirectPromptPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="tags" element={<TagSearchPage />} />
           <Route path="tags/groups/:groupName" element={<TagGroupPage />} />
           <Route path="tags/ungrouped" element={<TagUngroupedPage />} />

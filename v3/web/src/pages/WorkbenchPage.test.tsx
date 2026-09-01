@@ -2,6 +2,7 @@ import {cleanup, fireEvent, render, screen, waitFor, within} from "@testing-libr
 import {MemoryRouter} from "react-router-dom";
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import type {PromptCandidate, SceneDraft, WorkbenchResponse} from "../lib/types";
+import {resetDirectImportForTests, storeDirectImport} from "../lib/directPrompt";
 import {WorkbenchPage} from "./WorkbenchPage";
 
 const candidate: PromptCandidate = {
@@ -25,6 +26,7 @@ const candidate: PromptCandidate = {
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.setItem("anima-v3-session", "session-token");
+  resetDirectImportForTests();
   vi.restoreAllMocks();
 });
 
@@ -38,6 +40,20 @@ it("imports selected supermarket tags into the structured draft", () => {
 
   expect(screen.getByLabelText("希望画面中出现")).toHaveValue("maid，twintails");
   expect(screen.getByText("2 个正向概念")).toBeInTheDocument();
+});
+
+it("imports a Chinese gloss from the English passthrough page", () => {
+  storeDirectImport({
+    positive_text: "女仆，全身，看向观众",
+    excluded_text: "低画质",
+    english_positive: "maid, full body, looking at viewer",
+    english_negative: "low quality",
+  });
+  render(<MemoryRouter initialEntries={["/workbench?from=direct"]}><WorkbenchPage /></MemoryRouter>);
+
+  expect(screen.getByLabelText("希望画面中出现")).toHaveValue("女仆，全身，看向观众");
+  expect(screen.getByLabelText("明确排除")).toHaveValue("低画质");
+  expect(screen.getByText(/已从英文直出导入中文对照/)).toBeInTheDocument();
 });
 
 it("submits structured required, locked and excluded concepts and renders candidates", async () => {

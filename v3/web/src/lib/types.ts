@@ -533,6 +533,29 @@ export interface TranslationResponse {
   model_ready: boolean;
 }
 
+export interface DirectPromptToken {
+  original: string;
+  zh: string;
+  matched: boolean;
+  canonical_tag: string | null;
+  render_name: string | null;
+  cn_name: string | null;
+  category_name: string | null;
+}
+
+export interface DirectPromptPreview {
+  positive_prompt: string;
+  negative_prompt: string;
+  positive_tokens: DirectPromptToken[];
+  negative_tokens: DirectPromptToken[];
+  chinese_positive: string;
+  chinese_negative: string;
+  matched_count: number;
+  unmatched_count: number;
+  translation_engine: string;
+  algorithm: string;
+}
+
 export interface GalleryAsset {
   id: string;
   path: string;

@@ -47,6 +47,7 @@ from ..core import (
     LiteralCandidateGenerator,
     LiteralGenerationError,
     ModelProfileRegistry,
+    inspect_direct_prompt,
 )
 from ..core.composition import (
     COMPOSITION_CHIP_TAGS,
@@ -91,6 +92,8 @@ from .models import (
     GalleryProcessRequest,
     GalleryStateRequest,
     ArtistComparisonRequest,
+    DirectPromptPreviewRequest,
+    DirectPromptSubmitRequest,
     GenerationRunActionRequest,
     GenerationSubmitRequest,
     IntentCandidateRequest,
@@ -799,6 +802,63 @@ def create_api_runtime(
             "local_only": True,
             "model_ready": bool(getattr(translator, "model_ready", False)),
         }
+
+    @app.post(f"{API_PREFIX}/direct-prompt/preview", dependencies=[Depends(require_session)])
+    def preview_direct_prompt(
+        payload: DirectPromptPreviewRequest,
+        database: Path = Depends(require_reference_db),
+    ) -> dict[str, object]:
+        """Match comma-separated English tags and gloss them in Chinese.
+
+        This does not compile or rewrite the original prompt.
+        """
+        translator = app.state.translation_service
+        with ReferenceDataStore(database) as store:
+            inspection = inspect_direct_prompt(
+                store,
+                positive_prompt=payload.positive_prompt,
+                negative_prompt=payload.negative_prompt,
+                translator=translator,
+            )
+        return inspection.model_dump(mode="json")
+
+    @app.post(
+        f"{API_PREFIX}/direct-prompt/runs",
+        dependencies=[Depends(require_session)],
+        status_code=202,
+    )
+    def submit_direct_prompt_run(
+        payload: DirectPromptSubmitRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> dict[str, object]:
+        queue = app.state.generation_queue
+        if queue is None:
+            raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
+        if generation_bridge is None or V2GenerationSettings is None:
+            raise ApiError(503, "v2_runtime_missing", "当前安装不包含 V2 兼容运行时。")
+        if not idempotency_key or not idempotency_key.strip():
+            raise ApiError(422, "invalid_request", "生成任务必须提供 Idempotency-Key。")
+        try:
+            prepared = generation_bridge.prepare_direct(
+                positive_prompt=payload.positive_prompt,
+                negative_prompt=payload.negative_prompt,
+                model_profile_id=payload.model_profile,
+                project_name=payload.project_name,
+                settings=V2GenerationSettings(**payload.settings.model_dump()),
+            )
+            run = queue.submit(
+                prepared,
+                remote_profile_id=payload.remote_profile_id,
+                workflow_profile_id=payload.workflow_profile_id,
+                idempotency_key=idempotency_key,
+            )
+        except GenerationQueueFullError as exc:
+            raise ApiError(429, "rate_limited", str(exc), retryable=True) from exc
+        except KeyError as exc:
+            raise ApiError(422, "remote_not_configured", str(exc)) from exc
+        except (ValueError, GenerationQueueError) as exc:
+            raise ApiError(422, "workflow_incompatible", str(exc)) from exc
+        return _generation_run_response(run, queue)
 
     @app.post(f"{API_PREFIX}/local-natural/candidates", dependencies=[Depends(require_session)])
     def generate_local_natural_candidates(

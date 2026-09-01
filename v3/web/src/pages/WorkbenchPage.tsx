@@ -2,6 +2,7 @@ import {useEffect, useMemo, useRef, useState} from "react";
 import type {FormEvent} from "react";
 import {useSearchParams} from "react-router-dom";
 import {apiRequest, ApiClientError} from "../lib/api";
+import {consumeDirectImport} from "../lib/directPrompt";
 import type {ArtistComparisonSubmission, ArtistRanking, ArtistSuggestion, CandidateLane, CandidateTag, CompositionChip, CompositionPreset, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, IntentParseResponse, PromptCandidate, SceneDraft, SceneDraftItem, SceneRelation, TagSuggestion, TranslationResponse, WorkbenchGenerationSettings, WorkbenchResponse, WorkspaceDraft, WorkspaceListResponse, WorkspaceRecord} from "../lib/types";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
 
@@ -41,9 +42,20 @@ const laneMeta: Record<CandidateLane, {index: string; label: string; detail: str
 export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = false, localTranslationEnabled = false}: {remoteEnabled?: boolean; naturalLanguageEnabled?: boolean; localTranslationEnabled?: boolean}) {
   const [searchParams] = useSearchParams();
   const importedTags = useMemo(() => Array.from(new Set(searchParams.getAll("tag").map((item) => item.trim()).filter(Boolean))), []);
+  const directImport = useMemo(consumeDirectImport, []);
   const recovered = useMemo(loadRecoveredWorkbench, []);
   const [draft, setDraft] = useState<WorkspaceDraft>(() => {
     const base = normalizeDraft(recovered?.draft, naturalLanguageEnabled);
+    if (directImport) {
+      return {
+        ...base,
+        input_mode: "concepts",
+        positive_text: directImport.positive_text,
+        excluded_text: directImport.excluded_text,
+        selected_tags: [],
+        suppressed_tags: [],
+      };
+    }
     if (!importedTags.length) return base;
     const currentTags = base.selected_tags || [];
     return {
@@ -55,14 +67,18 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   });
   const [past, setPast] = useState<WorkspaceDraft[]>([]);
   const [future, setFuture] = useState<WorkspaceDraft[]>([]);
-  const [result, setResult] = useState<WorkbenchResponse | null>(recovered?.result || null);
+  const [result, setResult] = useState<WorkbenchResponse | null>(directImport ? null : recovered?.result || null);
   const [error, setError] = useState<ApiClientError | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceIdentity | null>(recovered?.workspace || null);
   const [workspaceTitle, setWorkspaceTitle] = useState(recovered?.workspaceTitle || "未命名工作台");
   const [workspaceList, setWorkspaceList] = useState<WorkspaceRecord[] | null>(null);
-  const [workspaceNotice, setWorkspaceNotice] = useState<{kind: "success" | "error"; text: string} | null>(null);
+  const [workspaceNotice, setWorkspaceNotice] = useState<{kind: "success" | "error"; text: string} | null>(() => (
+    directImport
+      ? {kind: "success", text: `已从英文直出导入中文对照。原文仍是英文：${directImport.english_positive.slice(0, 80)}${directImport.english_positive.length > 80 ? "…" : ""}`}
+      : null
+  ));
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [generationTargets, setGenerationTargets] = useState<GenerationTarget[]>([]);
   const [selectedTarget, setSelectedTarget] = useState(() => {
