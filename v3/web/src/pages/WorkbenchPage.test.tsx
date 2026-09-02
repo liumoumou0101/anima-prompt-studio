@@ -568,6 +568,7 @@ it("previews V2 local translation without compiling it into candidates", async (
 
   render(<MemoryRouter><WorkbenchPage localTranslationEnabled /></MemoryRouter>);
   fireEvent.change(screen.getByLabelText("希望画面中出现"), {target: {value: "一个女孩，白发"}});
+  fireEvent.click(screen.getByRole("button", {name: "展开本地翻译"}));
   fireEvent.click(screen.getByRole("button", {name: "翻译当前输入"}));
 
   expect(await screen.findByText("one girl, white hair")).toBeInTheDocument();
@@ -607,6 +608,7 @@ it("shows the artist comparison pool without injecting artists into candidates",
   fireEvent.change(screen.getByLabelText("希望画面中出现"), {target: {value: "女仆装"}});
   fireEvent.click(screen.getByRole("button", {name: "生成候选"}));
 
+  fireEvent.click(await screen.findByRole("button", {name: "展开画师对照"}));
   expect(await screen.findByRole("region", {name: "画师对照"})).toBeInTheDocument();
   expect(screen.getByText("@artist a")).toBeInTheDocument();
   expect(screen.getByText(/匹配 .*maid · 1 项证据 · 共现 80/)).toBeInTheDocument();

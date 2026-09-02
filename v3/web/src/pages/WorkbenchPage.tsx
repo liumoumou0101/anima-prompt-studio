@@ -1,5 +1,6 @@
 import {useEffect, useMemo, useRef, useState} from "react";
-import type {FormEvent} from "react";
+import type {FormEvent, ReactNode} from "react";
+import {CaretDown, Images, ListChecks, MagicWand, NotePencil, Translate, UsersThree} from "@phosphor-icons/react";
 import {useSearchParams} from "react-router-dom";
 import {apiRequest, ApiClientError} from "../lib/api";
 import {consumeDirectImport} from "../lib/directPrompt";
@@ -24,6 +25,8 @@ const PREFERRED_REMOTE_KEY = "anima-v3-preferred-remote";
 const aspectLabels: Record<WorkbenchGenerationSettings["aspect"], string> = {portrait: "竖图 896×1152", landscape: "横图 1152×896", square: "方形 1024×1024", custom: "自定义尺寸", model_default: "模型默认"};
 type WorkspaceIdentity = Pick<WorkspaceRecord, "id" | "title" | "revision" | "created_at" | "updated_at">;
 type RecoveredWorkbench = {draft: WorkspaceDraft; result: WorkbenchResponse | null; workspaceTitle: string; workspace: WorkspaceIdentity | null};
+type WorkbenchSectionId = "workbench-editor" | "workbench-translation" | "workbench-understanding" | "workbench-candidates" | "workbench-artists";
+type WorkbenchNavItem = {id: WorkbenchSectionId; label: string; meta: string; badge?: number; icon: ReactNode};
 
 const laneMeta: Record<CandidateLane, {index: string; label: string; detail: string}> = {
   literal: {index: "L", label: "Literal", detail: "只保留可确定映射的输入"},
@@ -104,6 +107,14 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   const compositionTimer = useRef<number | null>(null);
   const compositionRequestId = useRef(0);
   const [compositionBusy, setCompositionBusy] = useState(false);
+  const [activeSection, setActiveSection] = useState<WorkbenchSectionId>("workbench-editor");
+  const [openSections, setOpenSections] = useState<Record<WorkbenchSectionId, boolean>>({
+    "workbench-editor": true,
+    "workbench-translation": false,
+    "workbench-understanding": true,
+    "workbench-candidates": true,
+    "workbench-artists": false,
+  });
 
   const positiveText = draft.positive_text;
   const excludedText = draft.excluded_text;
@@ -216,6 +227,36 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   useEffect(() => () => {
     if (compositionTimer.current) window.clearTimeout(compositionTimer.current);
   }, []);
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const sections = Array.from(document.querySelectorAll<HTMLElement>("[data-workbench-section]"));
+    if (!sections.length) return;
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((left, right) => Math.abs(left.boundingClientRect.top) - Math.abs(right.boundingClientRect.top));
+      const id = visible[0]?.target.id as WorkbenchSectionId | undefined;
+      if (id) setActiveSection(id);
+    }, {rootMargin: "-18% 0px -68% 0px", threshold: [0, 0.05, 0.2]});
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, [localTranslationEnabled, Boolean(parseInfo), Boolean(result), loading, Boolean(error)]);
+
+  function toggleWorkbenchSection(id: WorkbenchSectionId) {
+    setOpenSections((current) => ({...current, [id]: !current[id]}));
+  }
+
+  function jumpToWorkbenchSection(id: WorkbenchSectionId) {
+    setOpenSections((current) => ({...current, [id]: true}));
+    setActiveSection(id);
+    window.requestAnimationFrame(() => {
+      const target = document.getElementById(id);
+      if (!target?.scrollIntoView) return;
+      const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      target.scrollIntoView({behavior: reducedMotion ? "auto" : "smooth", block: "start"});
+    });
+  }
 
   function editDraft(patch: Partial<WorkspaceDraft>, options: {preserveResult?: boolean} = {}) {
     const next = {...draft, ...patch};
@@ -711,6 +752,7 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   async function useArtistComparisonBase(candidate: PromptCandidate) {
     if (!result) return;
     setArtistComparisonBase(candidate);
+    setOpenSections((current) => ({...current, "workbench-artists": true}));
     setSelectedArtists([]);
     artistComparisonIdempotency.current = null;
     setGenerationNotice(null);
@@ -874,6 +916,20 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
     }
   }
 
+  const visibleArtistSuggestions = artistComparisonBase ? artistSuggestions : (result?.artist_suggestions || []);
+  const reviewIssueCount = result?.scene_draft
+    ? result.scene_draft.unresolved.length + result.scene_draft.risk_notes.length + (result.scene_draft.ambiguous || []).length + (result.scene_draft.ambiguous_exclusions || []).length
+    : 0;
+  const workbenchNavItems: WorkbenchNavItem[] = [
+    {id: "workbench-editor", label: "输入与生成", meta: `${profiles.find((item) => item.id === profile)?.label || "模型"} · ${aspectLabels[generationSettings.aspect]}`, icon: <NotePencil aria-hidden="true" weight="regular" />},
+    ...(localTranslationEnabled ? [{id: "workbench-translation" as const, label: "本地翻译", meta: translation ? "已有英译结果" : "独立辅助工具", icon: <Translate aria-hidden="true" weight="regular" />}] : []),
+    ...(parseInfo ? [{id: "workbench-understanding" as const, label: "画面理解", meta: `${reviewedFacts.length} 项画面证据`, badge: reviewIssueCount || undefined, icon: <MagicWand aria-hidden="true" weight="regular" />}] : []),
+    ...(result ? [
+      {id: "workbench-candidates" as const, label: "候选提示词", meta: `${result.candidates.length} 条已验证候选`, badge: result.candidates.length, icon: <Images aria-hidden="true" weight="regular" />},
+      {id: "workbench-artists" as const, label: "画师对照", meta: visibleArtistSuggestions.length ? `Top ${visibleArtistSuggestions.length}` : "暂无可靠推荐", badge: visibleArtistSuggestions.length || undefined, icon: <UsersThree aria-hidden="true" weight="regular" />},
+    ] : []),
+  ];
+
   return (
     <section className="page workbench-page">
       <header className="page-header workbench-header">
@@ -895,144 +951,242 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
         {workspaceList.length ? workspaceList.map((item) => <button type="button" key={item.id} onClick={() => loadWorkspace(item)}><span>{item.title}</span><small>r{item.revision} · {new Date(item.updated_at).toLocaleString()}</small></button>) : <p>还没有保存的工作台。</p>}
       </div>}
 
-      <div className="input-mode-tabs" role="tablist" aria-label="输入方式">
-        <button type="button" role="tab" aria-selected={inputMode === "concepts"} onClick={() => switchInputMode("concepts")}>结构化概念</button>
-        <button type="button" role="tab" aria-selected={inputMode === "natural"} disabled={!naturalLanguageEnabled} title={naturalLanguageEnabled ? "本地翻译、词典与数据包索引；不调用 AI API" : "请先连接 V2 本地翻译资源"} onClick={() => switchInputMode("natural")}>自然语言描述</button>
-      </div>
-      <form className="workbench-composer" onSubmit={generate}>
-        <div className="composer-main">
-          {inputMode === "natural" ? <>
-            <label htmlFor="natural-description">描述你想生成的画面</label>
-            <textarea id="natural-description" value={naturalText} onChange={(event) => editDraft({natural_text: event.target.value})} placeholder="可以粘贴小说片段或完整画面描述。系统只抽取当前画面可见事实。" rows={7} />
-            <div className="concept-summary"><span>{naturalText.trim().length} 字</span><span>本地翻译与词典索引 · V3 负责映射、推荐与校验</span></div>
-          </> : <>
-            <label htmlFor="positive-concepts">希望画面中出现</label>
-            <textarea id="positive-concepts" value={positiveText} onChange={(event) => editDraft({positive_text: event.target.value})} placeholder="每行或用逗号分隔，例如：女仆、双马尾、咖啡厅\n在词前加 ! 可锁定" rows={5} />
-            <div className="concept-summary"><span>{positiveItems.length} 个正向概念</span><span>输入精确标签、中文名或有效别名</span></div>
-          </>}
-        </div>
-        <div className="composer-side">
-          {inputMode === "concepts" ? <>
-            <label htmlFor="excluded-concepts">明确排除</label>
-            <textarea id="excluded-concepts" value={excludedText} onChange={(event) => editDraft({excluded_text: event.target.value})} placeholder="例如：金发、文字、水印" rows={3} />
-          </> : <>
-            <label htmlFor="natural-exclusions">明确排除（可选）</label>
-            <textarea id="natural-exclusions" value={excludedText} onChange={(event) => editDraft({excluded_text: event.target.value})} placeholder="例如：文字、水印、金发" rows={3} />
-            <p className="natural-mode-hint">描述里的“不要文字和水印”也会识别并写入负向提示词。角色/作品和过宽的整类标签需要点选确认，并始终按排除优先。</p>
-          </>}
-          <label htmlFor="model-profile">模型配置</label>
-          <select id="model-profile" value={profile} onChange={(event) => changeModelProfile(event.target.value)}>
-            {profiles.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-          </select>
-          <div className="generation-spec">
-            <strong>生成规格</strong>
-            <label htmlFor="generation-aspect">画幅</label>
-            <select id="generation-aspect" value={generationSettings.aspect} onChange={(event) => updateGenerationSettings(applyAspect(generationSettings, event.target.value as WorkbenchGenerationSettings["aspect"]))}>
-              <option value="portrait">{aspectLabels.portrait}</option>
-              <option value="landscape">{aspectLabels.landscape}</option>
-              <option value="square">{aspectLabels.square}</option>
-              <option value="custom">{aspectLabels.custom}</option>
-              <option value="model_default">{aspectLabels.model_default}</option>
-            </select>
-            <label htmlFor="generation-preset">生成配方</label>
-            <select id="generation-preset" value={activeGenerationRecipe?.id || "custom"} onChange={(event) => selectGenerationRecipe(event.target.value)} disabled={!activeTarget?.generation_recipes?.length}>
-              {generationSettings.preset_id === "custom" && <option value="custom">自定义参数</option>}
-              {(activeTarget?.generation_recipes || []).map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.display_name}{recipe.evidence === "experimental" ? " · 实验" : ""}</option>)}
-            </select>
-            <small>{activeGenerationRecipe?.notes || (generationSettings.preset_id === "custom" ? "参数已偏离配方，提交时仍会按当前工作流能力校验。" : "选择工作流后加载对应的 V3 生成配方。")}</small>
-            {remoteEnabled && <>
-              <label htmlFor="generation-remote">云主机连接</label>
-              <select id="generation-remote" aria-label="云主机连接" value={selectedRemoteId || ""} onChange={(event) => selectRemoteConnection(event.target.value)} disabled={!remoteConnections.length}>
-                {remoteConnections.length ? remoteConnections.map((target) => <option key={target.remote_profile_id} value={target.remote_profile_id}>{remoteConnectionLabel(target)}{duplicateConnectionLabels.has(target.remote_profile_id) ? ` · 连接 ${target.remote_profile_id.slice(0, 8)}` : ""}{target.host_fingerprint_ready ? "" : " · 待确认指纹"}</option>) : <option value="">无可用连接</option>}
-              </select>
-              <label htmlFor="generation-workflow">工作流</label>
-              <select id="generation-workflow" aria-label="远程工作流" value={selectedWorkflowId || ""} onChange={(event) => { const target = connectionWorkflows.find((item) => item.workflow_profile_id === event.target.value); if (target) chooseGenerationTarget(target); }} disabled={!connectionWorkflows.length}>
-                {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}</option>) : <option value="">当前模型无兼容工作流</option>}
-              </select>
+      <label className="workbench-mobile-jump">
+        <ListChecks aria-hidden="true" weight="regular" />
+        <span>跳转到</span>
+        <select aria-label="跳转到工作台区域" value={activeSection} onChange={(event) => jumpToWorkbenchSection(event.target.value as WorkbenchSectionId)}>
+          {workbenchNavItems.map((item) => <option key={item.id} value={item.id}>{item.label}{item.badge ? ` · ${item.badge}` : ""}</option>)}
+        </select>
+      </label>
+
+      <div className="workbench-layout">
+        <WorkbenchOutline items={workbenchNavItems} activeSection={activeSection} onJump={jumpToWorkbenchSection} />
+        <div className="workbench-flow">
+          <WorkbenchDisclosure id="workbench-editor" title="输入与生成" summary="描述画面、选择工作流并确认生成参数" open={openSections["workbench-editor"]} onToggle={() => toggleWorkbenchSection("workbench-editor")}>
+            <div className="input-mode-tabs" role="tablist" aria-label="输入方式">
+              <button type="button" role="tab" aria-selected={inputMode === "concepts"} onClick={() => switchInputMode("concepts")}>结构化概念</button>
+              <button type="button" role="tab" aria-selected={inputMode === "natural"} disabled={!naturalLanguageEnabled} title={naturalLanguageEnabled ? "本地翻译、词典与数据包索引；不调用 AI API" : "请先连接 V2 本地翻译资源"} onClick={() => switchInputMode("natural")}>自然语言描述</button>
+            </div>
+            <form className="workbench-composer" onSubmit={generate}>
+        <div className="composer-input-grid">
+          <div className="composer-main">
+            {inputMode === "natural" ? <>
+              <label htmlFor="natural-description">描述你想生成的画面</label>
+              <textarea id="natural-description" value={naturalText} onChange={(event) => editDraft({natural_text: event.target.value})} placeholder="可以粘贴小说片段或完整画面描述。系统只抽取当前画面可见事实。" rows={7} />
+              <div className="concept-summary"><span>{naturalText.trim().length} 字</span><span>本地翻译与词典索引 · V3 负责映射、推荐与校验</span></div>
+            </> : <>
+              <label htmlFor="positive-concepts">希望画面中出现</label>
+              <textarea id="positive-concepts" value={positiveText} onChange={(event) => editDraft({positive_text: event.target.value})} placeholder="每行或用逗号分隔，例如：女仆、双马尾、咖啡厅\n在词前加 ! 可锁定" rows={5} />
+              <div className="concept-summary"><span>{positiveItems.length} 个正向概念</span><span>输入精确标签、中文名或有效别名</span></div>
             </>}
-            <details className="generation-advanced" open>
-              <summary>高级参数</summary>
-              <div className="generation-advanced-grid">
+          </div>
+          <aside className="composer-exclusions">
+            {inputMode === "concepts" ? <>
+              <label htmlFor="excluded-concepts">明确排除</label>
+              <textarea id="excluded-concepts" value={excludedText} onChange={(event) => editDraft({excluded_text: event.target.value})} placeholder="例如：金发、文字、水印" rows={3} />
+              <p className="natural-mode-hint">这些内容只进入负向提示词，并始终优先于正向概念。</p>
+            </> : <>
+              <label htmlFor="natural-exclusions">明确排除（可选）</label>
+              <textarea id="natural-exclusions" value={excludedText} onChange={(event) => editDraft({excluded_text: event.target.value})} placeholder="例如：文字、水印、金发" rows={3} />
+              <p className="natural-mode-hint">描述里的“不要文字和水印”也会自动识别。角色、作品和过宽的整类标签仍需点选确认。</p>
+            </>}
+          </aside>
+        </div>
+
+        <section className="generation-panel" aria-labelledby="generation-panel-title">
+          <header className="generation-panel-header">
+            <div><span>Generation</span><strong id="generation-panel-title">生成设置</strong></div>
+            <p>先选工作流与配方，再按需要微调高级参数</p>
+          </header>
+          <div className="generation-core-grid">
+            <div className="generation-field">
+              <label htmlFor="model-profile">模型配置</label>
+              <select id="model-profile" value={profile} onChange={(event) => changeModelProfile(event.target.value)}>
+                {profiles.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+            </div>
+            <div className="generation-field">
+              <label htmlFor="generation-aspect">画幅</label>
+              <select id="generation-aspect" value={generationSettings.aspect} onChange={(event) => updateGenerationSettings(applyAspect(generationSettings, event.target.value as WorkbenchGenerationSettings["aspect"]))}>
+                <option value="portrait">{aspectLabels.portrait}</option>
+                <option value="landscape">{aspectLabels.landscape}</option>
+                <option value="square">{aspectLabels.square}</option>
+                <option value="custom">{aspectLabels.custom}</option>
+                <option value="model_default">{aspectLabels.model_default}</option>
+              </select>
+            </div>
+            <div className="generation-field">
+              <label htmlFor="generation-preset">生成配方</label>
+              <select id="generation-preset" value={activeGenerationRecipe?.id || "custom"} onChange={(event) => selectGenerationRecipe(event.target.value)} disabled={!activeTarget?.generation_recipes?.length}>
+                {generationSettings.preset_id === "custom" && <option value="custom">自定义参数</option>}
+                {(activeTarget?.generation_recipes || []).map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.display_name}{recipe.evidence === "experimental" ? " · 实验" : ""}</option>)}
+              </select>
+            </div>
+            {remoteEnabled && <>
+              <div className="generation-field generation-field--connection">
+                <label htmlFor="generation-remote">云主机连接</label>
+                <select id="generation-remote" aria-label="云主机连接" value={selectedRemoteId || ""} onChange={(event) => selectRemoteConnection(event.target.value)} disabled={!remoteConnections.length}>
+                  {remoteConnections.length ? remoteConnections.map((target) => <option key={target.remote_profile_id} value={target.remote_profile_id}>{remoteConnectionLabel(target)}{duplicateConnectionLabels.has(target.remote_profile_id) ? ` · 连接 ${target.remote_profile_id.slice(0, 8)}` : ""}{target.host_fingerprint_ready ? "" : " · 待确认指纹"}</option>) : <option value="">无可用连接</option>}
+                </select>
+              </div>
+              <div className="generation-field generation-field--workflow">
+                <label htmlFor="generation-workflow">工作流</label>
+                <select id="generation-workflow" aria-label="远程工作流" value={selectedWorkflowId || ""} onChange={(event) => { const target = connectionWorkflows.find((item) => item.workflow_profile_id === event.target.value); if (target) chooseGenerationTarget(target); }} disabled={!connectionWorkflows.length}>
+                  {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}</option>) : <option value="">当前模型无兼容工作流</option>}
+                </select>
+              </div>
+            </>}
+          </div>
+          <div className="generation-recipe-note">
+            <span>配方说明</span>
+            <p>{activeGenerationRecipe?.notes || (generationSettings.preset_id === "custom" ? "参数已偏离配方，提交时仍会按当前工作流能力校验。" : "选择工作流后加载对应的 V3 生成配方。")}</p>
+          </div>
+          <details className="generation-advanced" open>
+            <summary><span>高级参数</span><small>尺寸、Steps、CFG、采样器与随机种子</small></summary>
+            <div className="generation-advanced-grid">
+              <div className="generation-field">
                 <label htmlFor="generation-width">宽度</label>
                 <input id="generation-width" type="number" min="64" max="8192" step="64" value={generationSettings.width} disabled={generationSettings.aspect === "model_default"} onChange={(event) => updateGenerationSettings({aspect: "custom", width: Math.max(64, Number(event.target.value) || 64)})} />
+              </div>
+              <div className="generation-field">
                 <label htmlFor="generation-height">高度</label>
                 <input id="generation-height" type="number" min="64" max="8192" step="64" value={generationSettings.height} disabled={generationSettings.aspect === "model_default"} onChange={(event) => updateGenerationSettings({aspect: "custom", height: Math.max(64, Number(event.target.value) || 64)})} />
+              </div>
+              <div className="generation-field">
                 <label htmlFor="generation-steps">采样步数 Steps</label>
                 <input id="generation-steps" type="number" min={generationCapabilities?.steps.minimum ?? 1} max={generationCapabilities?.steps.maximum ?? 200} value={generationSettings.steps} disabled={generationCapabilities?.steps.mode === "fixed"} title={generationCapabilities?.steps.reason} onChange={(event) => updateGenerationSettings(markGenerationCustom(generationSettings, {steps: Math.max(1, Number(event.target.value) || 1)}))} />
+              </div>
+              <div className="generation-field">
                 <label htmlFor="generation-cfg">CFG</label>
                 <input id="generation-cfg" type="number" min={generationCapabilities?.cfg.minimum ?? 0} max={generationCapabilities?.cfg.maximum ?? 30} step="0.1" value={generationSettings.cfg} disabled={generationCapabilities?.cfg.mode === "fixed"} title={generationCapabilities?.cfg.reason} onChange={(event) => updateGenerationSettings(markGenerationCustom(generationSettings, {cfg: Math.max(0, Number(event.target.value) || 0)}))} />
+              </div>
+              <div className="generation-field generation-field--wide">
                 <label htmlFor="generation-sampler">采样器 Sampler</label>
                 <select id="generation-sampler" value={generationSettings.sampler} disabled={generationCapabilities?.sampler.mode === "fixed"} title={generationCapabilities?.sampler.reason} onChange={(event) => updateGenerationSettings(markGenerationCustom(generationSettings, {sampler: event.target.value}))}>
                   {Array.from(new Set([generationSettings.sampler, ...(generationCapabilities?.sampler.options || [])])).map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
+              </div>
+              <div className="generation-field generation-field--wide">
                 <label htmlFor="generation-scheduler">调度器 Scheduler</label>
                 <select id="generation-scheduler" value={generationSettings.scheduler} disabled={generationCapabilities?.scheduler.mode === "fixed"} title={generationCapabilities?.scheduler.reason} onChange={(event) => updateGenerationSettings(markGenerationCustom(generationSettings, {scheduler: event.target.value}))}>
                   {Array.from(new Set([generationSettings.scheduler, ...(generationCapabilities?.scheduler.options || [])])).map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               </div>
-              {activeTarget?.stages && activeTarget.stages.length > 1 && <div className="generation-stage-summary">{activeTarget.stages.map((stage) => <small key={stage.id}><strong>{stage.display_name}</strong>：{stage.steps} Steps · CFG {stage.cfg} · {stage.sampler}/{stage.scheduler}{stage.denoise !== undefined ? ` · Denoise ${stage.denoise}` : ""}{stage.upscale_factor !== undefined ? ` · ${stage.upscale_factor}×` : ""}</small>)}</div>}
-            </details>
-            <label htmlFor="generation-seed">Seed</label>
-            <input id="generation-seed" type="number" min="-1" max="2147483647" value={generationSettings.seed} onChange={(event) => updateGenerationSettings({seed: Number(event.target.value)})} />
-            <small>填 -1 表示随机 Seed；画师对照仍会使用下方固定 Seed。</small>
-            <label htmlFor="generation-batch">批量</label>
-            <input id="generation-batch" type="number" min="1" max="8" value={generationSettings.batch_size} onChange={(event) => updateGenerationSettings({batch_size: Math.max(1, Number(event.target.value) || 1)})} />
-          </div>
+              <div className="generation-field generation-field--seed">
+                <label htmlFor="generation-seed">Seed</label>
+                <input id="generation-seed" type="number" min="-1" max="2147483647" value={generationSettings.seed} onChange={(event) => updateGenerationSettings({seed: Number(event.target.value)})} />
+                <small>-1 表示每次随机</small>
+              </div>
+              <div className="generation-field">
+                <label htmlFor="generation-batch">批量</label>
+                <input id="generation-batch" type="number" min="1" max="8" value={generationSettings.batch_size} onChange={(event) => updateGenerationSettings({batch_size: Math.max(1, Number(event.target.value) || 1)})} />
+              </div>
+            </div>
+            {activeTarget?.stages && activeTarget.stages.length > 1 && <div className="generation-stage-summary">{activeTarget.stages.map((stage) => <small key={stage.id}><strong>{stage.display_name}</strong>：{stage.steps} Steps · CFG {stage.cfg} · {stage.sampler}/{stage.scheduler}{stage.denoise !== undefined ? ` · Denoise ${stage.denoise}` : ""}{stage.upscale_factor !== undefined ? ` · ${stage.upscale_factor}×` : ""}</small>)}</div>}
+          </details>
+        </section>
+
+        <footer className="composer-actions">
           {suppressedTags.length > 0 && <div className="suppressed-summary"><span>当前工作台已移除 {suppressedTags.length} 个标签</span><button type="button" disabled={loading} onClick={() => void clearSuppressedTags()}>恢复全部</button></div>}
           <button className="button generate-button" type="submit" disabled={(inputMode === "natural" ? !naturalText.trim() : !positiveItems.length) || loading}>{loading ? (inputMode === "natural" ? "正在本地编译并验证…" : "正在验证…") : (inputMode === "natural" ? "编译并生成候选" : "生成候选")}</button>
+        </footer>
+            </form>
+          </WorkbenchDisclosure>
+
+          {localTranslationEnabled && <WorkbenchDisclosure id="workbench-translation" title="本地翻译" summary={translation ? `${translation.engine} · 已生成英译结果` : "独立辅助工具，不参与 V3 候选编译"} open={openSections["workbench-translation"]} onToggle={() => toggleWorkbenchSection("workbench-translation")}>
+            <section className="translation-preview" aria-label="本地翻译预览">
+              <div><strong>本地英译预览</strong><span>独立工具，不参与 V3 候选编译</span></div>
+              <button type="button" onClick={() => void previewTranslation()} disabled={!translationSource.trim() || translationBusy}>{translationBusy ? "正在本地翻译…" : "翻译当前输入"}</button>
+              {translation && <div className="translation-result"><p>{translation.translated_text}</p><small>{translation.engine} · {translation.model_ready ? "本地 Marian 模型" : "内置离线词典"}</small></div>}
+            </section>
+          </WorkbenchDisclosure>}
+
+          {parseInfo && <WorkbenchDisclosure id="workbench-understanding" title="画面理解" summary={`${reviewedFacts.length} 项画面证据已整理${reviewIssueCount ? ` · ${reviewIssueCount} 项待检查` : ""}`} badge={reviewIssueCount || undefined} tone={reviewIssueCount ? "warning" : "default"} open={openSections["workbench-understanding"]} onToggle={() => toggleWorkbenchSection("workbench-understanding")}>
+            <section className="intent-review" aria-label="自然语言抽取结果">
+              <div><strong>已整理 {reviewedFacts.length} 项画面证据</strong><span>{parseInfo.parser.name} · {parseInfo.extraction.summary_zh}</span></div>
+              <div className="intent-facts">{reviewedFacts.map(({element, count}) => <span key={`${element.state}:${element.original_text}`} className={element.state === "excluded" ? "is-excluded" : ""}>{element.original_text}<small>{element.state === "excluded" ? `排除${count > 1 ? ` · ${count} 个映射` : ""}` : factTypeLabel(element.type)}</small></span>)}</div>
+              {parseInfo.intent.scene_plan_en && <details><summary>查看 Hybrid 英文画面计划</summary><p>{parseInfo.intent.scene_plan_en}</p>{result?.scene_draft?.back_translation?.text && <p className="scene-plan-zh">{result.scene_draft.back_translation.text}</p>}</details>}
+              {result?.scene_draft ? <SceneDraftReview draft={{...result.scene_draft, composition_palette: displayedCompositionPalette()}} relatedSuggestions={result.tag_suggestions || []} selectedTags={selectedTags} busy={loading} compositionBusy={compositionBusy} onToggle={toggleTagSuggestion} onToggleExclusion={toggleExclusionSuggestion} onToggleComposition={toggleCompositionChip} onApplyPreset={applyCompositionPreset} onApplyTranslation={applySceneDraftTranslation} onRemoveItem={removeConfirmedItem} onRestoreTag={restoreCanonicalTag} onAssignFactOwner={inputMode === "natural" ? applyFactOwner : undefined} onToggleRelation={inputMode === "natural" ? applySceneRelation : undefined} chineseLabels={chineseLabels} /> : <p className="intent-review-warning">本地翻译只会把本地索引中的精确匹配加入标签；未命中的画面信息会保留在 Hybrid 英文提示词中，提交前可继续检查候选说明。</p>}
+            </section>
+          </WorkbenchDisclosure>}
+
+          <div className="workbench-results" aria-live="polite">
+            {loading ? <LoadingState label="正在映射标签、计算推荐并验证候选…" /> : error ? (
+              <ErrorState message={error.message} requestId={error.requestId} />
+            ) : result ? (
+              <>
+                <WorkbenchDisclosure id="workbench-candidates" title="候选提示词" summary={`${result.candidates.length} 条候选 · 结构检查通过`} badge={result.candidates.length} open={openSections["workbench-candidates"]} onToggle={() => toggleWorkbenchSection("workbench-candidates")}>
+                  <div className={`validation-strip${(result.scene_draft?.unresolved.length || result.scene_draft?.risk_notes.some((note) => note.includes("已移除的标签仍出现"))) ? " is-warning" : ""}`}><span className="status-dot is-ready" /><strong>结构检查通过</strong><span>语义仍需人工确认 · {result.candidates.length} 条候选 · {result.data_pack_id}</span></div>
+                  {remoteEnabled && <div className="generation-submit-bar">
+                    <div><strong>远程生图</strong><span>{generationSummary(generationSettings)}{activeTarget ? ` · ${activeTarget.workflow_display_name}` : ""}{activeTarget?.host_fingerprint_ready ? " · 当前连接已确认指纹" : activeTarget ? " · 当前连接尚未确认指纹，请先前往设置" : " · 当前模型没有兼容工作流"}</span></div>
+                    {activeTarget?.auth_type === "private_key" && <label className="passphrase-input"><span>私钥口令（可选，仅本次运行内存）</span><input type="password" autoComplete="current-password" value={privateKeyPassphrase} onChange={(event) => setPrivateKeyPassphrase(event.target.value)} placeholder={activeTarget.private_key_passphrase_configured ? "已在本次运行中设置" : "私钥未加密可留空"} /></label>}
+                  </div>}
+                  {generationNotice && <div className="workspace-notice workspace-notice--error" role="alert">{generationNotice}</div>}
+                  <div className="candidate-grid">
+                    {result.candidates.map((candidate) => (
+                      <CandidateCard key={candidate.id} candidate={candidate} copied={copied} onCopy={copyPrompt} onGenerate={remoteEnabled ? submitGeneration : undefined} generationBusy={generationBusy === candidate.id} generationDisabled={!activeTarget?.host_fingerprint_ready || generationBusy !== null} onRemoveTag={removeCandidateTag} onUseArtistComparisonBase={useArtistComparisonBase} isArtistComparisonBase={artistComparisonBase?.id === candidate.id} chineseLabels={chineseLabels} proseZh={result.scene_draft?.back_translation?.text || ""} negativeZh={result.scene_draft?.back_translation?.negative_text || ""} />
+                    ))}
+                  </div>
+                </WorkbenchDisclosure>
+                <WorkbenchDisclosure id="workbench-artists" title="画师对照" summary={visibleArtistSuggestions.length ? `${visibleArtistSuggestions.length} 位推荐 · 可锁定候选做同 Seed 对照` : "暂无可靠推荐"} badge={visibleArtistSuggestions.length || undefined} open={openSections["workbench-artists"]} onToggle={() => toggleWorkbenchSection("workbench-artists")}>
+                  <ArtistComparisonPanel
+                    items={visibleArtistSuggestions}
+                    ranking={result.artist_ranking}
+                    base={artistComparisonBase}
+                    selectedArtists={selectedArtists}
+                    seed={artistComparisonSeed}
+                    remoteEnabled={remoteEnabled}
+                    canSubmit={Boolean(activeTarget?.host_fingerprint_ready)}
+                    busy={artistComparisonBusy}
+                    onToggle={toggleArtistSuggestion}
+                    onSelectVisible={() => setSelectedArtists(visibleArtistSuggestions.slice(0, 20).map((item) => item.name))}
+                    onClear={() => setSelectedArtists([])}
+                    onSeedChange={setArtistComparisonSeed}
+                    onSubmit={() => void submitArtistComparison()}
+                    chineseLabels={chineseLabels}
+                  />
+                </WorkbenchDisclosure>
+              </>
+            ) : (
+              <EmptyState title="从忠实基准开始" detail="输入画面概念后，工作台会并排生成可追踪的候选。自动推荐不会静默加入角色或版权标签。" />
+            )}
+          </div>
         </div>
-      </form>
-
-      {localTranslationEnabled && <section className="translation-preview" aria-label="本地翻译预览">
-        <div><strong>本地英译预览</strong><span>独立工具，不参与 V3 候选编译</span></div>
-        <button type="button" onClick={() => void previewTranslation()} disabled={!translationSource.trim() || translationBusy}>{translationBusy ? "正在本地翻译…" : "翻译当前输入"}</button>
-        {translation && <div className="translation-result"><p>{translation.translated_text}</p><small>{translation.engine} · {translation.model_ready ? "本地 Marian 模型" : "内置离线词典"}</small></div>}
-      </section>}
-
-      {parseInfo && <section className="intent-review" aria-label="自然语言抽取结果">
-        <div><strong>已整理 {reviewedFacts.length} 项画面证据</strong><span>{parseInfo.parser.name} · {parseInfo.extraction.summary_zh}</span></div>
-        <div className="intent-facts">{reviewedFacts.map(({element, count}) => <span key={`${element.state}:${element.original_text}`} className={element.state === "excluded" ? "is-excluded" : ""}>{element.original_text}<small>{element.state === "excluded" ? `排除${count > 1 ? ` · ${count} 个映射` : ""}` : factTypeLabel(element.type)}</small></span>)}</div>
-        {parseInfo.intent.scene_plan_en && <details><summary>查看 Hybrid 英文画面计划</summary><p>{parseInfo.intent.scene_plan_en}</p>{result?.scene_draft?.back_translation?.text && <p className="scene-plan-zh">{result.scene_draft.back_translation.text}</p>}</details>}
-        {result?.scene_draft ? <SceneDraftReview draft={{...result.scene_draft, composition_palette: displayedCompositionPalette()}} relatedSuggestions={result.tag_suggestions || []} selectedTags={selectedTags} busy={loading} compositionBusy={compositionBusy} onToggle={toggleTagSuggestion} onToggleExclusion={toggleExclusionSuggestion} onToggleComposition={toggleCompositionChip} onApplyPreset={applyCompositionPreset} onApplyTranslation={applySceneDraftTranslation} onRemoveItem={removeConfirmedItem} onRestoreTag={restoreCanonicalTag} onAssignFactOwner={inputMode === "natural" ? applyFactOwner : undefined} onToggleRelation={inputMode === "natural" ? applySceneRelation : undefined} chineseLabels={chineseLabels} /> : <p className="intent-review-warning">本地翻译只会把本地索引中的精确匹配加入标签；未命中的画面信息会保留在 Hybrid 英文提示词中，提交前可继续检查候选说明。</p>}
-      </section>}
-
-      <div className="workbench-results" aria-live="polite">
-        {loading ? <LoadingState label="正在映射标签、计算推荐并验证候选…" /> : error ? (
-          <ErrorState message={error.message} requestId={error.requestId} />
-        ) : result ? (
-          <>
-            <div className={`validation-strip${(result.scene_draft?.unresolved.length || result.scene_draft?.risk_notes.some((note) => note.includes("已移除的标签仍出现"))) ? " is-warning" : ""}`}><span className="status-dot is-ready" /><strong>结构检查通过</strong><span>语义仍需人工确认 · {result.candidates.length} 条候选 · {result.data_pack_id}</span></div>
-            {remoteEnabled && <div className="generation-submit-bar">
-              <div><strong>远程生图</strong><span>{generationSummary(generationSettings)}{activeTarget ? ` · ${activeTarget.workflow_display_name}` : ""}{activeTarget?.host_fingerprint_ready ? " · 当前连接已确认指纹" : activeTarget ? " · 当前连接尚未确认指纹，请先前往设置" : " · 当前模型没有兼容工作流"}</span></div>
-              {activeTarget?.auth_type === "private_key" && <label className="passphrase-input"><span>私钥口令（可选，仅本次运行内存）</span><input type="password" autoComplete="current-password" value={privateKeyPassphrase} onChange={(event) => setPrivateKeyPassphrase(event.target.value)} placeholder={activeTarget.private_key_passphrase_configured ? "已在本次运行中设置" : "私钥未加密可留空"} /></label>}
-            </div>}
-            {generationNotice && <div className="workspace-notice workspace-notice--error" role="alert">{generationNotice}</div>}
-            <div className="candidate-grid">
-              {result.candidates.map((candidate) => (
-                <CandidateCard key={candidate.id} candidate={candidate} copied={copied} onCopy={copyPrompt} onGenerate={remoteEnabled ? submitGeneration : undefined} generationBusy={generationBusy === candidate.id} generationDisabled={!activeTarget?.host_fingerprint_ready || generationBusy !== null} onRemoveTag={removeCandidateTag} onUseArtistComparisonBase={useArtistComparisonBase} isArtistComparisonBase={artistComparisonBase?.id === candidate.id} chineseLabels={chineseLabels} proseZh={result.scene_draft?.back_translation?.text || ""} negativeZh={result.scene_draft?.back_translation?.negative_text || ""} />
-              ))}
-            </div>
-            <ArtistComparisonPanel
-              items={artistComparisonBase ? artistSuggestions : (result.artist_suggestions || [])}
-              ranking={result.artist_ranking}
-              base={artistComparisonBase}
-              selectedArtists={selectedArtists}
-              seed={artistComparisonSeed}
-              remoteEnabled={remoteEnabled}
-              canSubmit={Boolean(activeTarget?.host_fingerprint_ready)}
-              busy={artistComparisonBusy}
-              onToggle={toggleArtistSuggestion}
-              onSelectVisible={() => setSelectedArtists((artistComparisonBase ? artistSuggestions : result.artist_suggestions || []).slice(0, 20).map((item) => item.name))}
-              onClear={() => setSelectedArtists([])}
-              onSeedChange={setArtistComparisonSeed}
-              onSubmit={() => void submitArtistComparison()}
-              chineseLabels={chineseLabels}
-            />
-          </>
-        ) : (
-          <EmptyState title="从忠实基准开始" detail="输入画面概念后，工作台会并排生成可追踪的候选。自动推荐不会静默加入角色或版权标签。" />
-        )}
       </div>
+    </section>
+  );
+}
+
+function WorkbenchOutline({items, activeSection, onJump}: {items: WorkbenchNavItem[]; activeSection: WorkbenchSectionId; onJump: (id: WorkbenchSectionId) => void}) {
+  return (
+    <aside className="workbench-outline" aria-label="工作台页内导航">
+      <header><ListChecks aria-hidden="true" weight="regular" /><div><strong>本页功能</strong><span>快速定位与收起区域</span></div></header>
+      <nav>
+        {items.map((item) => (
+          <button type="button" key={item.id} className={activeSection === item.id ? "is-active" : ""} aria-current={activeSection === item.id ? "location" : undefined} onClick={() => onJump(item.id)}>
+            <span className="workbench-outline-icon">{item.icon}</span>
+            <span><strong>{item.label}</strong><small>{item.meta}</small></span>
+            {item.badge !== undefined && <b>{item.badge}</b>}
+          </button>
+        ))}
+      </nav>
+      <p>点击区域标题可单独收起，输入和结果不会丢失。</p>
+    </aside>
+  );
+}
+
+function WorkbenchDisclosure({id, title, summary, badge, tone = "default", open, onToggle, children}: {id: WorkbenchSectionId; title: string; summary: string; badge?: number; tone?: "default" | "warning"; open: boolean; onToggle: () => void; children: ReactNode}) {
+  const contentId = `${id}-content`;
+  return (
+    <section id={id} data-workbench-section className={`workbench-section${open ? " is-open" : " is-collapsed"}${tone === "warning" ? " is-warning" : ""}`}>
+      <header className="workbench-section-header">
+        <button type="button" aria-label={`${open ? "收起" : "展开"}${title}`} aria-expanded={open} aria-controls={contentId} onClick={onToggle}>
+          <span><strong>{title}</strong><small>{summary}</small></span>
+          {badge !== undefined && <b>{badge}</b>}
+          <CaretDown aria-hidden="true" weight="bold" />
+        </button>
+      </header>
+      <div id={contentId} className="workbench-section-body" hidden={!open}>{children}</div>
     </section>
   );
 }
