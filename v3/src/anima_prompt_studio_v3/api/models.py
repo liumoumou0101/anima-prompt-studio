@@ -141,10 +141,18 @@ class IntentCandidateRequest(ApiModel):
 
 
 class WorkbenchGenerationSettings(ApiModel):
-    preset_id: Literal["fast", "balanced", "quality"] = "balanced"
-    aspect: Literal["portrait", "landscape", "square", "model_default"] = "portrait"
+    preset_id: str = Field(default="stable_baseline", min_length=1, max_length=100)
+    aspect: Literal["portrait", "landscape", "square", "custom", "model_default"] = "portrait"
+    width: int | None = Field(default=896, ge=64, le=8192)
+    height: int | None = Field(default=1152, ge=64, le=8192)
+    steps: int | None = Field(default=30, ge=1, le=200)
+    cfg: float | None = Field(default=4.0, ge=0, le=30)
+    sampler: str | None = Field(default="er_sde", min_length=1, max_length=100)
+    scheduler: str | None = Field(default="simple", min_length=1, max_length=100)
     seed: int = Field(default=-1, ge=-1)
     batch_size: int = Field(default=1, ge=1, le=100)
+    remote_profile_id: str | None = Field(default=None, max_length=200)
+    workflow_profile_id: str | None = Field(default=None, max_length=200)
 
 
 class WorkspaceDraft(ApiModel):
@@ -336,6 +344,10 @@ class GenerationBridgeSettings(ApiModel):
     preset_id: str = Field(default="balanced", min_length=1, max_length=100)
     width: int | None = Field(default=None, ge=64, le=8192)
     height: int | None = Field(default=None, ge=64, le=8192)
+    steps: int | None = Field(default=None, ge=1, le=200)
+    cfg: float | None = Field(default=None, ge=0, le=30)
+    sampler: str | None = Field(default=None, min_length=1, max_length=100)
+    scheduler: str | None = Field(default=None, min_length=1, max_length=100)
     seed: int = Field(default=-1, ge=-1)
     batch_size: int = Field(default=1, ge=1, le=100)
 

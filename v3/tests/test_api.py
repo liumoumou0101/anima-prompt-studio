@@ -1618,10 +1618,18 @@ def test_workspace_crud_persists_separately_and_rejects_stale_revision(
     assert workspace["draft"]["positive_text"] == draft["positive_text"]
     assert workspace["draft"]["suppressed_tags"] == []
     assert workspace["draft"]["generation_settings"] == {
-        "preset_id": "balanced",
+        "preset_id": "stable_baseline",
         "aspect": "portrait",
+        "width": 896,
+        "height": 1152,
+        "steps": 30,
+        "cfg": 4.0,
+        "sampler": "er_sde",
+        "scheduler": "simple",
         "seed": -1,
         "batch_size": 1,
+        "remote_profile_id": None,
+        "workflow_profile_id": None,
     }
     assert workspace["candidate_snapshot"]["candidates"][0]["positive_prompt"] == "score_7, maid, twintails"
     assert workspace["candidate_snapshot"]["artist_suggestions"][0]["name"] == "sample_artist_a"
@@ -1686,7 +1694,15 @@ def test_generation_bridge_preview_converts_validated_candidate_without_submitti
             "candidate": generated["candidates"][0],
             "intent": generated["intent"],
             "project_name": "V3 API 桥接",
-            "settings": {"preset_id": "balanced", "seed": 42, "batch_size": 2},
+            "settings": {
+                "preset_id": "balanced",
+                "steps": 41,
+                "cfg": 4.8,
+                "sampler": "er_sde",
+                "scheduler": "simple",
+                "seed": 42,
+                "batch_size": 2,
+            },
             "workspace_id": "workspace_1",
             "workspace_revision": 3,
         },
@@ -1699,7 +1715,10 @@ def test_generation_bridge_preview_converts_validated_candidate_without_submitti
     assert payload["bridge_schema"] == "v3-v2-generation-bridge/1"
     assert payload["prompt_job"]["positive_prompt"] == "score_7, maid, twintails"
     assert payload["prompt_job"]["negative_prompt"].endswith("blonde hair")
-    assert payload["prompt_job"]["generation_params"]["steps"] == 35
+    assert payload["prompt_job"]["generation_params"]["steps"] == 41
+    assert payload["prompt_job"]["generation_params"]["cfg"] == 4.8
+    assert payload["prompt_job"]["generation_params"]["sampler"] == "er_sde"
+    assert payload["prompt_job"]["generation_params"]["scheduler"] == "simple"
     assert payload["prompt_job"]["generation_params"]["batch_size"] == 2
     assert payload["checkpoint_logical_name"] == "anima_base_v1"
     assert payload["candidate_snapshot"]["versions"]["data_pack"] == "anima-v3-api-test-r1"

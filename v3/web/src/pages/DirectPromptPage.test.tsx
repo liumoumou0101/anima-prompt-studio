@@ -65,6 +65,14 @@ it("submits the original English prompt without compiling", async () => {
         host_fingerprint_ready: true,
         auth_type: "agent",
         private_key_passphrase_configured: false,
+        default_recipe_id: "stable_baseline",
+        generation_recipes: [{id: "stable_baseline", display_name: "稳定基线", objective: "baseline", parameters: {steps: 30, cfg: 4, sampler: "er_sde", scheduler: "simple"}, notes: "工作流模板基线。", evidence: "workflow_template"}],
+        parameter_capabilities: {
+          steps: {mode: "editable", value: 30, minimum: 30, maximum: 50, options: [], reason: "验证范围"},
+          cfg: {mode: "editable", value: 4, minimum: 4, maximum: 5, options: [], reason: "验证范围"},
+          sampler: {mode: "editable", value: "er_sde", options: ["er_sde", "euler"], reason: "风格取向"},
+          scheduler: {mode: "fixed", value: "simple", options: [], reason: "工作流固定"},
+        },
       }],
     }), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({id: "run-1", state: "draft"}), {status: 202}));
@@ -79,5 +87,6 @@ it("submits the original English prompt without compiling", async () => {
   expect(String(fetchMock.mock.calls[1][0])).toContain("/api/v3/direct-prompt/runs");
   const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
   expect(body.positive_prompt).toBe("1girl, finger to lips, clean delicate lineart");
+  expect(body.settings).toMatchObject({preset_id: "stable_baseline", steps: 30, cfg: 4, sampler: "er_sde", scheduler: "simple"});
   expect(await screen.findByText(/已按原文提交远程队列/)).toBeInTheDocument();
 });

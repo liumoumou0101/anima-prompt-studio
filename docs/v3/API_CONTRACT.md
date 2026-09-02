@@ -303,7 +303,9 @@ HTTP 500 的 `message` 不返回本地绝对路径、凭据、远程命令或堆
 
 ### `POST /generation-requests/preview`（已实现）
 
-接收已校验的 V3 `candidate + intent`、生成设置和可选工作区版本，返回将要交给 V2 远程服务的 `PromptJob` 快照。该端点不创建队列任务、不连接 SSH，用于在产生副作用前校验模型预设、提示词和版本快照。
+接收已校验的 V3 `candidate + intent`、生成设置和可选工作区版本，返回将要交给 V2 远程服务的 `PromptJob` 快照。该端点不创建队列任务、不连接 SSH，用于在产生副作用前检查提示词、显式参数和版本快照；工作流配方能力在选择具体目标并提交时校验。
+
+生成设置由 V3 正式拥有并校验：兼容字段 `preset_id` 保存当前 recipe ID，另含 `width`、`height`、`steps`、`cfg`、`sampler`、`scheduler`、`seed` 和 `batch_size`。V3 发送的显式高级参数优先于兼容层的旧预设值。
 
 完整仓库或安装 V2 运行时时，bootstrap 的 `features.v2_generation_bridge` 为 `true`。单独安装 V3 且缺少 V2 包时，其他 API 仍可使用，本端点返回 HTTP 503 / `v2_runtime_missing`。
 
@@ -333,7 +335,16 @@ HTTP 500 的 `message` 不返回本地绝对路径、凭据、远程命令或堆
 
 ### `GET /generation-targets`（已实现）
 
-返回 V2 中已启用的云主机和已验证工作流组合、兼容模型以及主机指纹就绪状态。不包含 host 地址、用户名、密码或私钥路径。
+返回 V2 中已启用的云主机和已验证工作流组合、兼容模型、主机指纹就绪状态，以及由该工作流真实模板派生的 V3 生成配方契约。不包含用户名、密码或私钥路径。
+
+每个目标包含：
+
+- `generation_recipes`：只适用于该工作流的结果导向配方，包含参数、用途和证据等级；
+- `parameter_capabilities`：逐项声明 `editable` 或 `fixed`、范围、候选值和锁定原因；
+- `stages`：实际执行阶段快照。HiRes 会分别返回基础生成和精修阶段；
+- `default_recipe_id`：切换到该工作流时使用的基线配方。
+
+DMDX、HiRes 等结构性工作流的关键参数由模板锁定。提交时服务端再次验证配方 ID、参数一致性和能力范围，不能通过手写请求绕过。旧工作区的 `fast/balanced/quality` 仅作为 `custom` 兼容输入，不再拥有覆盖工作流模板的权力。
 
 ### `POST /generation-runs/{id}/actions`（已实现）
 

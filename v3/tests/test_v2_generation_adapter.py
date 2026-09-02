@@ -143,6 +143,30 @@ def test_adapter_preserves_candidate_prompt_versions_and_generation_defaults() -
     assert job.task_package()["integration_metadata"]["workspace"] == {"id": "workspace_1", "revision": 3}
 
 
+def test_adapter_prefers_explicit_v3_advanced_parameters_over_legacy_preset() -> None:
+    prepared = CandidateToV2PromptJobAdapter().prepare(
+        sample_candidate(),
+        sample_intent(),
+        settings=V2GenerationSettings(
+            preset_id="balanced",
+            width=1216,
+            height=832,
+            steps=44,
+            cfg=3.7,
+            sampler="dpmpp_2m_sde",
+            scheduler="karras",
+            seed=7,
+            batch_size=3,
+        ),
+    )
+
+    params = prepared.job.generation_params
+    assert (params.width, params.height) == (1216, 832)
+    assert (params.steps, params.cfg) == (44, 3.7)
+    assert (params.sampler, params.scheduler) == ("dpmpp_2m_sde", "karras")
+    assert (params.seed, params.batch_size) == (7, 3)
+
+
 def test_prepared_v3_candidate_runs_through_unchanged_v2_remote_coordinator(tmp_path: Path) -> None:
     prepared = CandidateToV2PromptJobAdapter().prepare(sample_candidate(), sample_intent())
     coordinator = RemoteExecutionCoordinator(

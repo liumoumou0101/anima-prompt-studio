@@ -451,10 +451,54 @@ export interface IntentParseResponse {
 }
 
 export interface WorkbenchGenerationSettings {
-  preset_id: "fast" | "balanced" | "quality";
-  aspect: "portrait" | "landscape" | "square" | "model_default";
+  preset_id: string;
+  aspect: "portrait" | "landscape" | "square" | "custom" | "model_default";
+  width: number;
+  height: number;
+  steps: number;
+  cfg: number;
+  sampler: string;
+  scheduler: string;
   seed: number;
   batch_size: number;
+  remote_profile_id?: string | null;
+  workflow_profile_id?: string | null;
+}
+
+export interface GenerationRecipeParameters {
+  steps: number;
+  cfg: number;
+  sampler: string;
+  scheduler: string;
+}
+
+export interface GenerationRecipe {
+  id: string;
+  display_name: string;
+  objective: "baseline" | "creative" | "detail_study" | "speed" | "hires";
+  parameters: GenerationRecipeParameters;
+  notes: string;
+  evidence: "workflow_template" | "model_guidance" | "experimental";
+}
+
+export interface GenerationParameterCapability {
+  mode: "editable" | "fixed";
+  value: number | string;
+  reason: string;
+  minimum?: number | null;
+  maximum?: number | null;
+  options: string[];
+}
+
+export interface GenerationStage {
+  id: string;
+  display_name: string;
+  steps: number;
+  cfg: number;
+  sampler: string;
+  scheduler: string;
+  denoise?: number;
+  upscale_factor?: number;
 }
 
 export interface WorkspaceDraft {
@@ -518,6 +562,10 @@ export interface GenerationTarget {
   host_fingerprint_ready: boolean;
   auth_type: "private_key" | "password" | "agent";
   private_key_passphrase_configured: boolean;
+  default_recipe_id?: string;
+  generation_recipes?: GenerationRecipe[];
+  parameter_capabilities?: Record<"steps" | "cfg" | "sampler" | "scheduler", GenerationParameterCapability>;
+  stages?: GenerationStage[];
 }
 
 export interface GenerationTargetListResponse {

@@ -381,6 +381,28 @@ def test_hires_fix_renderer_preserves_template_stages_and_derives_refiner_seed(t
     assert profile.api_workflow["8"]["inputs"]["seed"] == 44
 
 
+def test_v3_hires_recipe_writes_the_declared_base_stage_parameters(tmp_path):
+    profile, missing = build_auto_workflow_profile(
+        hires_fix_workflow(),
+        tmp_path / "04_高清修复1点5倍_HiresFix_1_5x.json",
+    )
+    assert missing == []
+    job = PromptJob(
+        model_profile_id="anima_base_v1",
+        positive_prompt="1girl",
+        integration_metadata={"generation_recipe": {"schema": "v3-workflow-recipe/1", "id": "hires_template"}},
+    )
+    job.generation_params.steps = 34
+    job.generation_params.cfg = 4.5
+    job.generation_params.sampler = "er_sde"
+    job.generation_params.scheduler = "simple"
+
+    result = WorkflowRenderer().render(job, profile, remote_profile(), "anima_base_v1", "v3-hires-run")
+
+    base = result.workflow["8"]["inputs"]
+    assert (base["steps"], base["cfg"], base["sampler_name"], base["scheduler"]) == (34, 4.5, "er_sde", "simple")
+
+
 @pytest.mark.parametrize(("filename", "checkpoint", "expected"), [
     ("01_基础文生图.json", "anima-base-v1.0.safetensors", "anima_base_v1"),
     ("02_Turbo极速文生图.json", "anima-turbo-v1.0.safetensors", "anima_turbo_v1"),

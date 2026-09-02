@@ -27,7 +27,7 @@
 | 系统凭据存储 | `services/remote/credential_store.py` | 原样复用 | API 响应不得回传秘密 |
 | 远程领域对象 | `domain/execution_models.py` | 保留并向后兼容扩展 | 数据库迁移需有测试 |
 | ANIMA 模型配置 | `configs/model_profiles/*.json` | 作为 V3 `ModelProfile` 起点 | 增加 renderer/version 字段，不合并 Base/Aesthetic/Turbo |
-| 生成预设 | `configs/generation_presets.json` | 继续驱动远程参数 | 与提示词质量模板保持职责分离 |
+| 生成预设 | `configs/generation_presets.json` | 不迁移数值；V3 从具体工作流模板生成配方与参数能力契约 | V2 预设仅为缺字段的旧记录回退，不得覆盖 DMDX、HiRes 等工作流约束 |
 | AI 画面事实抽取 | `services/ai_extract_service.py`、`ai_prompt_service.py` | 经 `V2NaturalLanguageIntentAdapter` 转为 V3 Intent | 只复用抽取、provider 配置和凭据；禁止进入 V2 编译器 |
 | 画廊索引与安全路径 | `services/gallery_index.py`、`gallery_assets.py` | 经 `V2GalleryReadService` 接入统一 API | 不复用旧 stdlib HTTP server；`.trash` 保持私有 |
 

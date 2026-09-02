@@ -2,6 +2,7 @@ import {useEffect, useMemo, useRef, useState} from "react";
 import {useNavigate} from "react-router-dom";
 import {ApiClientError, apiRequest} from "../lib/api";
 import {storeDirectImport} from "../lib/directPrompt";
+import {applyAspect, applyGenerationRecipe, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
 import type {DirectPromptPreview, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, WorkbenchGenerationSettings} from "../lib/types";
 import {ErrorState} from "../components/States";
 
@@ -13,15 +14,7 @@ const profiles = [
   {id: "anima_aesthetic_v1", label: "ANIMA Aesthetic"},
   {id: "anima_turbo_v1", label: "ANIMA Turbo"},
 ];
-const defaultGenerationSettings: WorkbenchGenerationSettings = {preset_id: "balanced", aspect: "portrait", seed: -1, batch_size: 1};
-const aspectSizes: Record<WorkbenchGenerationSettings["aspect"], {width: number; height: number} | null> = {
-  portrait: {width: 896, height: 1152},
-  landscape: {width: 1152, height: 896},
-  square: {width: 1024, height: 1024},
-  model_default: null,
-};
-const presetLabels: Record<WorkbenchGenerationSettings["preset_id"], string> = {fast: "快速", balanced: "平衡", quality: "高质量"};
-const aspectLabels: Record<WorkbenchGenerationSettings["aspect"], string> = {portrait: "竖图 896×1152", landscape: "横图 1152×896", square: "方形 1024×1024", model_default: "模型默认"};
+const aspectLabels: Record<WorkbenchGenerationSettings["aspect"], string> = {portrait: "竖图 896×1152", landscape: "横图 1152×896", square: "方形 1024×1024", custom: "自定义尺寸", model_default: "模型默认"};
 
 type DirectDraft = {
   project_name: string;
@@ -36,7 +29,7 @@ const emptyDraft: DirectDraft = {
   positive_prompt: "",
   negative_prompt: "",
   model_profile: "anima_aesthetic_v1",
-  generation_settings: defaultGenerationSettings,
+  generation_settings: defaultGenerationSettings(),
 };
 
 export function DirectPromptPage({remoteEnabled = false}: {remoteEnabled?: boolean}) {
@@ -49,6 +42,7 @@ export function DirectPromptPage({remoteEnabled = false}: {remoteEnabled?: boole
   const [generationBusy, setGenerationBusy] = useState(false);
   const [generationTargets, setGenerationTargets] = useState<GenerationTarget[]>([]);
   const [selectedTarget, setSelectedTarget] = useState(() => {
+    if (draft.generation_settings.remote_profile_id && draft.generation_settings.workflow_profile_id) return `${draft.generation_settings.remote_profile_id}::${draft.generation_settings.workflow_profile_id}`;
     try { return localStorage.getItem(GENERATION_TARGET_KEY) || ""; } catch { return ""; }
   });
   const [preferredRemoteId, setPreferredRemoteId] = useState(() => {
@@ -98,16 +92,27 @@ export function DirectPromptPage({remoteEnabled = false}: {remoteEnabled?: boole
     const current = compatibleTargets.find((item) => targetKey(item) === selectedTarget);
     const next = current || preferred || compatibleTargets[0];
     const key = targetKey(next);
-    if (key !== selectedTarget) {
-      setSelectedTarget(key);
-      try { localStorage.setItem(GENERATION_TARGET_KEY, key); } catch { /* best-effort */ }
+    if (key !== selectedTarget || (!findGenerationRecipe(next, draft.generation_settings.preset_id) && draft.generation_settings.preset_id !== "custom")) {
+      chooseGenerationTarget(next);
     }
-  }, [compatibleTargets, preferredRemoteId, selectedTarget]);
+  }, [compatibleTargets, preferredRemoteId, selectedTarget, draft.generation_settings.preset_id]);
 
   function editDraft(patch: Partial<DirectDraft>) {
     setDraft((current) => ({...current, ...patch}));
     setPreview(null);
     idempotencyKey.current = null;
+  }
+
+  function chooseGenerationTarget(target: GenerationTarget) {
+    const key = targetKey(target);
+    setSelectedTarget(key);
+    try { localStorage.setItem(GENERATION_TARGET_KEY, key); } catch { /* best-effort */ }
+    setDraft((current) => {
+      const settings = current.generation_settings;
+      const sameTarget = settings.remote_profile_id === target.remote_profile_id && settings.workflow_profile_id === target.workflow_profile_id;
+      const compatibleRecipe = Boolean(findGenerationRecipe(target, settings.preset_id)) || settings.preset_id === "custom";
+      return {...current, generation_settings: sameTarget && compatibleRecipe ? settings : applyGenerationRecipe(settings, target)};
+    });
   }
 
   async function matchAndTranslate() {
@@ -191,12 +196,21 @@ export function DirectPromptPage({remoteEnabled = false}: {remoteEnabled?: boole
   function selectRemoteConnection(remoteId: string) {
     const workflow = compatibleTargets.find((item) => item.remote_profile_id === remoteId);
     if (!workflow) return;
-    const key = `${remoteId}::${workflow.workflow_profile_id}`;
-    setSelectedTarget(key);
-    try { localStorage.setItem(GENERATION_TARGET_KEY, key); } catch { /* best-effort */ }
+    chooseGenerationTarget(workflow);
   }
 
   const settings = draft.generation_settings;
+  const activeRecipe = findGenerationRecipe(activeTarget, settings.preset_id);
+  const capabilities = activeTarget?.parameter_capabilities;
+
+  function changeModel(modelProfile: string) {
+    const target = generationTargets.find((item) => (!item.compatible_model_profiles.length || item.compatible_model_profiles.includes(modelProfile)) && item.remote_profile_id === selectedRemoteId)
+      || generationTargets.find((item) => !item.compatible_model_profiles.length || item.compatible_model_profiles.includes(modelProfile));
+    if (target) {
+      setSelectedTarget(targetKey(target));
+      editDraft({model_profile: modelProfile, generation_settings: applyGenerationRecipe(settings, target)});
+    } else editDraft({model_profile: modelProfile});
+  }
 
   return (
     <section className="page direct-page">
@@ -224,24 +238,42 @@ export function DirectPromptPage({remoteEnabled = false}: {remoteEnabled?: boole
         <div className="composer-side">
           <p className="natural-mode-hint">工作台编译会把 `black hair ribbons` 拆成黑发，把 `lineart` 当成线稿。直出页按逗号保留整词，生图时不改原文。</p>
           <label htmlFor="direct-model">模型配置</label>
-          <select id="direct-model" value={draft.model_profile} onChange={(event) => editDraft({model_profile: event.target.value})}>
+          <select id="direct-model" value={draft.model_profile} onChange={(event) => changeModel(event.target.value)}>
             {profiles.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
           <div className="generation-spec">
             <strong>生成规格</strong>
             <label htmlFor="direct-aspect">画幅</label>
-            <select id="direct-aspect" value={settings.aspect} onChange={(event) => editDraft({generation_settings: {...settings, aspect: event.target.value as WorkbenchGenerationSettings["aspect"]}})}>
+            <select id="direct-aspect" value={settings.aspect} onChange={(event) => editDraft({generation_settings: applyAspect(settings, event.target.value as WorkbenchGenerationSettings["aspect"])})}>
               <option value="portrait">{aspectLabels.portrait}</option>
               <option value="landscape">{aspectLabels.landscape}</option>
               <option value="square">{aspectLabels.square}</option>
+              <option value="custom">{aspectLabels.custom}</option>
               <option value="model_default">{aspectLabels.model_default}</option>
             </select>
-            <label htmlFor="direct-preset">预设</label>
-            <select id="direct-preset" value={settings.preset_id} onChange={(event) => editDraft({generation_settings: {...settings, preset_id: event.target.value as WorkbenchGenerationSettings["preset_id"]}})}>
-              <option value="fast">{presetLabels.fast}</option>
-              <option value="balanced">{presetLabels.balanced}</option>
-              <option value="quality">{presetLabels.quality}</option>
+            <label htmlFor="direct-preset">生成配方</label>
+            <select id="direct-preset" value={activeRecipe?.id || "custom"} onChange={(event) => { if (activeTarget) editDraft({generation_settings: applyGenerationRecipe(settings, activeTarget, event.target.value)}); }} disabled={!activeTarget?.generation_recipes?.length}>
+              {settings.preset_id === "custom" && <option value="custom">自定义参数</option>}
+              {(activeTarget?.generation_recipes || []).map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.display_name}{recipe.evidence === "experimental" ? " · 实验" : ""}</option>)}
             </select>
+            <small>{activeRecipe?.notes || "选择工作流后加载对应的 V3 生成配方。"}</small>
+            <details className="generation-advanced" open>
+              <summary>高级参数</summary>
+              <div className="generation-advanced-grid">
+                <label htmlFor="direct-width">宽度</label>
+                <input id="direct-width" type="number" min="64" max="8192" step="64" value={settings.width} disabled={settings.aspect === "model_default"} onChange={(event) => editDraft({generation_settings: {...settings, aspect: "custom", width: Math.max(64, Number(event.target.value) || 64)}})} />
+                <label htmlFor="direct-height">高度</label>
+                <input id="direct-height" type="number" min="64" max="8192" step="64" value={settings.height} disabled={settings.aspect === "model_default"} onChange={(event) => editDraft({generation_settings: {...settings, aspect: "custom", height: Math.max(64, Number(event.target.value) || 64)}})} />
+                <label htmlFor="direct-steps">采样步数 Steps</label>
+                <input id="direct-steps" type="number" min={capabilities?.steps.minimum ?? 1} max={capabilities?.steps.maximum ?? 200} value={settings.steps} disabled={capabilities?.steps.mode === "fixed"} title={capabilities?.steps.reason} onChange={(event) => editDraft({generation_settings: markGenerationCustom(settings, {steps: Math.max(1, Number(event.target.value) || 1)})})} />
+                <label htmlFor="direct-cfg">CFG</label>
+                <input id="direct-cfg" type="number" min={capabilities?.cfg.minimum ?? 0} max={capabilities?.cfg.maximum ?? 30} step="0.1" value={settings.cfg} disabled={capabilities?.cfg.mode === "fixed"} title={capabilities?.cfg.reason} onChange={(event) => editDraft({generation_settings: markGenerationCustom(settings, {cfg: Math.max(0, Number(event.target.value) || 0)})})} />
+                <label htmlFor="direct-sampler">采样器 Sampler</label>
+                <select id="direct-sampler" value={settings.sampler} disabled={capabilities?.sampler.mode === "fixed"} title={capabilities?.sampler.reason} onChange={(event) => editDraft({generation_settings: markGenerationCustom(settings, {sampler: event.target.value})})}>{Array.from(new Set([settings.sampler, ...(capabilities?.sampler.options || [])])).map((option) => <option key={option} value={option}>{option}</option>)}</select>
+                <label htmlFor="direct-scheduler">调度器 Scheduler</label>
+                <select id="direct-scheduler" value={settings.scheduler} disabled={capabilities?.scheduler.mode === "fixed"} title={capabilities?.scheduler.reason} onChange={(event) => editDraft({generation_settings: markGenerationCustom(settings, {scheduler: event.target.value})})}>{Array.from(new Set([settings.scheduler, ...(capabilities?.scheduler.options || [])])).map((option) => <option key={option} value={option}>{option}</option>)}</select>
+              </div>
+            </details>
             <label htmlFor="direct-seed">Seed</label>
             <input id="direct-seed" type="number" min="-1" max="2147483647" value={settings.seed} onChange={(event) => editDraft({generation_settings: {...settings, seed: Number(event.target.value)}})} />
             <label htmlFor="direct-batch">批量</label>
@@ -253,7 +285,7 @@ export function DirectPromptPage({remoteEnabled = false}: {remoteEnabled?: boole
               {remoteConnections.length ? remoteConnections.map((target) => <option key={target.remote_profile_id} value={target.remote_profile_id}>{target.remote_display_name}{target.host_fingerprint_ready ? "" : " · 待确认指纹"}</option>) : <option value="">无可用连接</option>}
             </select>
             <label htmlFor="direct-workflow">工作流</label>
-            <select id="direct-workflow" aria-label="远程工作流" value={selectedWorkflowId || ""} onChange={(event) => setSelectedTarget(`${selectedRemoteId}::${event.target.value}`)} disabled={!connectionWorkflows.length}>
+            <select id="direct-workflow" aria-label="远程工作流" value={selectedWorkflowId || ""} onChange={(event) => { const target = connectionWorkflows.find((item) => item.workflow_profile_id === event.target.value); if (target) chooseGenerationTarget(target); }} disabled={!connectionWorkflows.length}>
               {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}</option>) : <option value="">当前模型无兼容工作流</option>}
             </select>
             {activeTarget?.auth_type === "private_key" && <label className="passphrase-input"><span>私钥口令（可选）</span><input type="password" autoComplete="current-password" value={privateKeyPassphrase} onChange={(event) => setPrivateKeyPassphrase(event.target.value)} placeholder={activeTarget.private_key_passphrase_configured ? "已在本次运行中设置" : "私钥未加密可留空"} /></label>}
@@ -312,21 +344,11 @@ function loadDraft(): DirectDraft {
     return {
       ...emptyDraft,
       ...parsed,
-      generation_settings: {...defaultGenerationSettings, ...(parsed.generation_settings || {})},
+      generation_settings: {...defaultGenerationSettings(), ...(parsed.generation_settings || {})},
     };
   } catch {
     return emptyDraft;
   }
-}
-
-function resolvedGenerationSettings(settings: WorkbenchGenerationSettings) {
-  const size = aspectSizes[settings.aspect];
-  return {
-    preset_id: settings.preset_id,
-    ...(size || {}),
-    seed: settings.seed,
-    batch_size: settings.batch_size,
-  };
 }
 
 function targetKey(target: GenerationTarget): string {

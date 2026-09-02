@@ -3,6 +3,7 @@ import type {FormEvent} from "react";
 import {useSearchParams} from "react-router-dom";
 import {apiRequest, ApiClientError} from "../lib/api";
 import {consumeDirectImport} from "../lib/directPrompt";
+import {applyAspect, applyGenerationRecipe, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
 import type {ArtistComparisonSubmission, ArtistRanking, ArtistSuggestion, CandidateLane, CandidateTag, CompositionChip, CompositionPreset, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, IntentParseResponse, PromptCandidate, SceneDraft, SceneDraftItem, SceneRelation, TagSuggestion, TranslationResponse, WorkbenchGenerationSettings, WorkbenchResponse, WorkspaceDraft, WorkspaceListResponse, WorkspaceRecord} from "../lib/types";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
 
@@ -20,15 +21,7 @@ const profiles = [
 const RECOVERY_KEY = "anima-v3-workbench-recovery";
 const GENERATION_TARGET_KEY = "anima-v3-generation-target";
 const PREFERRED_REMOTE_KEY = "anima-v3-preferred-remote";
-const defaultGenerationSettings: WorkbenchGenerationSettings = {preset_id: "balanced", aspect: "portrait", seed: -1, batch_size: 1};
-const aspectSizes: Record<WorkbenchGenerationSettings["aspect"], {width: number; height: number} | null> = {
-  portrait: {width: 896, height: 1152},
-  landscape: {width: 1152, height: 896},
-  square: {width: 1024, height: 1024},
-  model_default: null,
-};
-const presetLabels: Record<WorkbenchGenerationSettings["preset_id"], string> = {fast: "快速", balanced: "平衡", quality: "高质量"};
-const aspectLabels: Record<WorkbenchGenerationSettings["aspect"], string> = {portrait: "竖图 896×1152", landscape: "横图 1152×896", square: "方形 1024×1024", model_default: "模型默认"};
+const aspectLabels: Record<WorkbenchGenerationSettings["aspect"], string> = {portrait: "竖图 896×1152", landscape: "横图 1152×896", square: "方形 1024×1024", custom: "自定义尺寸", model_default: "模型默认"};
 type WorkspaceIdentity = Pick<WorkspaceRecord, "id" | "title" | "revision" | "created_at" | "updated_at">;
 type RecoveredWorkbench = {draft: WorkspaceDraft; result: WorkbenchResponse | null; workspaceTitle: string; workspace: WorkspaceIdentity | null};
 
@@ -82,6 +75,8 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [generationTargets, setGenerationTargets] = useState<GenerationTarget[]>([]);
   const [selectedTarget, setSelectedTarget] = useState(() => {
+    const saved = draft.generation_settings;
+    if (saved?.remote_profile_id && saved.workflow_profile_id) return `${saved.remote_profile_id}::${saved.workflow_profile_id}`;
     try { return localStorage.getItem(GENERATION_TARGET_KEY) || ""; } catch { return ""; }
   });
   const [preferredRemoteId, setPreferredRemoteId] = useState(() => {
@@ -117,7 +112,7 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
   const naturalText = draft.natural_text || "";
   const selectedTags = draft.selected_tags || [];
   const suppressedTags = draft.suppressed_tags || [];
-  const generationSettings = draft.generation_settings || defaultGenerationSettings;
+  const generationSettings = draft.generation_settings || defaultGenerationSettings();
 
   const positiveItems = useMemo(() => splitConcepts(positiveText), [positiveText]);
   const compatibleTargets = useMemo(() => generationTargets.filter((target) => (
@@ -139,8 +134,13 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
     return new Set(remoteConnections.filter((target) => (counts.get(remoteConnectionLabel(target)) || 0) > 1).map((target) => target.remote_profile_id));
   }, [remoteConnections]);
   const [selectedRemoteId, selectedWorkflowId] = selectedTarget.split("::");
+  const persistedTargetKey = generationSettings.remote_profile_id && generationSettings.workflow_profile_id
+    ? `${generationSettings.remote_profile_id}::${generationSettings.workflow_profile_id}`
+    : "";
   const connectionWorkflows = useMemo(() => compatibleTargets.filter((target) => target.remote_profile_id === selectedRemoteId), [compatibleTargets, selectedRemoteId]);
   const activeTarget = compatibleTargets.find((target) => targetKey(target) === selectedTarget);
+  const activeGenerationRecipe = findGenerationRecipe(activeTarget, generationSettings.preset_id);
+  const generationCapabilities = activeTarget?.parameter_capabilities;
   const reviewedFacts = useMemo(() => groupIntentFacts(parseInfo?.intent.graph.elements || []), [parseInfo]);
   const chineseLabels = useMemo(() => chineseLabelsFromResult(result), [result]);
 
@@ -168,22 +168,30 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
 
   useEffect(() => {
     const current = compatibleTargets.find((target) => targetKey(target) === selectedTarget);
+    const persisted = persistedTargetKey && compatibleTargets.find((target) => targetKey(target) === persistedTargetKey);
+    if (persisted && targetKey(persisted) !== selectedTarget) {
+      setSelectedTarget(targetKey(persisted));
+      return;
+    }
     const preferredTargets = preferredRemoteId
       ? compatibleTargets.filter((target) => target.remote_profile_id === preferredRemoteId)
       : [];
-    if (preferredTargets.length && current?.remote_profile_id !== preferredRemoteId) {
+    if (!persisted && preferredTargets.length && current?.remote_profile_id !== preferredRemoteId) {
       const preferred = preferredTargets.find((target) => target.workflow_profile_id === selectedWorkflowId)
         || preferredTargets.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name))
         || preferredTargets[0];
-      setSelectedTarget(targetKey(preferred));
+      chooseGenerationTarget(preferred, false);
       return;
     }
     if (!current) {
       const ready = compatibleTargets.filter((target) => target.host_fingerprint_ready);
       const fallback = ready.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name)) || ready[0] || compatibleTargets[0];
-      setSelectedTarget(fallback ? targetKey(fallback) : "");
+      if (fallback) chooseGenerationTarget(fallback, false);
+      else setSelectedTarget("");
+      return;
     }
-  }, [compatibleTargets, preferredRemoteId, selectedRemoteId, selectedTarget, selectedWorkflowId]);
+    if (!findGenerationRecipe(current, generationSettings.preset_id) && generationSettings.preset_id !== "custom") chooseGenerationTarget(current, false);
+  }, [compatibleTargets, persistedTargetKey, preferredRemoteId, selectedRemoteId, selectedTarget, selectedWorkflowId]);
 
   function selectRemoteConnection(remoteProfileId: string) {
     const options = compatibleTargets.filter((target) => target.remote_profile_id === remoteProfileId);
@@ -192,7 +200,8 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
       || options[0];
     setPreferredRemoteId(remoteProfileId);
     try { localStorage.setItem(PREFERRED_REMOTE_KEY, remoteProfileId); } catch { /* Best-effort preference. */ }
-    setSelectedTarget(preferred ? targetKey(preferred) : "");
+    if (preferred) chooseGenerationTarget(preferred);
+    else setSelectedTarget("");
     void apiRequest<{remote_profile_id: string}>("/api/v3/settings/default-remote-profile", {
       method: "PUT",
       body: JSON.stringify({remote_profile_id: remoteProfileId}),
@@ -227,13 +236,50 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
 
   function updateGenerationSettings(patch: Partial<WorkbenchGenerationSettings>) {
     const next = {...generationSettings, ...patch};
-    if (next.preset_id === generationSettings.preset_id && next.aspect === generationSettings.aspect && next.seed === generationSettings.seed && next.batch_size === generationSettings.batch_size) return;
+    if (JSON.stringify(next) === JSON.stringify(generationSettings)) return;
     setPast((items) => [...items.slice(-49), draft]);
     setDraft({...draft, generation_settings: next});
     setFuture([]);
     setWorkspaceNotice(null);
     idempotencyKeys.current.clear();
     artistComparisonIdempotency.current = null;
+  }
+
+  function chooseGenerationTarget(target: GenerationTarget, recordHistory = true) {
+    setSelectedTarget(targetKey(target));
+    const resolve = (settings: WorkbenchGenerationSettings) => {
+      const currentMatches = settings.remote_profile_id === target.remote_profile_id
+        && settings.workflow_profile_id === target.workflow_profile_id;
+      const hasCompatibleRecipe = Boolean(findGenerationRecipe(target, settings.preset_id));
+      return currentMatches && (hasCompatibleRecipe || settings.preset_id === "custom")
+        ? {...settings, remote_profile_id: target.remote_profile_id, workflow_profile_id: target.workflow_profile_id}
+        : applyGenerationRecipe(settings, target);
+    };
+    if (recordHistory) {
+      const next = resolve(generationSettings);
+      if (JSON.stringify(next) !== JSON.stringify(generationSettings)) updateGenerationSettings(next);
+    } else {
+      setDraft((current) => {
+        const currentSettings = current.generation_settings || defaultGenerationSettings();
+        const next = resolve(currentSettings);
+        return JSON.stringify(next) === JSON.stringify(currentSettings) ? current : {...current, generation_settings: next};
+      });
+    }
+  }
+
+  function changeModelProfile(modelProfile: string) {
+    const nextTarget = generationTargets.find((target) => (
+      (!target.compatible_model_profiles.length || target.compatible_model_profiles.includes(modelProfile))
+      && target.remote_profile_id === selectedRemoteId
+    )) || generationTargets.find((target) => !target.compatible_model_profiles.length || target.compatible_model_profiles.includes(modelProfile));
+    const nextSettings = nextTarget ? applyGenerationRecipe(generationSettings, nextTarget) : generationSettings;
+    if (nextTarget) setSelectedTarget(targetKey(nextTarget));
+    editDraft({model_profile: modelProfile, generation_settings: nextSettings});
+  }
+
+  function selectGenerationRecipe(recipeId: string) {
+    if (!activeTarget) return;
+    updateGenerationSettings(applyGenerationRecipe(generationSettings, activeTarget, recipeId));
   }
 
   function switchInputMode(mode: "concepts" | "natural") {
@@ -875,24 +921,57 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
             <p className="natural-mode-hint">描述里的“不要文字和水印”也会识别并写入负向提示词。角色/作品和过宽的整类标签需要点选确认，并始终按排除优先。</p>
           </>}
           <label htmlFor="model-profile">模型配置</label>
-          <select id="model-profile" value={profile} onChange={(event) => editDraft({model_profile: event.target.value})}>
+          <select id="model-profile" value={profile} onChange={(event) => changeModelProfile(event.target.value)}>
             {profiles.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
           <div className="generation-spec">
             <strong>生成规格</strong>
             <label htmlFor="generation-aspect">画幅</label>
-            <select id="generation-aspect" value={generationSettings.aspect} onChange={(event) => updateGenerationSettings({aspect: event.target.value as WorkbenchGenerationSettings["aspect"]})}>
+            <select id="generation-aspect" value={generationSettings.aspect} onChange={(event) => updateGenerationSettings(applyAspect(generationSettings, event.target.value as WorkbenchGenerationSettings["aspect"]))}>
               <option value="portrait">{aspectLabels.portrait}</option>
               <option value="landscape">{aspectLabels.landscape}</option>
               <option value="square">{aspectLabels.square}</option>
+              <option value="custom">{aspectLabels.custom}</option>
               <option value="model_default">{aspectLabels.model_default}</option>
             </select>
-            <label htmlFor="generation-preset">预设</label>
-            <select id="generation-preset" value={generationSettings.preset_id} onChange={(event) => updateGenerationSettings({preset_id: event.target.value as WorkbenchGenerationSettings["preset_id"]})}>
-              <option value="fast">{presetLabels.fast}</option>
-              <option value="balanced">{presetLabels.balanced}</option>
-              <option value="quality">{presetLabels.quality}</option>
+            <label htmlFor="generation-preset">生成配方</label>
+            <select id="generation-preset" value={activeGenerationRecipe?.id || "custom"} onChange={(event) => selectGenerationRecipe(event.target.value)} disabled={!activeTarget?.generation_recipes?.length}>
+              {generationSettings.preset_id === "custom" && <option value="custom">自定义参数</option>}
+              {(activeTarget?.generation_recipes || []).map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.display_name}{recipe.evidence === "experimental" ? " · 实验" : ""}</option>)}
             </select>
+            <small>{activeGenerationRecipe?.notes || (generationSettings.preset_id === "custom" ? "参数已偏离配方，提交时仍会按当前工作流能力校验。" : "选择工作流后加载对应的 V3 生成配方。")}</small>
+            {remoteEnabled && <>
+              <label htmlFor="generation-remote">云主机连接</label>
+              <select id="generation-remote" aria-label="云主机连接" value={selectedRemoteId || ""} onChange={(event) => selectRemoteConnection(event.target.value)} disabled={!remoteConnections.length}>
+                {remoteConnections.length ? remoteConnections.map((target) => <option key={target.remote_profile_id} value={target.remote_profile_id}>{remoteConnectionLabel(target)}{duplicateConnectionLabels.has(target.remote_profile_id) ? ` · 连接 ${target.remote_profile_id.slice(0, 8)}` : ""}{target.host_fingerprint_ready ? "" : " · 待确认指纹"}</option>) : <option value="">无可用连接</option>}
+              </select>
+              <label htmlFor="generation-workflow">工作流</label>
+              <select id="generation-workflow" aria-label="远程工作流" value={selectedWorkflowId || ""} onChange={(event) => { const target = connectionWorkflows.find((item) => item.workflow_profile_id === event.target.value); if (target) chooseGenerationTarget(target); }} disabled={!connectionWorkflows.length}>
+                {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}</option>) : <option value="">当前模型无兼容工作流</option>}
+              </select>
+            </>}
+            <details className="generation-advanced" open>
+              <summary>高级参数</summary>
+              <div className="generation-advanced-grid">
+                <label htmlFor="generation-width">宽度</label>
+                <input id="generation-width" type="number" min="64" max="8192" step="64" value={generationSettings.width} disabled={generationSettings.aspect === "model_default"} onChange={(event) => updateGenerationSettings({aspect: "custom", width: Math.max(64, Number(event.target.value) || 64)})} />
+                <label htmlFor="generation-height">高度</label>
+                <input id="generation-height" type="number" min="64" max="8192" step="64" value={generationSettings.height} disabled={generationSettings.aspect === "model_default"} onChange={(event) => updateGenerationSettings({aspect: "custom", height: Math.max(64, Number(event.target.value) || 64)})} />
+                <label htmlFor="generation-steps">采样步数 Steps</label>
+                <input id="generation-steps" type="number" min={generationCapabilities?.steps.minimum ?? 1} max={generationCapabilities?.steps.maximum ?? 200} value={generationSettings.steps} disabled={generationCapabilities?.steps.mode === "fixed"} title={generationCapabilities?.steps.reason} onChange={(event) => updateGenerationSettings(markGenerationCustom(generationSettings, {steps: Math.max(1, Number(event.target.value) || 1)}))} />
+                <label htmlFor="generation-cfg">CFG</label>
+                <input id="generation-cfg" type="number" min={generationCapabilities?.cfg.minimum ?? 0} max={generationCapabilities?.cfg.maximum ?? 30} step="0.1" value={generationSettings.cfg} disabled={generationCapabilities?.cfg.mode === "fixed"} title={generationCapabilities?.cfg.reason} onChange={(event) => updateGenerationSettings(markGenerationCustom(generationSettings, {cfg: Math.max(0, Number(event.target.value) || 0)}))} />
+                <label htmlFor="generation-sampler">采样器 Sampler</label>
+                <select id="generation-sampler" value={generationSettings.sampler} disabled={generationCapabilities?.sampler.mode === "fixed"} title={generationCapabilities?.sampler.reason} onChange={(event) => updateGenerationSettings(markGenerationCustom(generationSettings, {sampler: event.target.value}))}>
+                  {Array.from(new Set([generationSettings.sampler, ...(generationCapabilities?.sampler.options || [])])).map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+                <label htmlFor="generation-scheduler">调度器 Scheduler</label>
+                <select id="generation-scheduler" value={generationSettings.scheduler} disabled={generationCapabilities?.scheduler.mode === "fixed"} title={generationCapabilities?.scheduler.reason} onChange={(event) => updateGenerationSettings(markGenerationCustom(generationSettings, {scheduler: event.target.value}))}>
+                  {Array.from(new Set([generationSettings.scheduler, ...(generationCapabilities?.scheduler.options || [])])).map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </div>
+              {activeTarget?.stages && activeTarget.stages.length > 1 && <div className="generation-stage-summary">{activeTarget.stages.map((stage) => <small key={stage.id}><strong>{stage.display_name}</strong>：{stage.steps} Steps · CFG {stage.cfg} · {stage.sampler}/{stage.scheduler}{stage.denoise !== undefined ? ` · Denoise ${stage.denoise}` : ""}{stage.upscale_factor !== undefined ? ` · ${stage.upscale_factor}×` : ""}</small>)}</div>}
+            </details>
             <label htmlFor="generation-seed">Seed</label>
             <input id="generation-seed" type="number" min="-1" max="2147483647" value={generationSettings.seed} onChange={(event) => updateGenerationSettings({seed: Number(event.target.value)})} />
             <small>填 -1 表示随机 Seed；画师对照仍会使用下方固定 Seed。</small>
@@ -924,13 +1003,7 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
           <>
             <div className={`validation-strip${(result.scene_draft?.unresolved.length || result.scene_draft?.risk_notes.some((note) => note.includes("已移除的标签仍出现"))) ? " is-warning" : ""}`}><span className="status-dot is-ready" /><strong>结构检查通过</strong><span>语义仍需人工确认 · {result.candidates.length} 条候选 · {result.data_pack_id}</span></div>
             {remoteEnabled && <div className="generation-submit-bar">
-              <div><strong>远程生图</strong><span>{generationSummary(generationSettings)}{activeTarget?.host_fingerprint_ready ? " · 当前连接已确认指纹" : activeTarget ? " · 当前连接尚未确认指纹，请先前往设置" : " · 当前模型没有兼容工作流"}</span></div>
-              <label className="generation-target-field"><span>云主机连接</span><select aria-label="云主机连接" value={selectedRemoteId || ""} onChange={(event) => selectRemoteConnection(event.target.value)} disabled={!remoteConnections.length}>
-                {remoteConnections.length ? remoteConnections.map((target) => <option key={target.remote_profile_id} value={target.remote_profile_id}>{remoteConnectionLabel(target)}{duplicateConnectionLabels.has(target.remote_profile_id) ? ` · 连接 ${target.remote_profile_id.slice(0, 8)}` : ""}{target.host_fingerprint_ready ? "" : " · 待确认指纹"}</option>) : <option value="">无可用连接</option>}
-              </select></label>
-              <label className="generation-target-field"><span>工作流</span><select aria-label="远程工作流" value={selectedWorkflowId || ""} onChange={(event) => setSelectedTarget(`${selectedRemoteId}::${event.target.value}`)} disabled={!connectionWorkflows.length}>
-                {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}</option>) : <option value="">当前模型无兼容工作流</option>}
-              </select></label>
+              <div><strong>远程生图</strong><span>{generationSummary(generationSettings)}{activeTarget ? ` · ${activeTarget.workflow_display_name}` : ""}{activeTarget?.host_fingerprint_ready ? " · 当前连接已确认指纹" : activeTarget ? " · 当前连接尚未确认指纹，请先前往设置" : " · 当前模型没有兼容工作流"}</span></div>
               {activeTarget?.auth_type === "private_key" && <label className="passphrase-input"><span>私钥口令（可选，仅本次运行内存）</span><input type="password" autoComplete="current-password" value={privateKeyPassphrase} onChange={(event) => setPrivateKeyPassphrase(event.target.value)} placeholder={activeTarget.private_key_passphrase_configured ? "已在本次运行中设置" : "私钥未加密可留空"} /></label>}
             </div>}
             {generationNotice && <div className="workspace-notice workspace-notice--error" role="alert">{generationNotice}</div>}
@@ -1419,25 +1492,16 @@ function PromptBlock({label, value, copied, onCopy, negative = false, notes = []
 }
 
 function normalizeDraft(draft: Partial<WorkspaceDraft> | undefined, naturalLanguageEnabled: boolean): WorkspaceDraft {
+  const modelProfile = draft?.model_profile || "anima_aesthetic_v1";
   return {
     positive_text: draft?.positive_text || "",
     excluded_text: draft?.excluded_text || "",
-    model_profile: draft?.model_profile || "anima_aesthetic_v1",
+    model_profile: modelProfile,
     input_mode: draft?.input_mode || (naturalLanguageEnabled ? "natural" : "concepts"),
     natural_text: draft?.natural_text || "",
     selected_tags: draft?.selected_tags || [],
     suppressed_tags: draft?.suppressed_tags || [],
-    generation_settings: {...defaultGenerationSettings, ...(draft?.generation_settings || {})},
-  };
-}
-
-function resolvedGenerationSettings(settings: WorkbenchGenerationSettings, overrides: {seed?: number; batch_size?: number} = {}) {
-  const size = aspectSizes[settings.aspect];
-  return {
-    preset_id: settings.preset_id,
-    ...(size || {}),
-    seed: overrides.seed ?? settings.seed,
-    batch_size: overrides.batch_size ?? settings.batch_size,
+    generation_settings: {...defaultGenerationSettings(), ...(draft?.generation_settings || {})},
   };
 }
 
@@ -1504,7 +1568,9 @@ function annotatePrompt(value: string, labels: Map<string, string>, proseZh: str
 
 function generationSummary(settings: WorkbenchGenerationSettings): string {
   const seedLabel = settings.seed < 0 ? "随机 Seed" : `Seed ${settings.seed}`;
-  return `${presetLabels[settings.preset_id]} · ${aspectLabels[settings.aspect]} · ${seedLabel} · 批量 ${settings.batch_size}`;
+  const sizeLabel = settings.aspect === "custom" ? `${settings.width}×${settings.height}` : aspectLabels[settings.aspect];
+  const recipeLabel = settings.preset_id === "custom" ? "自定义参数" : settings.preset_id;
+  return `${recipeLabel} · ${sizeLabel} · ${settings.steps} Steps · CFG ${settings.cfg} · ${settings.sampler}/${settings.scheduler} · ${seedLabel} · 批量 ${settings.batch_size}`;
 }
 
 function splitConcepts(value: string): string[] {

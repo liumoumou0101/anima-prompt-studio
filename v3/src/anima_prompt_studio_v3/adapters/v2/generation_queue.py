@@ -28,6 +28,7 @@ from anima_prompt_studio.services.remote.credential_store import CredentialStore
 from anima_prompt_studio.domain.models import PromptJob
 
 from .generation import V2PreparedGeneration
+from ...core.generation_recipes import build_workflow_recipe_contract, validate_job_recipe
 
 
 class GenerationQueueError(RuntimeError):
@@ -425,6 +426,7 @@ class V2GenerationQueueService:
         compatible = workflow.compatible_model_profiles
         if compatible and prepared.job.model_profile_id not in compatible:
             raise ValueError("工作流与当前模型配置不兼容。")
+        validate_job_recipe(prepared.job, workflow)
 
     @staticmethod
     def _validate_remote_target(target: V2GenerationTarget) -> None:
@@ -502,6 +504,7 @@ def build_v2_generation_queue(
                 "host_fingerprint_ready": bool(profile.known_host_fingerprint),
                 "auth_type": profile.auth_type.value,
                 "private_key_passphrase_configured": passphrases.has(profile.id),
+                **build_workflow_recipe_contract(workflow),
             }
             for profile in profiles
             for workflow in workflows

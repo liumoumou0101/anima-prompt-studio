@@ -23,6 +23,20 @@ const candidate: PromptCandidate = {
   versions: {data_pack: "pack-r1", algorithm: "literal-v1", templates: "renderer-v1", model_profile: "anima_base_v1"},
 };
 
+const baseRecipeContract = {
+  default_recipe_id: "stable_baseline",
+  generation_recipes: [
+    {id: "stable_baseline", display_name: "稳定基线", objective: "baseline", parameters: {steps: 30, cfg: 4, sampler: "er_sde", scheduler: "simple"}, notes: "工作流模板基线。", evidence: "workflow_template"},
+    {id: "detail_study", display_name: "细节实验", objective: "detail_study", parameters: {steps: 40, cfg: 4.5, sampler: "er_sde", scheduler: "simple"}, notes: "固定 Seed 对照实验。", evidence: "experimental"},
+  ],
+  parameter_capabilities: {
+    steps: {mode: "editable", value: 30, minimum: 30, maximum: 50, options: [], reason: "验证范围"},
+    cfg: {mode: "editable", value: 4, minimum: 4, maximum: 5, options: [], reason: "验证范围"},
+    sampler: {mode: "editable", value: "er_sde", options: ["er_sde", "euler", "dpmpp_2m_sde_gpu"], reason: "风格取向"},
+    scheduler: {mode: "fixed", value: "simple", options: [], reason: "工作流固定"},
+  },
+};
+
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.setItem("anima-v3-session", "session-token");
@@ -724,6 +738,7 @@ it("keeps same-named connections distinct and submits to the selected cloud host
       host_fingerprint_ready: true,
       auth_type: "agent",
       private_key_passphrase_configured: false,
+      ...baseRecipeContract,
     }, {
       remote_profile_id: "remote-2",
       remote_display_name: "测试云主机",
@@ -736,6 +751,7 @@ it("keeps same-named connections distinct and submits to the selected cloud host
       host_fingerprint_ready: true,
       auth_type: "agent",
       private_key_passphrase_configured: false,
+      ...baseRecipeContract,
     }, {
       remote_profile_id: "remote-3",
       remote_display_name: "新云显卡",
@@ -748,6 +764,7 @@ it("keeps same-named connections distinct and submits to the selected cloud host
       host_fingerprint_ready: false,
       auth_type: "agent",
       private_key_passphrase_configured: false,
+      ...baseRecipeContract,
     }]}), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({
       intent: {source_text: "女仆", source_language: "zh", graph: {elements: []}},
@@ -779,7 +796,7 @@ it("keeps same-named connections distinct and submits to the selected cloud host
   expect(request.remote_profile_id).toBe("remote-2");
   expect(request.workflow_profile_id).toBe("workflow-1");
   expect(request.candidate.id).toBe("candidate_literal");
-  expect(request.settings).toEqual({preset_id: "balanced", width: 896, height: 1152, seed: -1, batch_size: 1});
+  expect(request.settings).toEqual({preset_id: "stable_baseline", width: 896, height: 1152, steps: 30, cfg: 4, sampler: "er_sde", scheduler: "simple", seed: -1, batch_size: 1});
   expect(new Headers(fetchMock.mock.calls[3][1]?.headers).get("Idempotency-Key")).toMatch(/^web-/);
 });
 
@@ -835,7 +852,7 @@ it("locks one candidate and submits separate fixed-seed jobs for selected artist
   ];
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify({items: [{
-      remote_profile_id: "remote-1", remote_display_name: "测试云主机", workflow_profile_id: "workflow-1", workflow_display_name: "ANIMA Base", workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_base_v1", "anima_aesthetic_v1"], host_fingerprint_ready: true, auth_type: "agent", private_key_passphrase_configured: false,
+      remote_profile_id: "remote-1", remote_display_name: "测试云主机", workflow_profile_id: "workflow-1", workflow_display_name: "ANIMA Base", workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_base_v1", "anima_aesthetic_v1"], host_fingerprint_ready: true, auth_type: "agent", private_key_passphrase_configured: false, ...baseRecipeContract,
     }]}), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({
       intent: {source_text: "女仆", source_language: "zh", graph: {elements: []}}, candidates: [candidate], validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1", artist_suggestions: artists,
@@ -862,7 +879,7 @@ it("locks one candidate and submits separate fixed-seed jobs for selected artist
   expect(fetchMock.mock.calls[3][0]).toBe("/api/v3/artist-comparisons");
   const request = JSON.parse(String(fetchMock.mock.calls[3][1]?.body));
   expect(request.artist_names).toEqual(["artist_a", "artist_b"]);
-  expect(request.settings).toEqual({preset_id: "balanced", width: 896, height: 1152, seed: 123, batch_size: 1});
+  expect(request.settings).toEqual({preset_id: "stable_baseline", width: 896, height: 1152, steps: 30, cfg: 4, sampler: "er_sde", scheduler: "simple", seed: 123, batch_size: 1});
   expect(request.candidate.id).toBe("candidate_literal");
   expect(new Headers(fetchMock.mock.calls[3][1]?.headers).get("Idempotency-Key")).toMatch(/^artist-comparison-/);
 });
@@ -958,7 +975,7 @@ it("annotates English scene plans with Chinese back-translation and lets users d
 it("writes the visible generation spec into the remote request", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify({items: [{
-      remote_profile_id: "remote-1", remote_display_name: "测试云主机", workflow_profile_id: "workflow-1", workflow_display_name: "ANIMA Aesthetic", workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_aesthetic_v1"], host_fingerprint_ready: true, auth_type: "agent", private_key_passphrase_configured: false,
+      remote_profile_id: "remote-1", remote_display_name: "测试云主机", workflow_profile_id: "workflow-1", workflow_display_name: "ANIMA Aesthetic", workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_aesthetic_v1"], host_fingerprint_ready: true, auth_type: "agent", private_key_passphrase_configured: false, ...baseRecipeContract,
     }]}), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({
       intent: {source_text: "女仆", source_language: "zh", graph: {elements: []}}, candidates: [candidate], validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1",
@@ -968,7 +985,10 @@ it("writes the visible generation spec into the remote request", async () => {
   render(<MemoryRouter><WorkbenchPage remoteEnabled /></MemoryRouter>);
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   fireEvent.change(screen.getByLabelText("画幅"), {target: {value: "landscape"}});
-  fireEvent.change(screen.getByLabelText("预设"), {target: {value: "quality"}});
+  fireEvent.change(screen.getByLabelText("生成配方"), {target: {value: "detail_study"}});
+  fireEvent.change(screen.getByLabelText("采样步数 Steps"), {target: {value: "46"}});
+  fireEvent.change(screen.getByLabelText("CFG"), {target: {value: "4.2"}});
+  fireEvent.change(screen.getByLabelText("采样器 Sampler"), {target: {value: "dpmpp_2m_sde_gpu"}});
   fireEvent.change(screen.getByLabelText("Seed"), {target: {value: "42"}});
   fireEvent.change(screen.getByLabelText("希望画面中出现"), {target: {value: "女仆"}});
   fireEvent.click(screen.getByRole("button", {name: "生成候选"}));
@@ -976,7 +996,7 @@ it("writes the visible generation spec into the remote request", async () => {
   fireEvent.click(screen.getByRole("button", {name: "远程生图"}));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).settings).toEqual({preset_id: "quality", width: 1152, height: 896, seed: 42, batch_size: 1});
+  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).settings).toEqual({preset_id: "custom", width: 1152, height: 896, steps: 46, cfg: 4.2, sampler: "dpmpp_2m_sde_gpu", scheduler: "simple", seed: 42, batch_size: 1});
 });
 
 it("keeps English structured tags bilingual and suppressed after recompiling", async () => {

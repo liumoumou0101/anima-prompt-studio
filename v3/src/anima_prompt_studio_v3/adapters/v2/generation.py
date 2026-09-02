@@ -24,6 +24,10 @@ class V2GenerationSettings(BaseModel):
     preset_id: str = "balanced"
     width: int | None = Field(default=None, ge=64, le=8192)
     height: int | None = Field(default=None, ge=64, le=8192)
+    steps: int | None = Field(default=None, ge=1, le=200)
+    cfg: float | None = Field(default=None, ge=0, le=30)
+    sampler: str | None = Field(default=None, min_length=1, max_length=100)
+    scheduler: str | None = Field(default=None, min_length=1, max_length=100)
     seed: int = Field(default=-1, ge=-1)
     batch_size: int = Field(default=1, ge=1, le=100)
 
@@ -40,6 +44,18 @@ class CandidateToV2PromptJobAdapter:
     def __init__(self, config: ConfigService | None = None) -> None:
         self.config = config or ConfigService()
 
+    def _fallback_preset(self, model_id: str, preset_id: str):
+        """V2 defaults are only a compatibility fallback for omitted fields.
+
+        V3 workflow recipes have their own ids and always send explicit
+        parameters.  Looking up those ids in V2 would incorrectly make V2 the
+        owner of the new recipe catalog.
+        """
+        try:
+            return self.config.get_generation_preset(model_id, preset_id)
+        except ValueError:
+            return self.config.get_generation_preset(model_id, "balanced")
+
     def prepare(
         self,
         candidate: PromptCandidate,
@@ -52,17 +68,17 @@ class CandidateToV2PromptJobAdapter:
     ) -> V2PreparedGeneration:
         settings = settings or V2GenerationSettings()
         model = self.config.get_model(candidate.versions.model_profile)
-        preset = self.config.get_generation_preset(model.id, settings.preset_id)
+        preset = self._fallback_preset(model.id, settings.preset_id)
         if not candidate.positive_prompt.strip():
             raise ValueError("V3 候选缺少正向提示词。")
 
         generation_params = GenerationParams(
             width=settings.width or model.default_width,
             height=settings.height or model.default_height,
-            steps=preset.steps,
-            cfg=preset.cfg,
-            sampler=preset.sampler,
-            scheduler=preset.scheduler,
+            steps=settings.steps if settings.steps is not None else preset.steps,
+            cfg=settings.cfg if settings.cfg is not None else preset.cfg,
+            sampler=settings.sampler or preset.sampler,
+            scheduler=settings.scheduler or preset.scheduler,
             seed=settings.seed,
             batch_size=settings.batch_size,
         )
@@ -86,6 +102,7 @@ class CandidateToV2PromptJobAdapter:
             "candidate": candidate.model_dump(mode="json"),
             "intent": intent.model_dump(mode="json"),
             "workspace": {"id": workspace_id, "revision": workspace_revision},
+            "generation_recipe": {"schema": "v3-workflow-recipe/1", "id": settings.preset_id},
         }
         job = PromptJob(
             project_name=project_name,
@@ -122,7 +139,7 @@ class CandidateToV2PromptJobAdapter:
 
         settings = settings or V2GenerationSettings()
         model = self.config.get_model(model_profile_id)
-        preset = self.config.get_generation_preset(model.id, settings.preset_id)
+        preset = self._fallback_preset(model.id, settings.preset_id)
         positive = positive_prompt.strip()
         if not positive:
             raise ValueError("英文直出缺少正向提示词。")
@@ -130,10 +147,10 @@ class CandidateToV2PromptJobAdapter:
         generation_params = GenerationParams(
             width=settings.width or model.default_width,
             height=settings.height or model.default_height,
-            steps=preset.steps,
-            cfg=preset.cfg,
-            sampler=preset.sampler,
-            scheduler=preset.scheduler,
+            steps=settings.steps if settings.steps is not None else preset.steps,
+            cfg=settings.cfg if settings.cfg is not None else preset.cfg,
+            sampler=settings.sampler or preset.sampler,
+            scheduler=settings.scheduler or preset.scheduler,
             seed=settings.seed,
             batch_size=settings.batch_size,
         )
@@ -154,6 +171,7 @@ class CandidateToV2PromptJobAdapter:
                 "schema": BRIDGE_SCHEMA,
                 "origin": "direct_prompt",
                 "model_profile": model.id,
+                "generation_recipe": {"schema": "v3-workflow-recipe/1", "id": settings.preset_id},
             },
         )
         return V2PreparedGeneration(job=job, checkpoint_logical_name=model.checkpoint_logical_name)

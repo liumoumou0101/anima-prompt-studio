@@ -114,7 +114,9 @@ class WorkflowRenderer:
             "filename_prefix": f"Anima_{run_id[:8]}",
         }
         values = dict(common_values)
-        if workflow_profile.workflow_kind != HIRES_FIX_WORKFLOW_KIND:
+        recipe_metadata = job.integration_metadata.get("generation_recipe", {})
+        is_v3_recipe = isinstance(recipe_metadata, dict) and recipe_metadata.get("schema") == "v3-workflow-recipe/1"
+        if workflow_profile.workflow_kind != HIRES_FIX_WORKFLOW_KIND or is_v3_recipe:
             values.update({
                 "steps": params.steps,
                 "cfg": params.cfg,
