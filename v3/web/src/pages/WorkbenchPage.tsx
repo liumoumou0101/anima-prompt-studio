@@ -1116,11 +1116,13 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
             ) : result ? (
               <>
                 <WorkbenchDisclosure id="workbench-candidates" title="候选提示词" summary={`${result.candidates.length} 条候选 · 结构检查通过`} badge={result.candidates.length} open={openSections["workbench-candidates"]} onToggle={() => toggleWorkbenchSection("workbench-candidates")}>
-                  <div className={`validation-strip${(result.scene_draft?.unresolved.length || result.scene_draft?.risk_notes.some((note) => note.includes("已移除的标签仍出现"))) ? " is-warning" : ""}`}><span className="status-dot is-ready" /><strong>结构检查通过</strong><span>语义仍需人工确认 · {result.candidates.length} 条候选 · {result.data_pack_id}</span></div>
-                  {remoteEnabled && <div className="generation-submit-bar">
-                    <div><strong>远程生图</strong><span>{generationSummary(generationSettings)}{activeTarget ? ` · ${activeTarget.workflow_display_name}` : ""}{activeTarget?.host_fingerprint_ready ? " · 当前连接已确认指纹" : activeTarget ? " · 当前连接尚未确认指纹，请先前往设置" : " · 当前模型没有兼容工作流"}</span></div>
-                    {activeTarget?.auth_type === "private_key" && <label className="passphrase-input"><span>私钥口令（可选，仅本次运行内存）</span><input type="password" autoComplete="current-password" value={privateKeyPassphrase} onChange={(event) => setPrivateKeyPassphrase(event.target.value)} placeholder={activeTarget.private_key_passphrase_configured ? "已在本次运行中设置" : "私钥未加密可留空"} /></label>}
-                  </div>}
+                  <div className="candidate-status-row">
+                    <div className={`validation-strip${(result.scene_draft?.unresolved.length || result.scene_draft?.risk_notes.some((note) => note.includes("已移除的标签仍出现"))) ? " is-warning" : ""}`}><span className="status-dot is-ready" /><strong>结构检查通过</strong><span>语义仍需人工确认 · {result.candidates.length} 条候选 · {result.data_pack_id}</span></div>
+                    {remoteEnabled && <div className="generation-submit-bar">
+                      <div><strong>远程生图</strong><span>{generationSummary(generationSettings)}{activeTarget ? ` · ${activeTarget.workflow_display_name}` : ""}{activeTarget?.host_fingerprint_ready ? " · 当前连接已确认指纹" : activeTarget ? " · 当前连接尚未确认指纹，请先前往设置" : " · 当前模型没有兼容工作流"}</span></div>
+                      {activeTarget?.auth_type === "private_key" && <label className="passphrase-input"><span>私钥口令（可选，仅本次运行内存）</span><input type="password" autoComplete="current-password" value={privateKeyPassphrase} onChange={(event) => setPrivateKeyPassphrase(event.target.value)} placeholder={activeTarget.private_key_passphrase_configured ? "已在本次运行中设置" : "私钥未加密可留空"} /></label>}
+                    </div>}
+                  </div>
                   {generationNotice && <div className="workspace-notice workspace-notice--error" role="alert">{generationNotice}</div>}
                   <div className="candidate-grid">
                     {result.candidates.map((candidate) => (
@@ -1284,109 +1286,115 @@ function SceneDraftReview({draft, relatedSuggestions, selectedTags, busy, compos
   return (
     <section className="scene-draft-review" aria-label="Scene Draft">
       <header><div><strong>Scene Draft</strong><span>原文证据、译文和本地映射分开保存；角色卡和作品标签需要单独确认，建议不会自动加入候选。</span></div></header>
-      {draft.scene_plan_enabled !== false && <div className="scene-draft-prose">
-        <div><strong>可编辑画面计划</strong><span>英文可直接改；周围的中文是回译对照，不会自动改提示词。</span></div>
-        <textarea aria-label="可编辑画面计划" value={translatedText} disabled={busy} onChange={(event) => setTranslatedText(event.target.value)} rows={4} />
-        {back?.segments?.length ? (
-          <div className="scene-draft-backtranslation" role="region" aria-label="英文画面计划的中文回译对照">
-            <strong>中文回译对照</strong>
-            <p>{back.text || "回译不可用"}</p>
-            <ul>{back.segments.map((segment) => (
-              <li key={segment.en}>
-                <code>{segment.en}</code>
-                <span>{segment.zh || "无中文对照"}</span>
-              </li>
-            ))}</ul>
-            {back.engine && <small>{back.engine} · 仅供人工对照，发现串词或幻觉时请改英文或删除标签</small>}
+      <div className="scene-draft-columns">
+        <div className="scene-draft-plan">
+          {draft.scene_plan_enabled !== false && <div className="scene-draft-prose">
+            <div><strong>可编辑画面计划</strong><span>英文可直接改；周围的中文是回译对照，不会自动改提示词。</span></div>
+            <textarea aria-label="可编辑画面计划" value={translatedText} disabled={busy} onChange={(event) => setTranslatedText(event.target.value)} rows={4} />
+            {back?.segments?.length ? (
+              <div className="scene-draft-backtranslation" role="region" aria-label="英文画面计划的中文回译对照">
+                <strong>中文回译对照</strong>
+                <p>{back.text || "回译不可用"}</p>
+                <ul>{back.segments.map((segment) => (
+                  <li key={segment.en}>
+                    <code>{segment.en}</code>
+                    <span>{segment.zh || "无中文对照"}</span>
+                  </li>
+                ))}</ul>
+                {back.engine && <small>{back.engine} · 仅供人工对照，发现串词或幻觉时请改英文或删除标签</small>}
+              </div>
+            ) : null}
+            <button type="button" disabled={busy || !translatedText.trim() || translatedText.trim() === draft.translated_text.trim()} onClick={() => void onApplyTranslation(translatedText.trim())}>{busy ? "正在重新映射…" : "应用译文修改"}</button>
+          </div>}
+          <LayeredDraftGroup items={draft.confirmed.filter((item) => item.fact_type !== "composition")} busy={busy} onRemove={onRemoveItem} />
+        </div>
+        <div className="scene-draft-evidence">
+          <CompositionChipReview palette={draft.composition_palette || []} presets={draft.composition_presets || []} confirmed={draft.confirmed.filter((item) => item.fact_type === "composition")} busy={busy} compositionBusy={compositionBusy} onToggle={onToggleComposition} onApplyPreset={onApplyPreset} onRemove={onRemoveItem} />
+          <EntityOwnershipReview draft={draft} busy={busy} onAssign={onAssignFactOwner} />
+          <SceneRelationReview draft={draft} busy={busy} onToggle={onToggleRelation} />
+          <DraftGroup label="明确排除" items={draft.exclusions || []} empty="当前没有识别到明确排除项。" excluded busy={busy} onRemove={onRemoveItem} />
+          {identityExclusionSuggestions.size > 0 && (
+            <div className="scene-draft-group is-identity is-excluded">
+              <strong>疑似要排除的角色/作品，需确认</strong>
+              <p>这些名字来自角色卡或作品标签，不会自动写入负向提示词。请核对其英文 tag 后再点选排除。</p>
+              <div className="scene-draft-suggestions">{[...identityExclusionSuggestions].map(([tag, item]) => {
+                const selected = excludedTags.has(tag);
+                return <button type="button" key={tag} aria-pressed={selected} disabled={busy} title={item.reason} onClick={() => void onToggleExclusion(tag)}><span>{item.zh || item.rendered}</span><small>{item.zh ? `${item.rendered}${selected ? " · 已排除" : ""}` : `${selected ? "已排除 · " : ""}${item.rendered}`}</small></button>;
+              })}</div>
+            </div>
+          )}
+          {broadExclusionSuggestions.size > 0 && (
+            <div className="scene-draft-group is-excluded">
+              <strong>排除过宽，需确认</strong>
+              <p>排除短语比这些标签更具体，未自动把整类写入负向。点选后才会加入负向提示词。</p>
+              <div className="scene-draft-suggestions">{[...broadExclusionSuggestions].map(([tag, item]) => {
+                const selected = excludedTags.has(tag);
+                return <button type="button" key={tag} aria-pressed={selected} disabled={busy} title={item.reason} onClick={() => void onToggleExclusion(tag)}><span>{item.zh || item.rendered}</span><small>{item.zh ? `${item.rendered}${selected ? " · 已排除" : ""}` : `${selected ? "已排除 · " : ""}${item.rendered}`}</small></button>;
+              })}</div>
+            </div>
+          )}
+          {identitySuggestions.size > 0 && (
+            <div className="scene-draft-group is-identity">
+              <strong>疑似角色/作品，需确认</strong>
+              <p>这些名字来自角色卡或作品标签，可能很生僻，不会自动加入提示词。请核对其英文 tag 后再点选。</p>
+              <div className="scene-draft-suggestions">{[...identitySuggestions].map(([tag, item]) => {
+                const selected = selectedTags.includes(tag);
+                return <button type="button" key={tag} aria-pressed={selected} disabled={busy} title={item.reason} onClick={() => void onToggle(tag)}><span>{item.zh || item.rendered}</span><small>{item.zh ? `${item.rendered}${selected ? " · 已选用" : ""}` : `${selected ? "已选用 · " : ""}${item.rendered}`}</small></button>;
+              })}</div>
+            </div>
+          )}
+          {(draft.ambiguous || []).length > 0 && (
+            <div className="scene-draft-group">
+              <strong>一对多，请点选</strong>
+              {(draft.ambiguous || []).map((group) => (
+                <div key={group.text} className="scene-draft-ambiguous">
+                  <span>“{group.text}”可对应多条标签</span>
+                  <div className="scene-draft-suggestions">{group.options.map((option) => {
+                    const selected = selectedTags.includes(option.canonical_tag);
+                    return <button type="button" key={option.canonical_tag} aria-pressed={selected} disabled={busy} onClick={() => void onToggle(option.canonical_tag)}><span>{option.cn_name || option.render_name}</span><small>{selected ? "已选用" : option.render_name}</small></button>;
+                  })}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {(draft.ambiguous_exclusions || []).length > 0 && (
+            <div className="scene-draft-group is-excluded">
+              <strong>排除一对多，请点选</strong>
+              {(draft.ambiguous_exclusions || []).map((group) => (
+                <div key={`ex-${group.text}`} className="scene-draft-ambiguous">
+                  <span>“{group.text}”可对应多条负向标签</span>
+                  <div className="scene-draft-suggestions">{group.options.map((option) => {
+                    const selected = excludedTags.has(option.canonical_tag);
+                    return <button type="button" key={option.canonical_tag} aria-pressed={selected} disabled={busy} onClick={() => void onToggleExclusion(option.canonical_tag)}><span>{option.cn_name || option.render_name}</span><small>{selected ? "已排除" : option.render_name}</small></button>;
+                  })}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="scene-draft-group">
+            <strong>待确认建议</strong>
+            {suggestions.size ? <div className="scene-draft-suggestions">{[...suggestions].map(([tag, item]) => {
+              const selected = selectedTags.includes(tag);
+              return <button type="button" key={tag} aria-pressed={selected} disabled={busy} title={item.reason} onClick={() => void onToggle(tag)}><span>{item.zh || item.rendered}</span><small>{item.zh ? `${item.rendered}${selected ? " · 已选用" : ""}` : `${selected ? "已选用 · " : ""}无中文名`}</small></button>;
+            })}</div> : <p>没有待确认的标签建议。</p>}
           </div>
-        ) : null}
-        <button type="button" disabled={busy || !translatedText.trim() || translatedText.trim() === draft.translated_text.trim()} onClick={() => void onApplyTranslation(translatedText.trim())}>{busy ? "正在重新映射…" : "应用译文修改"}</button>
-      </div>}
-      <LayeredDraftGroup items={draft.confirmed.filter((item) => item.fact_type !== "composition")} busy={busy} onRemove={onRemoveItem} />
-      <CompositionChipReview palette={draft.composition_palette || []} presets={draft.composition_presets || []} confirmed={draft.confirmed.filter((item) => item.fact_type === "composition")} busy={busy} compositionBusy={compositionBusy} onToggle={onToggleComposition} onApplyPreset={onApplyPreset} onRemove={onRemoveItem} />
-      <EntityOwnershipReview draft={draft} busy={busy} onAssign={onAssignFactOwner} />
-      <SceneRelationReview draft={draft} busy={busy} onToggle={onToggleRelation} />
-      <DraftGroup label="明确排除" items={draft.exclusions || []} empty="当前没有识别到明确排除项。" excluded busy={busy} onRemove={onRemoveItem} />
-      {identityExclusionSuggestions.size > 0 && (
-        <div className="scene-draft-group is-identity is-excluded">
-          <strong>疑似要排除的角色/作品，需确认</strong>
-          <p>这些名字来自角色卡或作品标签，不会自动写入负向提示词。请核对其英文 tag 后再点选排除。</p>
-          <div className="scene-draft-suggestions">{[...identityExclusionSuggestions].map(([tag, item]) => {
-            const selected = excludedTags.has(tag);
-            return <button type="button" key={tag} aria-pressed={selected} disabled={busy} title={item.reason} onClick={() => void onToggleExclusion(tag)}><span>{item.zh || item.rendered}</span><small>{item.zh ? `${item.rendered}${selected ? " · 已排除" : ""}` : `${selected ? "已排除 · " : ""}${item.rendered}`}</small></button>;
-          })}</div>
-        </div>
-      )}
-      {broadExclusionSuggestions.size > 0 && (
-        <div className="scene-draft-group is-excluded">
-          <strong>排除过宽，需确认</strong>
-          <p>排除短语比这些标签更具体，未自动把整类写入负向。点选后才会加入负向提示词。</p>
-          <div className="scene-draft-suggestions">{[...broadExclusionSuggestions].map(([tag, item]) => {
-            const selected = excludedTags.has(tag);
-            return <button type="button" key={tag} aria-pressed={selected} disabled={busy} title={item.reason} onClick={() => void onToggleExclusion(tag)}><span>{item.zh || item.rendered}</span><small>{item.zh ? `${item.rendered}${selected ? " · 已排除" : ""}` : `${selected ? "已排除 · " : ""}${item.rendered}`}</small></button>;
-          })}</div>
-        </div>
-      )}
-      {identitySuggestions.size > 0 && (
-        <div className="scene-draft-group is-identity">
-          <strong>疑似角色/作品，需确认</strong>
-          <p>这些名字来自角色卡或作品标签，可能很生僻，不会自动加入提示词。请核对其英文 tag 后再点选。</p>
-          <div className="scene-draft-suggestions">{[...identitySuggestions].map(([tag, item]) => {
-            const selected = selectedTags.includes(tag);
-            return <button type="button" key={tag} aria-pressed={selected} disabled={busy} title={item.reason} onClick={() => void onToggle(tag)}><span>{item.zh || item.rendered}</span><small>{item.zh ? `${item.rendered}${selected ? " · 已选用" : ""}` : `${selected ? "已选用 · " : ""}${item.rendered}`}</small></button>;
-          })}</div>
-        </div>
-      )}
-      {(draft.ambiguous || []).length > 0 && (
-        <div className="scene-draft-group">
-          <strong>一对多，请点选</strong>
-          {(draft.ambiguous || []).map((group) => (
-            <div key={group.text} className="scene-draft-ambiguous">
-              <span>“{group.text}”可对应多条标签</span>
-              <div className="scene-draft-suggestions">{group.options.map((option) => {
-                const selected = selectedTags.includes(option.canonical_tag);
-                return <button type="button" key={option.canonical_tag} aria-pressed={selected} disabled={busy} onClick={() => void onToggle(option.canonical_tag)}><span>{option.cn_name || option.render_name}</span><small>{selected ? "已选用" : option.render_name}</small></button>;
-              })}</div>
+          <DraftGroup label="未命中内容" items={draft.unresolved} empty="全部内容都有本地确认映射；仍请检查动作、关系和构图。" />
+          {(draft.suppressed || []).length > 0 && (
+            <div className="scene-draft-group is-suppressed">
+              <strong>已移除，不会自动恢复</strong>
+              <ul>{(draft.suppressed || []).map((item) => (
+                <li key={item.id}>
+                  <span>{item.text}</span>
+                  {item.canonical_tag && <code>{item.canonical_tag.replaceAll("_", " ")}</code>}
+                  <small>{item.reason}</small>
+                  {item.canonical_tag && <button type="button" aria-label={`恢复 ${item.text}`} disabled={busy} onClick={() => void onRestoreTag(item.canonical_tag as string)}>恢复</button>}
+                </li>
+              ))}</ul>
             </div>
-          ))}
+          )}
+          {draft.risk_notes.length > 0 && <ul className="scene-draft-risks">{draft.risk_notes.map((item) => <li key={item}>{item}</li>)}</ul>}
         </div>
-      )}
-      {(draft.ambiguous_exclusions || []).length > 0 && (
-        <div className="scene-draft-group is-excluded">
-          <strong>排除一对多，请点选</strong>
-          {(draft.ambiguous_exclusions || []).map((group) => (
-            <div key={`ex-${group.text}`} className="scene-draft-ambiguous">
-              <span>“{group.text}”可对应多条负向标签</span>
-              <div className="scene-draft-suggestions">{group.options.map((option) => {
-                const selected = excludedTags.has(option.canonical_tag);
-                return <button type="button" key={option.canonical_tag} aria-pressed={selected} disabled={busy} onClick={() => void onToggleExclusion(option.canonical_tag)}><span>{option.cn_name || option.render_name}</span><small>{selected ? "已排除" : option.render_name}</small></button>;
-              })}</div>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="scene-draft-group">
-        <strong>待确认建议</strong>
-        {suggestions.size ? <div className="scene-draft-suggestions">{[...suggestions].map(([tag, item]) => {
-          const selected = selectedTags.includes(tag);
-          return <button type="button" key={tag} aria-pressed={selected} disabled={busy} title={item.reason} onClick={() => void onToggle(tag)}><span>{item.zh || item.rendered}</span><small>{item.zh ? `${item.rendered}${selected ? " · 已选用" : ""}` : `${selected ? "已选用 · " : ""}无中文名`}</small></button>;
-        })}</div> : <p>没有待确认的标签建议。</p>}
       </div>
-      <DraftGroup label="未命中内容" items={draft.unresolved} empty="全部内容都有本地确认映射；仍请检查动作、关系和构图。" />
-      {(draft.suppressed || []).length > 0 && (
-        <div className="scene-draft-group is-suppressed">
-          <strong>已移除，不会自动恢复</strong>
-          <ul>{(draft.suppressed || []).map((item) => (
-            <li key={item.id}>
-              <span>{item.text}</span>
-              {item.canonical_tag && <code>{item.canonical_tag.replaceAll("_", " ")}</code>}
-              <small>{item.reason}</small>
-              {item.canonical_tag && <button type="button" aria-label={`恢复 ${item.text}`} disabled={busy} onClick={() => void onRestoreTag(item.canonical_tag as string)}>恢复</button>}
-            </li>
-          ))}</ul>
-        </div>
-      )}
-      {draft.risk_notes.length > 0 && <ul className="scene-draft-risks">{draft.risk_notes.map((item) => <li key={item}>{item}</li>)}</ul>}
     </section>
   );
 }

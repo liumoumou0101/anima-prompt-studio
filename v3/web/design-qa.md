@@ -2,44 +2,35 @@
 
 ## Visual truth and captured state
 
-- Source: `C:\Users\10937\AppData\Local\Temp\codex-clipboard-9778ecf2-98b5-4830-833a-e60be2d39a51.png`
-- Source size: 1507 × 6845 physical pixels.
-- Implementation viewport: 1507 × 1000 CSS pixels at device scale factor 1.
-- Implementation full-page capture: `C:\Users\10937\AppData\Local\Temp\anima-v3-workbench-qa\workbench-desktop-collapsed.png`
-- Implementation full-page size: 1507 × 2393 physical pixels.
-- Focused comparison: `C:\Users\10937\AppData\Local\Temp\anima-v3-workbench-qa\comparison-top.png`
-- Full-view comparison: `C:\Users\10937\AppData\Local\Temp\anima-v3-workbench-qa\comparison-full.png`
-- Desktop resolution matrix: `C:\Users\10937\AppData\Local\Temp\anima-v3-workbench-qa\desktop-resolution-matrix.png`
-- Captured state: natural-language input compiled locally; input and candidate sections open; translation, picture-understanding, and artist sections collapsed.
+- Original long-page reference: `C:\Users\10937\AppData\Local\Temp\codex-clipboard-9778ecf2-98b5-4830-833a-e60be2d39a51.png`
+- Pre-refinement 2K captures: `C:\Users\10937\AppData\Local\Temp\anima-workbench-ui-audit-2026-09-03\01-editor-2k.png`, `02-understanding-2k.png`, and `03-candidates-2k.png`.
+- Pre-refinement laptop capture: `C:\Users\10937\AppData\Local\Temp\anima-workbench-ui-audit-2026-09-03\04-candidates-laptop.png`.
+- Final captures: `C:\Users\10937\AppData\Local\Temp\anima-workbench-ui-qa-2026-09-03\`.
+- Side-by-side comparisons: `compare-01-editor-2k.png` through `compare-04-candidates-laptop.png` in the final capture directory.
+- Captured state: natural-language input compiled locally with two validated candidate lanes; no remote generation was submitted.
 
-## Comparison findings
+## Refinement findings and fixes
 
-- Fonts: existing project typography and hierarchy are preserved; the new outline and disclosure labels use the same sans/serif and monospace conventions already present on the workbench.
-- Spacing and geometry: a 164 px page-local outline is added inside the existing content column. The main editor remains three-column at desktop width. Collapsing picture understanding reduces the rendered page from 4197 px to 2393 px for the same result state.
-- Colors and surfaces: navigation, badges, section headers, focus states, and disclosure borders reuse the existing dark neutral and violet accent palette. No new competing visual system was introduced.
-- Imagery: no imagery or generated-output presentation was changed.
-- Copy: section names and helper text are concise, describe the existing regions, and do not change generation semantics.
+- P1 — 2K underused the available desktop width. The workbench-only page now grows to 1840 px; its usable flow increased from about 1086 px to 1502 px while keeping the global navigation and local outline visually separate.
+- P1 — picture understanding was a single deeply nested stack. At 2K it now uses a balanced 55/45 plan-and-evidence split, with confirmed facts grouped under the editable plan. The checked section height dropped from about 1792 px to 1278 px.
+- P1 — validation and remote-generation summaries consumed two full rows before candidates. They now share one compact summary row on FHD and 2K, and stack safely on the laptop viewport.
+- P2 — candidate cards were narrow and tall at 2K. They changed from about 537 × 738 px to 744 × 663 px, with tighter prompt spacing and aligned footers while preserving the two-column comparison.
+- P2 — the page-local outline used 7–9 px metadata. Its labels, metadata, badges, and guidance now use clearer 8–11 px sizing and higher secondary-text contrast.
+- P2 — generation controls did not use 2K width efficiently. They use five columns at 2560 px, remain three columns at 1920 px and 1280 px, and preserve all existing controls and values.
+- The existing dark palette, typography, focus treatment, disclosure behavior, and candidate-lane colors are preserved. No generation, API, workflow, preset, or state logic was changed.
 
-## Interaction and desktop resolution checks
+## Desktop resolution checks
 
-- Desktop outline buttons open a collapsed destination and scroll it to the top of the viewport.
-- Every functional section exposes an accessible `aria-expanded` disclosure button.
-- Translation and artist comparison default to collapsed; picture understanding and candidate results can be collapsed independently.
-- Standard 2K at 2560 × 1440: page-local outline remains visible, the three-column generation grid remains stable, candidate navigation opens and reveals the destination, and no horizontal overflow was detected.
-- Standard 1K/FHD at 1920 × 1080: page-local outline remains visible, candidate navigation aligns the destination near the viewport top, and no horizontal overflow was detected.
-- Current laptop: the panel reports 1920 × 1200 physical pixels with a 1280 × 800 effective viewport at 150% Windows scaling. Both the effective viewport and native-resolution simulation preserve the desktop outline and contain all workbench content without horizontal overflow.
-- Tablet and mobile layouts are outside this acceptance scope and were not used as release criteria.
-- Browser console: zero warnings and zero errors during the checked flow.
+- Standard 2K, 2560 × 1440: 1840 px workbench page, 1704 px local layout, 1502 px content flow, five-column generation controls, two-column picture understanding, 744 px candidate cards, and no horizontal overflow.
+- Standard FHD, 1920 × 1080: 1673 px workbench page, 1335 px content flow, 184 px local outline, three-column generation controls, stacked picture understanding, 660 px candidate cards, and no horizontal overflow.
+- Current laptop effective viewport, 1280 × 800: 1033 px workbench page, 738 px content flow, 176 px local outline, three-column generation controls, stacked picture understanding, two 362 px candidate cards, and no horizontal overflow.
+- Tablet and mobile layouts remain outside this acceptance scope and were not used as release criteria.
 
-## Issue history
+## Interaction and code checks
 
-- P1 — long result state required 4197 px of vertical scrolling. Fixed with section disclosures; the checked compact state is 2393 px.
-- P1 — no persistent way to move between distant workbench regions. Fixed with a sticky desktop outline and sticky mobile selector.
-- P2 — low-frequency translation and artist regions added permanent page length. Fixed by collapsing them by default while preserving their content and state.
-
-## Verification
-
-- `npm test`: 45 tests passed.
-- `npm run build`: passed.
-- 2K, FHD, and current-laptop browser interaction checks: passed.
+- Local outline navigation updates the active item and moves between editor, understanding, candidates, and artist regions.
+- Candidate disclosure closes and reopens without losing the compiled result.
+- Browser console reported zero warnings and zero errors in the checked flow.
+- `npm test -- --run`: 45 tests passed.
+- `npm run build`: passed; the existing Vite advisory for a JavaScript chunk larger than 500 kB remains unchanged.
 - Final result: passed.
