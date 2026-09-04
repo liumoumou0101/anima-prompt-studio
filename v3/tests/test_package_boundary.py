@@ -8,7 +8,7 @@ import anima_prompt_studio_v3.adapters.v2.translation as translation_adapter
 
 
 def test_v3_package_has_independent_version() -> None:
-    assert __version__ == "0.0.0"
+    assert __version__ == "0.1.0"
 
 
 def test_v2_adapter_imports_without_loading_v2_ui() -> None:

@@ -12,6 +12,9 @@ from ..api import LocalApiServer
 from ..data import DataContractError, DataPackManager, DataPackManifest
 
 
+COMFY_ACCESS_URL = "http://127.0.0.1:18188"
+
+
 def default_app_data_dir() -> Path:
     base = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".local" / "share"))
     return base / "AnimaPromptStudio"
@@ -86,6 +89,8 @@ def run(
             flush=True,
         )
         print("ANIMA V3 已启动。关闭此窗口即可停止本地服务。", flush=True)
+        if selected_v2_database is not None:
+            print(f"ComfyUI 网页维护入口：{COMFY_ACCESS_URL}（后台安全隧道连接中）", flush=True)
         if open_browser and not webbrowser.open(server.bootstrap_url, new=1):
             print(f"未能自动打开浏览器，请手动访问：{server.bootstrap_url}", flush=True)
         (wait_event or threading.Event()).wait()

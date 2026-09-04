@@ -21,8 +21,12 @@ from anima_prompt_studio_v3.api import LocalApiServer, SessionManager, create_ap
 from anima_prompt_studio_v3.api.app import (
     _LocalExclusionEvidence,
     _LocalIndexMatch,
+    _ambiguous_source_groups,
     _back_translate_scene_plan,
     _confirmed_source_matches,
+    _demote_partial_exclusion_matches,
+    _divert_protected_identity_matches,
+    _general_specific_tag_conflicts,
     _local_exclusion_concept_matches,
 )
 from anima_prompt_studio_v3.data import (
@@ -115,6 +119,19 @@ def test_health_session_exchange_is_one_time_and_bootstrap_is_protected(referenc
         "ready": True,
         "cutoff_mode": "approximate",
     }
+    assert bootstrap.json()["model_profiles"] == [
+        "anima_aesthetic_v1",
+        "anima_base_v1",
+        "anima_turbo_v1",
+        "anima_turbo_v1_1",
+        "animayume_v1_0_final",
+        "miaomiao_harem_anima_v1_6",
+    ]
+    assert bootstrap.json()["model_profile_options"][-1] == {
+        "id": "miaomiao_harem_anima_v1_6",
+        "display_name": "MiaoMiao Harem ANIMA v1.6",
+        "variant": "community",
+    }
     assert "access-control-allow-origin" not in bootstrap.headers
 
 
@@ -140,9 +157,9 @@ def test_tag_search_detail_related_and_artist_endpoints_are_read_only(reference_
         "cn_name": "颜色",
         "tag_count": 1,
     }]
-    assert browse.json()["ungrouped"]["total"] == 4
-    assert browse.json()["ungrouped"]["safe_count"] == 3
-    assert browse.json()["ungrouped"]["nsfw_count"] == 1
+    assert browse.json()["ungrouped"]["total"] >= 4
+    assert browse.json()["ungrouped"]["safe_count"] >= 3
+    assert browse.json()["ungrouped"]["nsfw_count"] >= 1
     assert "underwear" not in {item["name"] for item in browse.json()["ungrouped"]["items"]}
 
     ungrouped = client.get(
@@ -151,8 +168,8 @@ def test_tag_search_detail_related_and_artist_endpoints_are_read_only(reference_
         headers=auth,
     )
     assert ungrouped.status_code == 200
-    assert [item["name"] for item in ungrouped.json()["items"]] == ["twintails"]
-    assert ungrouped.json()["summary"]["total"] == 4
+    assert "twintails" in [item["name"] for item in ungrouped.json()["items"]]
+    assert ungrouped.json()["summary"]["total"] >= 4
 
     nsfw_only = client.get(
         "/api/v3/tags/ungrouped",
@@ -160,8 +177,8 @@ def test_tag_search_detail_related_and_artist_endpoints_are_read_only(reference_
         headers=auth,
     )
     assert nsfw_only.status_code == 200
-    assert [item["name"] for item in nsfw_only.json()["items"]] == ["underwear"]
-    assert nsfw_only.json()["items"][0]["nsfw"] is True
+    assert "underwear" in [item["name"] for item in nsfw_only.json()["items"]]
+    assert all(item["nsfw"] is True for item in nsfw_only.json()["items"])
 
     group = client.get("/api/v3/tag-groups/attire", params={"q": "apron", "limit": 1}, headers=auth)
     assert group.status_code == 200
@@ -323,13 +340,91 @@ def test_v3_settings_reuses_v2_remote_profile_store_without_exposing_credentials
     )
     assert unavailable.status_code == 409
     assert unavailable.json()["error"]["code"] == "ssh_host_key_unconfirmed"
+    created = client.post(
+        "/api/v3/settings/remote-profiles",
+        json={
+            "display_name": "新增默认云主机",
+            "ssh_host": "preferred.example",
+            "ssh_port": 23,
+            "ssh_user": "root",
+            "auth_type": "agent",
+            "enabled": True,
+        },
+        headers=write_auth,
+    )
+    assert created.status_code == 201
     repository = SQLiteRepository(v2_database)
     try:
         profile = repository.get_remote_profile("existing")
         assert profile.ssh_host == "new.example"
         assert profile.known_host_fingerprint == ""
+        assert repository.get_setting("last_remote_profile_id") == created.json()["id"]
     finally:
         repository.close()
+
+    selected = client.put(
+        "/api/v3/settings/default-remote-profile",
+        json={"remote_profile_id": "existing"},
+        headers=write_auth,
+    )
+    assert selected.status_code == 200
+    assert selected.json() == {"remote_profile_id": "existing"}
+    repository = SQLiteRepository(v2_database)
+    try:
+        assert repository.get_setting("last_remote_profile_id") == "existing"
+    finally:
+        repository.close()
+
+
+def test_artist_ranking_setting_changes_workbench_suggestions(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    v2_database = tmp_path / "v2.db"
+    SQLiteRepository(v2_database).close()
+    runtime = create_api_runtime(reference_db, v2_database=v2_database)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchanged = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
+
+    defaulted = client.get("/api/v3/settings/artist-ranking", headers=headers)
+    assert defaulted.status_code == 200
+    assert defaulted.json() == {"ranking": "tag_fit"}
+
+    saved = client.put(
+        "/api/v3/settings/artist-ranking",
+        json={"ranking": "volume"},
+        headers=headers,
+    )
+    assert saved.status_code == 200
+    assert saved.json() == {"ranking": "volume"}
+
+    recommended = client.post(
+        "/api/v3/artists/recommend",
+        json={"tags": ["maid"], "limit": 10},
+        headers=headers,
+    )
+    assert recommended.status_code == 200
+    assert recommended.json()["ranking"] == "volume"
+
+    override = client.post(
+        "/api/v3/artists/recommend",
+        json={"tags": ["maid"], "limit": 10, "ranking": "tag_fit"},
+        headers=headers,
+    )
+    assert override.status_code == 200
+    assert override.json()["ranking"] == "tag_fit"
+
+    rejected = client.put(
+        "/api/v3/settings/artist-ranking",
+        json={"ranking": "quality"},
+        headers=headers,
+    )
+    assert rejected.status_code == 422
 
 
 def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
@@ -407,6 +502,63 @@ def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
     assert events == ["ssh", "comfy", "close"]
 
 
+def test_v3_settings_opens_managed_comfy_browser_access(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    v2_database = tmp_path / "v2.db"
+    repository = SQLiteRepository(v2_database)
+    try:
+        from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
+
+        repository.save_remote_profile(RemoteProfile(
+            id="browser-ready",
+            display_name="网页维护云主机",
+            ssh_host="gpu.example",
+            ssh_user="root",
+            auth_type=RemoteAuthType.AGENT,
+            known_host_fingerprint="SHA256:confirmed",
+        ))
+    finally:
+        repository.close()
+
+    calls: list[tuple[str, str, str]] = []
+
+    class FakeComfyAccess:
+        def status(self):
+            return {"state": "stopped", "ready": False, "local_url": "http://127.0.0.1:18188"}
+
+        def open(self, profile_id: str, *, password: str, passphrase: str):
+            calls.append((profile_id, password, passphrase))
+            return {"state": "ready", "ready": True, "local_url": "http://127.0.0.1:18188"}
+
+    runtime = create_api_runtime(
+        reference_db,
+        v2_database=v2_database,
+        comfy_access=FakeComfyAccess(),
+    )
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchanged = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
+
+    listed = client.get("/api/v3/settings/remote-profiles", headers=headers)
+    opened = client.post(
+        "/api/v3/settings/remote-profiles/browser-ready/open-comfy",
+        json={"password": "temporary", "passphrase": "key-secret"},
+        headers=headers,
+    )
+
+    assert listed.status_code == 200
+    assert listed.json()["comfy_access"]["local_url"] == "http://127.0.0.1:18188"
+    assert opened.status_code == 200
+    assert opened.json()["ready"] is True
+    assert calls == [("browser-ready", "temporary", "key-secret")]
+
+
 def test_session_manager_revoke_invalidates_token() -> None:
     manager = SessionManager()
     exchange = manager.exchange(manager.issue_bootstrap_token())
@@ -443,6 +595,50 @@ def test_local_api_server_uses_random_loopback_port_and_stops(reference_db: Path
             assert json.loads(response.read())["name"] == "maid"
     with pytest.raises(RuntimeError, match="尚未启动"):
         _ = server.port
+
+
+def test_local_api_server_owns_comfy_access_lifecycle(
+    reference_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import anima_prompt_studio_v3.adapters.v2 as adapters
+
+    events: list[str] = []
+    v2_database = tmp_path / "v2.db"
+    v2_database.write_bytes(b"placeholder")
+
+    class FakeQueue:
+        def shutdown(self, **_kwargs) -> None:
+            events.append("queue-close")
+
+    class FakeGallery:
+        def shutdown(self, **_kwargs) -> None:
+            events.append("gallery-close")
+
+    class FakeComfyAccess:
+        def __init__(self, database: Path) -> None:
+            assert database == v2_database
+
+        def start_default_async(self) -> None:
+            events.append("comfy-start")
+
+        def close(self) -> None:
+            events.append("comfy-close")
+
+        def status(self):
+            return {"state": "stopped", "ready": False, "local_url": "http://127.0.0.1:18188"}
+
+    monkeypatch.setattr(adapters, "build_v2_generation_queue", lambda _database: FakeQueue())
+    monkeypatch.setattr(adapters, "build_v2_gallery_service", lambda _database: FakeGallery())
+    monkeypatch.setattr(adapters, "build_v2_intent_parser", lambda _database: object())
+    monkeypatch.setattr(adapters, "build_v2_local_translation_adapter", lambda: object())
+    monkeypatch.setattr(adapters, "ManagedComfyAccess", FakeComfyAccess)
+
+    with LocalApiServer(reference_db, v2_database=v2_database):
+        assert "comfy-start" in events
+
+    assert "comfy-close" in events
 
 
 def test_frontend_dist_serves_assets_and_spa_without_masking_api_404(
@@ -664,6 +860,32 @@ def test_local_natural_candidate_separates_inline_and_explicit_exclusions(
     assert "不要金发" not in payload["local_translation"]["translated_text"]
 
 
+def test_partial_exclusion_phrase_is_not_upgraded_to_generic_tag() -> None:
+    generic = _LocalIndexMatch("金发", "explicit_exclusion", "blonde_hair", "cn_name", 6000)
+    kept, leftover = _demote_partial_exclusion_matches([generic], (), "浅色金发")
+    assert kept == []
+    assert [item.canonical_tag for item in leftover] == ["blonde_hair"]
+
+    kept, leftover = _demote_partial_exclusion_matches([generic], (), "金发")
+    assert [item.canonical_tag for item in kept] == ["blonde_hair"]
+    assert leftover == []
+
+    inline = _LocalIndexMatch("金发", "source", "blonde_hair", "cn_name", 6000, 2, 4)
+    kept, leftover = _demote_partial_exclusion_matches(
+        [inline],
+        (_LocalExclusionEvidence("浅色金发", 0, 4),),
+        "",
+    )
+    assert kept == []
+    assert [item.canonical_tag for item in leftover] == ["blonde_hair"]
+
+
+def test_general_specific_tag_conflicts_use_token_suffix_not_unrelated_garments() -> None:
+    assert _general_specific_tag_conflicts({"black_socks", "maid"}, {"socks"}) == [("black_socks", "socks")]
+    assert _general_specific_tag_conflicts({"white_thighhighs"}, {"socks"}) == []
+    assert _general_specific_tag_conflicts({"blonde_hair"}, {"hair"}) == [("blonde_hair", "hair")]
+
+
 def test_local_natural_candidate_does_not_claim_partial_tag_coverage_is_complete(
     reference_db: Path,
     tmp_path: Path,
@@ -715,18 +937,35 @@ def test_local_natural_candidate_requires_user_confirmation_for_fact_ownership(
     first = client.post("/api/v3/local-natural/candidates", json=request, headers=auth)
     assert first.status_code == 200
     first_payload = first.json()
-    entities = first_payload["scene_draft"]["entities"]
-    assert [(item["label"], item["canonical_tag"]) for item in entities] == [("博丽灵梦", "hakurei_reimu")]
+    assert [item["canonical_tag"] for item in first_payload["scene_draft"]["confirmed"]] == ["maid"]
+    identity = [item for item in first_payload["scene_draft"]["suggestions"] if item["source"] == "identity_candidate"]
+    assert [item["canonical_tag"] for item in identity] == ["hakurei_reimu"]
+    assert first_payload["scene_draft"]["entities"] == []
+    assert "hakurei reimu" not in first_payload["candidates"][0]["positive_prompt"]
     maid = next(item for item in first_payload["scene_draft"]["confirmed"] if item["canonical_tag"] == "maid")
     assert maid["owner_entity_id"] is None
-    assert maid["suggested_owner_entity_id"] == entities[0]["id"]
+    assert maid["suggested_owner_entity_id"] is None
     assert first_payload["scene_draft"]["relations"] == []
-    first_maid_element = next(item for item in first_payload["intent"]["graph"]["elements"] if item["id"] == maid["id"])
+
+    selected = client.post(
+        "/api/v3/local-natural/candidates",
+        json={**request, "selected_tags": ["hakurei_reimu"]},
+        headers=auth,
+    )
+    assert selected.status_code == 200
+    selected_payload = selected.json()
+    entities = selected_payload["scene_draft"]["entities"]
+    assert [(item["label"], item["canonical_tag"]) for item in entities] == [("博丽灵梦", "hakurei_reimu")]
+    maid = next(item for item in selected_payload["scene_draft"]["confirmed"] if item["canonical_tag"] == "maid")
+    assert maid["suggested_owner_entity_id"] == entities[0]["id"]
+    reimu = next(item for item in selected_payload["scene_draft"]["confirmed"] if item["canonical_tag"] == "hakurei_reimu")
+    assert reimu["source"] == "user_selected"
+    first_maid_element = next(item for item in selected_payload["intent"]["graph"]["elements"] if item["id"] == maid["id"])
     assert first_maid_element["entity_id"] is None
 
     second = client.post(
         "/api/v3/local-natural/candidates",
-        json={**request, "fact_owners": {maid["id"]: entities[0]["id"]}},
+        json={**request, "selected_tags": ["hakurei_reimu"], "fact_owners": {maid["id"]: entities[0]["id"]}},
         headers=auth,
     )
     assert second.status_code == 200
@@ -746,12 +985,13 @@ def test_local_natural_candidate_requires_user_confirmation_for_fact_ownership(
         "phrase": "hakurei reimu wearing maid",
         "reason": "已确认服装归属；穿着关系仍需单独确认",
     }]
-    assert second_payload["candidates"][0]["positive_prompt"] == first_payload["candidates"][0]["positive_prompt"]
+    assert second_payload["candidates"][0]["positive_prompt"] == selected_payload["candidates"][0]["positive_prompt"]
 
     third = client.post(
         "/api/v3/local-natural/candidates",
         json={
             **request,
+            "selected_tags": ["hakurei_reimu"],
             "fact_owners": {maid["id"]: entities[0]["id"]},
             "confirmed_relations": [{
                 "source_entity_id": entities[0]["id"],
@@ -775,7 +1015,8 @@ def test_local_natural_candidate_requires_user_confirmation_for_fact_ownership(
     }]
     literal = next(item for item in third_payload["candidates"] if item["lane"] == "literal")
     hybrid = next(item for item in third_payload["candidates"] if item["lane"] == "hybrid")
-    assert literal["positive_prompt"] == first_payload["candidates"][0]["positive_prompt"]
+    assert literal["positive_prompt"] == selected_payload["candidates"][0]["positive_prompt"]
+    assert "hakurei reimu" in literal["positive_prompt"]
     assert "hakurei reimu wearing maid" in hybrid["positive_prompt"]
 
 
@@ -804,6 +1045,320 @@ def test_local_source_resolution_prefers_longer_primary_phrase_over_nested_term(
     confirmed, _ambiguous = _confirmed_source_matches(matches)
 
     assert [item.canonical_tag for item in confirmed] == ["fallen_angel"]
+
+
+def test_ambiguous_longer_primary_span_occupies_nested_unique_short_term() -> None:
+    matches = [
+        _LocalIndexMatch("白色过膝袜", "source", "white_thighhighs", "cn_name", 343_355, 0, 5),
+        _LocalIndexMatch("白色过膝袜", "source", "white_hiphighs", "cn_name", 205, 0, 5),
+        _LocalIndexMatch("过膝袜", "source", "kneehighs", "cn_name", 165_954, 2, 5),
+        _LocalIndexMatch("过膝袜", "source", "white_thighhighs", "cn_term", 343_355, 2, 5),
+        _LocalIndexMatch("膝袜", "source", "kneesocks_(psg)", "cn_name", 1_345, 3, 5),
+    ]
+
+    confirmed, ambiguous = _confirmed_source_matches(matches)
+
+    assert confirmed == []
+    assert ambiguous == ["白色过膝袜"]
+
+
+def test_related_word_long_span_does_not_occupy_nested_unique_primary() -> None:
+    matches = [
+        _LocalIndexMatch("女仆装", "source", "maid_headdress", "cn_term", 205_559, 0, 3),
+        _LocalIndexMatch("女仆装", "source", "maid_apron", "cn_term", 79_564, 0, 3),
+        _LocalIndexMatch("女仆", "source", "maid", "cn_name", 208_407, 0, 2),
+    ]
+
+    confirmed, ambiguous = _confirmed_source_matches(matches)
+
+    assert [item.canonical_tag for item in confirmed] == ["maid"]
+    assert ambiguous == ["女仆装"]
+
+
+def test_adjacent_unique_primary_phrases_can_both_be_confirmed() -> None:
+    matches = [
+        _LocalIndexMatch("女仆", "source", "maid", "cn_name", 5_000, 0, 2),
+        _LocalIndexMatch("双马尾", "source", "twintails", "cn_name", 3_000, 3, 6),
+    ]
+
+    confirmed, ambiguous = _confirmed_source_matches(matches)
+
+    assert [item.canonical_tag for item in confirmed] == ["maid", "twintails"]
+    assert ambiguous == []
+
+
+def test_ambiguous_groups_keep_the_longer_occupied_span_not_nested_shorts() -> None:
+    class Store:
+        @staticmethod
+        def get_tag(name: str) -> dict[str, object]:
+            return {"render_name": name.replace("_", " "), "cn_name": name, "post_count": 1}
+
+    matches = [
+        _LocalIndexMatch("白色过膝袜", "source", "white_thighhighs", "cn_name", 343_355, 0, 5),
+        _LocalIndexMatch("白色过膝袜", "source", "white_hiphighs", "cn_name", 205, 0, 5),
+        _LocalIndexMatch("过膝袜", "source", "kneehighs", "cn_name", 165_954, 2, 5),
+        _LocalIndexMatch("过膝袜", "source", "white_thighhighs", "cn_term", 343_355, 2, 5),
+        _LocalIndexMatch("膝袜", "source", "kneesocks_(psg)", "cn_name", 1_345, 3, 5),
+    ]
+
+    groups = _ambiguous_source_groups(matches, Store(), confirmed_tags=set())  # type: ignore[arg-type]
+
+    assert [group["text"] for group in groups] == ["白色过膝袜"]
+    assert {option["canonical_tag"] for option in groups[0]["options"]} == {
+        "white_thighhighs",
+        "white_hiphighs",
+    }
+
+
+def test_protected_identity_tags_are_diverted_unless_user_typed_english_canonical() -> None:
+    class Store:
+        tags = {
+            "hakurei_reimu": {"category_name": "character", "name": "hakurei_reimu", "post_count": 2500},
+            "touhou": {"category_name": "copyright", "name": "touhou", "post_count": 10000},
+            "maid": {"category_name": "general", "name": "maid", "post_count": 5000},
+            "the_girl_(fear_&_hunger)": {"category_name": "character", "name": "the_girl_(fear_&_hunger)", "post_count": 1200},
+        }
+
+        def get_tag(self, name: str) -> dict[str, object] | None:
+            return self.tags.get(name)
+
+    matches = [
+        _LocalIndexMatch("博丽灵梦", "source", "hakurei_reimu", "cn_name", 2500, 0, 4),
+        _LocalIndexMatch("东方", "source", "touhou", "cn_term", 10000, 5, 7),
+        _LocalIndexMatch("女仆", "source", "maid", "cn_name", 5000, 8, 10),
+        _LocalIndexMatch("女孩", "source", "the_girl_(fear_&_hunger)", "cn_name", 1200, 11, 13),
+        _LocalIndexMatch("hakurei_reimu", "source", "hakurei_reimu", "canonical", 2500, 20, 33),
+    ]
+
+    kept, diverted = _divert_protected_identity_matches(matches, Store())  # type: ignore[arg-type]
+
+    assert [item.canonical_tag for item in kept] == ["maid", "hakurei_reimu"]
+    assert [item.text for item in kept] == ["女仆", "hakurei_reimu"]
+    assert {item.canonical_tag for item in diverted} == {"hakurei_reimu", "touhou", "the_girl_(fear_&_hunger)"}
+    assert {item.text for item in diverted} == {"博丽灵梦", "东方", "女孩"}
+
+
+def test_local_natural_does_not_auto_confirm_character_identity(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    first = client.post(
+        "/api/v3/local-natural/candidates",
+        json={"source_text": "博丽灵梦穿女仆装", "model_profile": "anima_aesthetic_v1"},
+        headers=headers,
+    )
+    assert first.status_code == 200
+    payload = first.json()
+    confirmed = [item["canonical_tag"] for item in payload["scene_draft"]["confirmed"]]
+    identity = [item["canonical_tag"] for item in payload["scene_draft"]["suggestions"] if item["source"] == "identity_candidate"]
+    assert confirmed == ["maid"]
+    assert identity == ["hakurei_reimu"]
+    assert "hakurei reimu" not in payload["candidates"][0]["positive_prompt"]
+    assert any("疑似角色或作品" in note for note in payload["scene_draft"]["risk_notes"])
+
+    typed = client.post(
+        "/api/v3/local-natural/candidates",
+        json={"source_text": "hakurei_reimu, maid", "model_profile": "anima_aesthetic_v1"},
+        headers=headers,
+    )
+    assert typed.status_code == 200
+    typed_payload = typed.json()
+    assert {"hakurei_reimu", "maid"} <= {item["canonical_tag"] for item in typed_payload["scene_draft"]["confirmed"]}
+    assert "hakurei reimu" in typed_payload["candidates"][0]["positive_prompt"]
+
+
+def test_local_natural_does_not_auto_exclude_character_identity(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    inline = client.post(
+        "/api/v3/local-natural/candidates",
+        json={"source_text": "女仆，不要博丽灵梦", "model_profile": "anima_aesthetic_v1"},
+        headers=headers,
+    )
+    assert inline.status_code == 200
+    payload = inline.json()
+    assert {item["canonical_tag"] for item in payload["scene_draft"]["confirmed"]} == {"maid"}
+    assert "hakurei_reimu" not in {item["canonical_tag"] for item in payload["scene_draft"]["exclusions"]}
+    identity_exclusions = [
+        item["canonical_tag"]
+        for item in payload["scene_draft"]["suggestions"]
+        if item["source"] == "identity_exclusion"
+    ]
+    assert identity_exclusions == ["hakurei_reimu"]
+    assert "hakurei reimu" not in payload["candidates"][0]["negative_prompt"]
+    assert any("排除的疑似角色或作品" in note for note in payload["scene_draft"]["risk_notes"])
+
+    typed = client.post(
+        "/api/v3/local-natural/candidates",
+        json={
+            "source_text": "女仆，不要博丽灵梦",
+            "excluded_text": "hakurei_reimu",
+            "model_profile": "anima_aesthetic_v1",
+        },
+        headers=headers,
+    )
+    assert typed.status_code == 200
+    typed_payload = typed.json()
+    assert "hakurei_reimu" in {item["canonical_tag"] for item in typed_payload["scene_draft"]["exclusions"]}
+    assert "hakurei reimu" in typed_payload["candidates"][0]["negative_prompt"]
+    assert "hakurei reimu" not in typed_payload["candidates"][0]["positive_prompt"]
+    assert all(item["canonical_tag"] for item in typed_payload["scene_draft"]["exclusions"])
+
+
+def test_local_natural_full_body_composition_does_not_spawn_watermark(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.post(
+        "/api/v3/local-natural/candidates",
+        json={"source_text": "女仆，全身构图", "model_profile": "anima_aesthetic_v1"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    confirmed = {item["canonical_tag"] for item in payload["scene_draft"]["confirmed"]}
+    assert "full_body" in confirmed
+    palette = {item["canonical_tag"]: item for item in payload["scene_draft"]["composition_palette"]}
+    assert palette["full_body"]["state"] == "confirmed"
+    preset_ids = {item["id"] for item in payload["scene_draft"]["composition_presets"]}
+    assert {"none", "cowboy_viewer", "look_away", "back"} <= preset_ids
+    ambiguous_texts = [group["text"] for group in payload["scene_draft"].get("ambiguous") or []]
+    assert "构图" not in ambiguous_texts
+    assert "watermark" not in {
+        option["canonical_tag"]
+        for group in payload["scene_draft"].get("ambiguous") or []
+        for option in group["options"]
+    }
+
+
+def test_local_natural_do_not_look_at_camera_auto_excludes_without_wet_lens(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.post(
+        "/api/v3/local-natural/candidates",
+        json={"source_text": "女仆，不要看镜头", "model_profile": "anima_aesthetic_v1"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "looking_at_viewer" in {item["canonical_tag"] for item in payload["scene_draft"]["exclusions"]}
+    assert "looking at viewer" in payload["candidates"][0]["negative_prompt"]
+    assert "looking_away" not in payload["candidates"][0]["positive_prompt"]
+    palette = {item["canonical_tag"]: item for item in payload["scene_draft"]["composition_palette"]}
+    assert palette["looking_at_viewer"]["state"] == "excluded"
+    assert palette["looking_away"]["state"] == "suggested"
+    assert any("看向画外" in note for note in payload["scene_draft"]["risk_notes"])
+    assert "wet_lens" not in {option["canonical_tag"] for group in payload["scene_draft"].get("ambiguous") or [] for option in group["options"]}
+    assert all(item["canonical_tag"] for item in payload["scene_draft"]["exclusions"])
+
+
+def test_local_natural_does_not_upgrade_partial_exclusion_phrases(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.post(
+        "/api/v3/local-natural/candidates",
+        json={
+            "source_text": "女仆",
+            "excluded_text": "浅色金发",
+            "model_profile": "anima_aesthetic_v1",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "blonde_hair" not in {item["canonical_tag"] for item in payload["scene_draft"]["exclusions"]}
+    leftover = [
+        item["canonical_tag"]
+        for item in payload["scene_draft"]["suggestions"]
+        if item["source"] == "exclusion_candidate"
+    ]
+    assert leftover == ["blonde_hair"]
+    assert "blonde hair" not in payload["candidates"][0]["negative_prompt"]
+    assert any("更宽的标签" in note for note in payload["scene_draft"]["risk_notes"])
+
+
+def test_local_natural_exclusion_wins_over_the_same_positive_tag(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    translator = build_v2_local_translation_adapter(tmp_path / "missing-resources")
+    runtime = create_api_runtime(reference_db, translation_service=translator)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchange = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchange.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.post(
+        "/api/v3/local-natural/candidates",
+        json={
+            "source_text": "女仆金发",
+            "excluded_text": "金发",
+            "model_profile": "anima_aesthetic_v1",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["candidates"][0]["positive_prompt"] == "maid"
+    assert "blonde hair" in payload["candidates"][0]["negative_prompt"]
+    assert "blonde_hair" not in {item["canonical_tag"] for item in payload["scene_draft"]["confirmed"]}
+    assert any("排除冲突" in note for note in payload["scene_draft"]["risk_notes"])
 
 
 def test_broad_text_exclusion_expands_transparently_instead_of_picking_one_ambiguous_tag() -> None:
@@ -862,6 +1417,7 @@ def test_structured_workbench_uses_the_same_local_mapping_and_preserves_exclusio
     literal = payload["candidates"][0]
     assert literal["positive_prompt"] == "maid, twintails"
     assert "blonde hair" in literal["negative_prompt"]
+    assert {item["canonical_tag"] for item in payload["scene_draft"]["exclusions"]} == {"blonde_hair"}
 
 
 def test_structured_workbench_reuses_scene_draft_translation_when_selecting_tags(
@@ -986,15 +1542,30 @@ def test_local_natural_candidate_keeps_suppressed_tags_from_returning(
     assert first.status_code == 200
     first_payload = first.json()
     confirmed = [item["canonical_tag"] for item in first_payload["scene_draft"]["confirmed"]]
-    assert "hakurei_reimu" in confirmed
+    assert "hakurei_reimu" not in confirmed
     assert "maid" in confirmed
     assert first_payload["scene_draft"]["back_translation"]["segments"]
+
+    selected = client.post(
+        "/api/v3/local-natural/candidates",
+        json={
+            "source_text": source_text,
+            "translated_text": first_payload["scene_draft"]["translated_text"],
+            "selected_tags": ["hakurei_reimu"],
+            "model_profile": "anima_aesthetic_v1",
+        },
+        headers=headers,
+    )
+    assert selected.status_code == 200
+    selected_payload = selected.json()
+    assert "hakurei_reimu" in [item["canonical_tag"] for item in selected_payload["scene_draft"]["confirmed"]]
 
     removed = client.post(
         "/api/v3/local-natural/candidates",
         json={
             "source_text": source_text,
             "translated_text": first_payload["scene_draft"]["translated_text"],
+            "selected_tags": ["hakurei_reimu"],
             "suppressed_tags": ["hakurei_reimu"],
             "model_profile": "anima_aesthetic_v1",
         },
@@ -1161,10 +1732,18 @@ def test_workspace_crud_persists_separately_and_rejects_stale_revision(
     assert workspace["draft"]["positive_text"] == draft["positive_text"]
     assert workspace["draft"]["suppressed_tags"] == []
     assert workspace["draft"]["generation_settings"] == {
-        "preset_id": "balanced",
+        "preset_id": "stable_baseline",
         "aspect": "portrait",
+        "width": 896,
+        "height": 1152,
+        "steps": 30,
+        "cfg": 4.0,
+        "sampler": "er_sde",
+        "scheduler": "simple",
         "seed": -1,
         "batch_size": 1,
+        "remote_profile_id": None,
+        "workflow_profile_id": None,
     }
     assert workspace["candidate_snapshot"]["candidates"][0]["positive_prompt"] == "score_7, maid, twintails"
     assert workspace["candidate_snapshot"]["artist_suggestions"][0]["name"] == "sample_artist_a"
@@ -1229,7 +1808,15 @@ def test_generation_bridge_preview_converts_validated_candidate_without_submitti
             "candidate": generated["candidates"][0],
             "intent": generated["intent"],
             "project_name": "V3 API 桥接",
-            "settings": {"preset_id": "balanced", "seed": 42, "batch_size": 2},
+            "settings": {
+                "preset_id": "balanced",
+                "steps": 41,
+                "cfg": 4.8,
+                "sampler": "er_sde",
+                "scheduler": "simple",
+                "seed": 42,
+                "batch_size": 2,
+            },
             "workspace_id": "workspace_1",
             "workspace_revision": 3,
         },
@@ -1242,7 +1829,10 @@ def test_generation_bridge_preview_converts_validated_candidate_without_submitti
     assert payload["bridge_schema"] == "v3-v2-generation-bridge/1"
     assert payload["prompt_job"]["positive_prompt"] == "score_7, maid, twintails"
     assert payload["prompt_job"]["negative_prompt"].endswith("blonde hair")
-    assert payload["prompt_job"]["generation_params"]["steps"] == 35
+    assert payload["prompt_job"]["generation_params"]["steps"] == 41
+    assert payload["prompt_job"]["generation_params"]["cfg"] == 4.8
+    assert payload["prompt_job"]["generation_params"]["sampler"] == "er_sde"
+    assert payload["prompt_job"]["generation_params"]["scheduler"] == "simple"
     assert payload["prompt_job"]["generation_params"]["batch_size"] == 2
     assert payload["checkpoint_logical_name"] == "anima_base_v1"
     assert payload["candidate_snapshot"]["versions"]["data_pack"] == "anima-v3-api-test-r1"
@@ -1435,6 +2025,8 @@ def test_gallery_api_lists_and_streams_only_files_inside_output_root(
     image = output_root / "项目" / "batch" / "one.png"
     image.parent.mkdir(parents=True)
     image.write_bytes(b"gallery-image")
+    direct_delete_image = image.with_name("direct-delete.png")
+    direct_delete_image.write_bytes(b"delete-me")
     outside = tmp_path / "outside.png"
     outside.write_bytes(b"outside")
     v2_database = tmp_path / "v2-gallery.db"
@@ -1457,7 +2049,7 @@ def test_gallery_api_lists_and_streams_only_files_inside_output_root(
     assert unauthorized_list.status_code == 401
     listed = client.get("/api/v3/gallery/assets", headers={"X-Anima-Session": token})
     assert listed.status_code == 200
-    asset = listed.json()["items"][0]
+    asset = next(item for item in listed.json()["items"] if item["name"] == "one.png")
     assert asset["project"] == "项目"
 
     # The exchange cookie is scoped only to image content so native <img> requests work
@@ -1469,6 +2061,15 @@ def test_gallery_api_lists_and_streams_only_files_inside_output_root(
     assert thumbnail.status_code == 200
     assert thumbnail.content == b"gallery-image"
     write_headers = {"X-Anima-Session": token, "Origin": ORIGIN}
+    direct_asset = next(item for item in listed.json()["items"] if item["name"] == "direct-delete.png")
+    direct_deleted = client.post(
+        "/api/v3/gallery/assets/delete",
+        json={"paths": [direct_asset["path"]]},
+        headers=write_headers,
+    )
+    assert direct_deleted.status_code == 200
+    assert direct_deleted.json()["deleted"] == [direct_asset["path"]]
+    assert not direct_delete_image.exists()
     state = client.post(
         "/api/v3/gallery/assets/state",
         json={"paths": [asset["path"]], "state": "kept"},

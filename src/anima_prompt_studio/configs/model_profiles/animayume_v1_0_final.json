@@ -1,0 +1,9 @@
+{
+  "id": "animayume_v1_0_final", "display_name": "AnimaYume v1.0 Final", "family": "anima", "variant": "community",
+  "checkpoint_logical_name": "animayume_v1_0_final", "default_steps": 30, "default_cfg": 5.5,
+  "default_sampler": "euler_ancestral", "default_scheduler": "normal", "negative_prompt_mode": "enabled",
+  "positive_prefix": [],
+  "negative_prompt": ["worst quality", "low quality", "score_1", "score_2", "score_3", "artist name", "blurry", "jpeg artifacts"],
+  "default_width": 896, "default_height": 1152, "workflow_template_id": "animayume_v1_0_final_baseline",
+  "status": "experimental", "notes": "社区模型作者建议基线：25–40 步、CFG 4–7、Euler a + normal；默认取 30 / 5.5。"
+}

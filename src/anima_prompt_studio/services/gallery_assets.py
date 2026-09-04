@@ -163,6 +163,37 @@ def delete_images_permanently(
     return deleted, failed
 
 
+def delete_gallery_images_permanently(
+    paths: list[Path],
+    output_root: Path,
+) -> tuple[list[Path], list[tuple[Path, str]]]:
+    """Permanently delete validated image files from the live gallery root."""
+    root = output_root.expanduser().resolve()
+    trash_root = (root / TRASH_DIR_NAME).resolve()
+    deleted: list[Path] = []
+    failed: list[tuple[Path, str]] = []
+    seen: set[str] = set()
+    for raw_path in paths:
+        path = Path(raw_path)
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(root)
+            if resolved.is_relative_to(trash_root):
+                raise ValueError("回收站图片必须通过回收站永久删除")
+            key = str(resolved).casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            if resolved.suffix.casefold() not in IMAGE_SUFFIXES or not resolved.is_file():
+                failed.append((path, "图片不存在或不是受支持的图片"))
+                continue
+            resolved.unlink()
+            deleted.append(resolved)
+        except (OSError, ValueError) as exc:
+            failed.append((path, str(exc) or "图片不在当前图片保存目录内"))
+    return deleted, failed
+
+
 def _remove_empty_trash_dirs(trash_root: Path) -> None:
     if not trash_root.is_dir():
         return

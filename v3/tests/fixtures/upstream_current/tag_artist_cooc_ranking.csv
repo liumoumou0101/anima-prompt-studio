@@ -1,0 +1,5 @@
+tag,artist,artist_post_count,cooc_count,frequency,pmi,npmi
+maid,specialist,120,110,0.92,3.2,0.95
+maid,midhigh,500,200,0.40,2.1,0.62
+maid,ultra,8000,400,0.05,1.8,0.58
+maid,bulky,2000,80,0.04,1.4,0.25

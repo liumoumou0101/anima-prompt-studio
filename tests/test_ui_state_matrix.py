@@ -322,6 +322,20 @@ def test_generation_parameter_edit_becomes_manual_and_resets_on_model_switch(win
     assert window.steps.value() == 35
 
 
+def test_v2_model_switch_refreshes_visible_generation_presets(window):
+    window.model_combo.setCurrentIndex(window.model_combo.findData("anima_turbo_v1_1"))
+    assert window.generation_combo.currentData() == "balanced"
+    assert window.generation_combo.currentText() == "标准"
+    assert window.job.generation_params.steps == 10
+    assert window.job.generation_params.scheduler == "simple"
+
+    window.model_combo.setCurrentIndex(window.model_combo.findData("animayume_v1_0_final"))
+    assert window.generation_combo.currentData() == "balanced"
+    assert window.generation_combo.currentText() == "作者推荐基线"
+    assert window.job.generation_params.cfg == 5.5
+    assert window.job.generation_params.sampler == "euler_ancestral"
+
+
 def test_generation_preset_resets_manual_but_preserves_locked(window):
     window.job = PromptJob(model_profile_id="anima_turbo_v1")
     window.pipeline.compiler.apply_model_defaults(window.job)

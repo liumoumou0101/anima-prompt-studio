@@ -38,6 +38,11 @@ class RelatedTagsRequest(ApiModel):
 class ArtistRecommendRequest(ApiModel):
     tags: list[str] = Field(min_length=1, max_length=50)
     limit: int = Field(default=20, ge=1, le=100)
+    ranking: Literal["tag_fit", "volume", "balanced"] | None = None
+
+
+class ArtistRankingSettingsRequest(ApiModel):
+    ranking: Literal["tag_fit", "volume", "balanced"]
 
 
 class WorkbenchElementInput(ApiModel):
@@ -88,6 +93,11 @@ class TranslationRequest(ApiModel):
     direction: Literal["zh_en", "en_zh"] = "zh_en"
 
 
+class DirectPromptPreviewRequest(ApiModel):
+    positive_prompt: str = Field(min_length=1, max_length=20_000)
+    negative_prompt: str = Field(default="", max_length=20_000)
+
+
 class LocalNaturalRelationInput(ApiModel):
     source_entity_id: str = Field(pattern=r"^entity_[A-Za-z0-9._-]+$", max_length=240)
     target_element_id: str = Field(pattern=r"^e_[A-Za-z0-9._-]+$", max_length=200)
@@ -131,10 +141,18 @@ class IntentCandidateRequest(ApiModel):
 
 
 class WorkbenchGenerationSettings(ApiModel):
-    preset_id: Literal["fast", "balanced", "quality"] = "balanced"
-    aspect: Literal["portrait", "landscape", "square", "model_default"] = "portrait"
+    preset_id: str = Field(default="stable_baseline", min_length=1, max_length=100)
+    aspect: Literal["portrait", "landscape", "square", "custom", "model_default"] = "portrait"
+    width: int | None = Field(default=896, ge=64, le=8192)
+    height: int | None = Field(default=1152, ge=64, le=8192)
+    steps: int | None = Field(default=30, ge=1, le=200)
+    cfg: float | None = Field(default=4.0, ge=0, le=30)
+    sampler: str | None = Field(default="er_sde", min_length=1, max_length=100)
+    scheduler: str | None = Field(default="simple", min_length=1, max_length=100)
     seed: int = Field(default=-1, ge=-1)
     batch_size: int = Field(default=1, ge=1, le=100)
+    remote_profile_id: str | None = Field(default=None, max_length=200)
+    workflow_profile_id: str | None = Field(default=None, max_length=200)
 
 
 class WorkspaceDraft(ApiModel):
@@ -170,7 +188,17 @@ class SceneDraftItem(ApiModel):
     id: str = Field(min_length=1, max_length=200)
     text: str = Field(min_length=1, max_length=500)
     canonical_tag: str | None = Field(default=None, max_length=200)
-    source: Literal["source_exact", "source_excluded", "translation_exact", "user_selected", "unresolved", "suppressed"]
+    source: Literal[
+        "source_exact",
+        "source_excluded",
+        "translation_exact",
+        "user_selected",
+        "unresolved",
+        "suppressed",
+        "identity_candidate",
+        "identity_exclusion",
+        "exclusion_candidate",
+    ]
     fact_type: IntentElementType = IntentElementType.OTHER
     owner_entity_id: str | None = Field(default=None, pattern=r"^entity_[A-Za-z0-9._-]+$", max_length=240)
     suggested_owner_entity_id: str | None = Field(default=None, pattern=r"^entity_[A-Za-z0-9._-]+$", max_length=240)
@@ -201,6 +229,7 @@ class SceneDraftAmbiguousOption(ApiModel):
 class SceneDraftAmbiguousGroup(ApiModel):
     text: str = Field(min_length=1, max_length=200)
     options: list[SceneDraftAmbiguousOption] = Field(min_length=1, max_length=8)
+    side: Literal["positive", "excluded"] = "positive"
 
 
 class SceneDraftBackTranslationSegment(ApiModel):
@@ -215,9 +244,29 @@ class SceneDraftBackTranslation(ApiModel):
     negative_text: str = Field(default="", max_length=20_000)
 
 
+class CompositionChipSnapshot(ApiModel):
+    axis: Literal["shot", "gaze", "camera_height", "angle"]
+    canonical_tag: str = Field(min_length=1, max_length=200)
+    label_zh: str = Field(min_length=1, max_length=40)
+    render_name: str = Field(min_length=1, max_length=240)
+    state: Literal["available", "suggested", "confirmed", "selected", "excluded"]
+    side: Literal["positive", "excluded"] = "positive"
+    reason: str = Field(default="可选构图芯片，不会自动勾选", min_length=1, max_length=500)
+    notes: dict[str, str] = Field(default_factory=dict, max_length=8)
+
+
+class CompositionPresetSnapshot(ApiModel):
+    id: str = Field(min_length=1, max_length=40)
+    label_zh: str = Field(min_length=1, max_length=40)
+    tags: list[str] = Field(default_factory=list, max_length=4)
+    note: str = Field(min_length=1, max_length=200)
+    group_zh: str = Field(default="", max_length=40)
+
+
 class SceneDraftSnapshot(ApiModel):
     source_text: str = Field(min_length=1, max_length=10_000)
     translated_text: str = Field(default="", max_length=20_000)
+    scene_plan_enabled: bool = True
     entities: list[SceneEntitySnapshot] = Field(default_factory=list, max_length=20)
     relations: list[SceneRelationSnapshot] = Field(default_factory=list, max_length=100)
     confirmed: list[SceneDraftItem] = Field(default_factory=list, max_length=100)
@@ -226,6 +275,9 @@ class SceneDraftSnapshot(ApiModel):
     unresolved: list[SceneDraftItem] = Field(default_factory=list, max_length=20)
     suppressed: list[SceneDraftItem] = Field(default_factory=list, max_length=80)
     ambiguous: list[SceneDraftAmbiguousGroup] = Field(default_factory=list, max_length=20)
+    ambiguous_exclusions: list[SceneDraftAmbiguousGroup] = Field(default_factory=list, max_length=20)
+    composition_palette: list[CompositionChipSnapshot] = Field(default_factory=list, max_length=20)
+    composition_presets: list[CompositionPresetSnapshot] = Field(default_factory=list, max_length=24)
     back_translation: SceneDraftBackTranslation = Field(default_factory=SceneDraftBackTranslation)
     risk_notes: list[str] = Field(default_factory=list, max_length=24)
 
@@ -268,6 +320,7 @@ class WorkspaceCandidateSnapshot(ApiModel):
     candidates: list[PromptCandidate] = Field(min_length=1, max_length=4)
     validation: CandidateSetValidationReport
     artist_suggestions: list[ArtistSuggestionSnapshot] = Field(default_factory=list, max_length=10)
+    artist_ranking: Literal["tag_fit", "volume", "balanced"] | None = None
     tag_suggestions: list[TagSuggestionSnapshot] = Field(default_factory=list, max_length=20)
     scene_draft: SceneDraftSnapshot | None = None
     data_pack_id: str = Field(min_length=1, max_length=200)
@@ -291,6 +344,10 @@ class GenerationBridgeSettings(ApiModel):
     preset_id: str = Field(default="balanced", min_length=1, max_length=100)
     width: int | None = Field(default=None, ge=64, le=8192)
     height: int | None = Field(default=None, ge=64, le=8192)
+    steps: int | None = Field(default=None, ge=1, le=200)
+    cfg: float | None = Field(default=None, ge=0, le=30)
+    sampler: str | None = Field(default=None, min_length=1, max_length=100)
+    scheduler: str | None = Field(default=None, min_length=1, max_length=100)
     seed: int = Field(default=-1, ge=-1)
     batch_size: int = Field(default=1, ge=1, le=100)
 
@@ -305,6 +362,16 @@ class GenerationBridgePreviewRequest(ApiModel):
 
 
 class GenerationSubmitRequest(GenerationBridgePreviewRequest):
+    remote_profile_id: str = Field(min_length=1, max_length=200)
+    workflow_profile_id: str = Field(min_length=1, max_length=200)
+
+
+class DirectPromptSubmitRequest(ApiModel):
+    positive_prompt: str = Field(min_length=1, max_length=20_000)
+    negative_prompt: str = Field(default="", max_length=20_000)
+    model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)
+    project_name: str = Field(default="英文提示词直出", min_length=1, max_length=200)
+    settings: GenerationBridgeSettings = Field(default_factory=GenerationBridgeSettings)
     remote_profile_id: str = Field(min_length=1, max_length=200)
     workflow_profile_id: str = Field(min_length=1, max_length=200)
 
@@ -349,6 +416,10 @@ class PrivateKeyPassphraseRequest(ApiModel):
     passphrase: SecretStr = Field(max_length=4096)
 
 
+class PreferredRemoteProfileRequest(ApiModel):
+    remote_profile_id: str = Field(min_length=1, max_length=200)
+
+
 class RemoteProfileSettingsRequest(ApiModel):
     """The editable, non-secret part of a V2 remote profile.
 
@@ -377,7 +448,7 @@ class RemoteConnectionTestRequest(ApiModel):
 
 
 class GalleryPathsRequest(ApiModel):
-    paths: list[str] = Field(min_length=1, max_length=100)
+    paths: list[str] = Field(min_length=1, max_length=1000)
 
 
 class GalleryStateRequest(GalleryPathsRequest):

@@ -11,6 +11,7 @@ class ModelVariant(StrEnum):
     BASE = "base"
     AESTHETIC = "aesthetic"
     TURBO = "turbo"
+    COMMUNITY = "community"
 
 
 class NegativePromptMode(StrEnum):
@@ -40,7 +41,7 @@ class ModelProfile(BaseModel):
             if self.negative_prompt_mode != NegativePromptMode.DISABLED or self.negative_prompt:
                 raise ValueError("Turbo profile 必须关闭默认 negative prompt。")
         elif self.negative_prompt_mode != NegativePromptMode.ENABLED:
-            raise ValueError("Base/Aesthetic profile 必须启用 negative prompt。")
+            raise ValueError("非 Turbo profile 必须启用 negative prompt。")
         return self
 
 

@@ -6,6 +6,7 @@ import select
 import socket
 import socketserver
 import threading
+import time
 from typing import Any
 
 from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteCredentials, RemoteProfile
@@ -86,9 +87,18 @@ def _handler_for(transport, remote_host: str, remote_port: int):
 
 
 class SshTunnel:
-    def __init__(self, profile: RemoteProfile, connect_timeout: float = 15.0) -> None:
+    def __init__(
+        self,
+        profile: RemoteProfile,
+        connect_timeout: float = 15.0,
+        *,
+        local_bind_host: str = "127.0.0.1",
+        local_bind_port: int = 0,
+    ) -> None:
         self.profile = profile
         self.connect_timeout = connect_timeout
+        self.local_bind_host = local_bind_host
+        self.local_bind_port = local_bind_port
         self.client = None
         self.server: _ForwardServer | None = None
         self.thread: threading.Thread | None = None
@@ -125,9 +135,6 @@ class SshTunnel:
             raise HostKeyMismatchError(f"SSH 主机指纹不匹配。已保存 {expected}，当前 {actual}。")
 
         paramiko = self._paramiko()
-        client = paramiko.SSHClient()
-        client.load_system_host_keys()
-        client.set_missing_host_key_policy(_ExpectedFingerprintPolicy(expected))
         connect_args: dict[str, Any] = {
             "hostname": self.profile.ssh_host,
             "port": self.profile.ssh_port,
@@ -150,13 +157,32 @@ class SshTunnel:
             )
         else:
             connect_args.update(look_for_keys=True, allow_agent=True)
+        client = None
+        last_error: Exception | None = None
+        for attempt in range(3):
+            candidate = paramiko.SSHClient()
+            candidate.load_system_host_keys()
+            candidate.set_missing_host_key_policy(_ExpectedFingerprintPolicy(expected))
+            try:
+                candidate.connect(**connect_args)
+                transport = candidate.get_transport()
+                if transport is None or not transport.is_active():
+                    raise SSHError("SSH 已连接，但传输通道不可用。")
+                client = candidate
+                break
+            except (paramiko.AuthenticationException, HostKeyMismatchError):
+                candidate.close()
+                raise
+            except (paramiko.SSHException, EOFError, OSError) as exc:
+                candidate.close()
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(0.5 * (attempt + 1))
+        if client is None:
+            raise SSHError(f"SSH 握手连续 3 次失败：{last_error}") from last_error
         try:
-            client.connect(**connect_args)
-            transport = client.get_transport()
-            if transport is None or not transport.is_active():
-                raise SSHError("SSH 已连接，但传输通道不可用。")
             server = _ForwardServer(
-                ("127.0.0.1", 0),
+                (self.local_bind_host, self.local_bind_port),
                 _handler_for(transport, self.profile.comfy_host, self.profile.comfy_port),
             )
             thread = threading.Thread(target=server.serve_forever, name="anima-ssh-tunnel", daemon=True)

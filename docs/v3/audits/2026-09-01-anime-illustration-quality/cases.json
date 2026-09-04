@@ -1,0 +1,54 @@
+{
+  "schema": "anima-illustration-diagnostic/1",
+  "date": "2026-09-01",
+  "model_profile": "anima_aesthetic_v1",
+  "workflow_profile": "22___Aesthetic_v1.1",
+  "settings": {
+    "preset_id": "quality",
+    "width": 768,
+    "height": 1024,
+    "batch_size": 1
+  },
+  "source_text": "清晨的教室窗边，一位气质温柔、安静顺从的黑色长发女孩，穿着整洁精致的校服、纯白色过膝袜和黑色乐福鞋，双手自然交叠在身前，微微侧身看向镜头，露出柔和浅笑。全身构图，细腻精美的二次元插画，柔和晨光，干净背景。",
+  "raw_excluded_text": "短发，浅色头发，彩色头发，黑色袜子，短袜，赤脚，高跟鞋，哭泣，凶狠表情，傲慢姿态，多人",
+  "required_canonical_tags": [
+    "1girl",
+    "solo",
+    "black_hair",
+    "long_hair",
+    "school_uniform",
+    "white_thighhighs",
+    "loafers",
+    "standing",
+    "light_smile",
+    "looking_at_viewer",
+    "full_body",
+    "classroom",
+    "window"
+  ],
+  "forbidden_automatic_tags": [
+    "the_girl_(fear_&_hunger)",
+    "kneesocks_(psg)",
+    "gwen_(league)"
+  ],
+  "clean_negative_prompt": "worst quality, low quality, lowres, blurry, jpeg artifacts, chromatic aberration, bad anatomy, bad hands, malformed hands, extra fingers, missing fingers, extra limbs, duplicate, multiple girls, 2girls, 3girls, short hair, light hair, colored hair, black socks, ankle socks, barefoot, high heels, crying, sad, angry, frown, evil smile, closed eyes, looking away, from behind, squatting, sitting, text, watermark, signature, artist name",
+  "illustration_positive_prompt": "masterpiece, best quality, very aesthetic, highres, absurdres, professional anime illustration, 1girl, solo, black hair, long hair, school uniform, white thighhighs, black loafers, standing, full body, looking at viewer, light smile, gentle expression, calm demure demeanor, hands folded naturally in front, classroom, beside window, soft morning sunlight, delicate facial features, finely detailed eyes, clean lineart, refined anime coloring, subtle fabric details, harmonious colors, elegant composition, cinematic depth of field. A single gentle and calm girl with long black hair stands naturally beside a classroom window. She wears a neat school uniform, pure white thigh-high socks, and black loafers. Her hands rest together in front of her, and she looks toward the viewer with a soft, modest smile. Full-body composition, soft morning light, clean classroom background.",
+  "cases": [
+    {"id": "A", "seed": 20260901, "mode": "raw_local_natural"},
+    {"id": "B", "seed": 20260901, "mode": "canonical_with_generic_socks_conflict"},
+    {"id": "C", "seed": 20260901, "mode": "canonical_clean"},
+    {"id": "D", "seed": 20260901, "mode": "illustration_recipe"},
+    {"id": "E", "seed": 20260902, "mode": "illustration_recipe"},
+    {"id": "F", "seed": 20260903, "mode": "illustration_recipe"},
+    {"id": "G", "seed": 20260904, "mode": "illustration_recipe"},
+    {"id": "H", "seed": 20260905, "mode": "illustration_recipe"}
+  ],
+  "acceptance": {
+    "single_subject": "5/5 across D-H",
+    "core_appearance_and_clothing": "5/5 across D-H",
+    "gentle_visible_expression": "5/5 across D-H",
+    "forbidden_pose_or_mood": "0/5 across D-H",
+    "fine_illustration_quality": "not yet achieved; requires explicit style and hires/detail workflow"
+  }
+}
+

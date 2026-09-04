@@ -1,0 +1,8 @@
+{
+  "id": "anima_turbo_v1_1", "display_name": "ANIMA Turbo v1.1", "family": "anima", "variant": "turbo",
+  "checkpoint_logical_name": "anima_turbo_v1_1", "default_steps": 10, "default_cfg": 1.0,
+  "default_sampler": "er_sde", "default_scheduler": "simple", "negative_prompt_mode": "disabled",
+  "positive_prefix": ["score_7"], "negative_prompt": [], "default_width": 896, "default_height": 1152,
+  "workflow_template_id": "anima_turbo_v1_1_baseline", "status": "experimental",
+  "notes": "完整 Turbo v1.1 模型验证配置：CFG 1、8–12 步；不叠加旧 anima-turbo-lora-v0.2。"
+}

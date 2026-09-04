@@ -50,3 +50,34 @@ class GalleryThumbnailCache:
                 return source
             temporary.replace(target)
         return target
+
+    def purge(self, source: Path, *, aliases: tuple[Path, ...] = ()) -> int:
+        """Remove every cached size for a source before its image is permanently deleted."""
+        source = Path(source).expanduser().resolve()
+        try:
+            stat = source.stat()
+        except OSError:
+            return 0
+        removed = 0
+        identities = (source, *(Path(alias).expanduser().resolve() for alias in aliases))
+        with self._lock:
+            for identity in identities:
+                for size in range(160, 1441):
+                    digest = hashlib.sha256(
+                        f"{identity}|{stat.st_mtime_ns}|{stat.st_size}|{size}".encode("utf-8")
+                    ).hexdigest()
+                    target = self.cache_root / digest[:2] / f"{digest}.webp"
+                    try:
+                        target.unlink()
+                        removed += 1
+                    except FileNotFoundError:
+                        continue
+                    except OSError:
+                        continue
+            if self.cache_root.is_dir():
+                for directory in self.cache_root.iterdir():
+                    try:
+                        directory.rmdir()
+                    except OSError:
+                        pass
+        return removed

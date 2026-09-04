@@ -1,0 +1,11 @@
+{
+  "id": "anima_turbo_v1_1",
+  "display_name": "ANIMA Turbo v1.1",
+  "family": "anima",
+  "variant": "turbo",
+  "positive_prefix": ["score_7"],
+  "negative_prompt": [],
+  "negative_prompt_mode": "disabled",
+  "tag_separator": ", ",
+  "renderer_version": "anima-renderer-v1"
+}

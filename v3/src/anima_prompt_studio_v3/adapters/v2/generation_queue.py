@@ -25,9 +25,11 @@ from anima_prompt_studio.services.remote.execution_coordinator import (
 from anima_prompt_studio.services.remote.result_organizer import ResultOrganizer
 from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
 from anima_prompt_studio.services.remote.credential_store import CredentialStore
+from anima_prompt_studio.services.remote.workflow_compatibility import infer_workflow_model_profiles
 from anima_prompt_studio.domain.models import PromptJob
 
 from .generation import V2PreparedGeneration
+from ...core.generation_recipes import build_workflow_recipe_contract, validate_job_recipe
 
 
 class GenerationQueueError(RuntimeError):
@@ -422,9 +424,12 @@ class V2GenerationQueueService:
     def _validate_target(prepared: V2PreparedGeneration, target: V2GenerationTarget) -> None:
         V2GenerationQueueService._validate_remote_target(target)
         workflow = target.workflow_profile
-        compatible = workflow.compatible_model_profiles
-        if compatible and prepared.job.model_profile_id not in compatible:
+        compatible = _compatible_models(workflow)
+        if not compatible:
+            raise ValueError("工作流尚未声明兼容模型，不能安全提交。")
+        if prepared.job.model_profile_id not in compatible:
             raise ValueError("工作流与当前模型配置不兼容。")
+        validate_job_recipe(prepared.job, workflow)
 
     @staticmethod
     def _validate_remote_target(target: V2GenerationTarget) -> None:
@@ -498,14 +503,17 @@ def build_v2_generation_queue(
                 "workflow_profile_id": workflow.id,
                 "workflow_display_name": workflow.display_name,
                 "workflow_kind": workflow.workflow_kind,
-                "compatible_model_profiles": list(workflow.compatible_model_profiles),
+                "workflow_notes": workflow.notes,
+                "compatible_model_profiles": _compatible_models(workflow),
                 "host_fingerprint_ready": bool(profile.known_host_fingerprint),
                 "auth_type": profile.auth_type.value,
                 "private_key_passphrase_configured": passphrases.has(profile.id),
+                **build_workflow_recipe_contract(workflow),
             }
             for profile in profiles
             for workflow in workflows
             if workflow.workflow_kind in SUPPORTED_GENERATION_WORKFLOW_KINDS
+            and _compatible_models(workflow)
         ]
 
     def with_repository(callback):
@@ -530,4 +538,11 @@ def build_v2_generation_queue(
         existing_artifacts=existing_artifacts,
         target_lister=target_lister,
         passphrase_vault=passphrases,
+    )
+
+
+def _compatible_models(workflow: WorkflowProfile) -> list[str]:
+    return workflow.compatible_model_profiles or infer_workflow_model_profiles(
+        workflow.api_workflow,
+        workflow.source_path or workflow.display_name or workflow.id,
     )

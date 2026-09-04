@@ -31,6 +31,7 @@ from .translation import (
     V2TranslationResult,
     build_v2_local_translation_adapter,
 )
+from .comfy_access import COMFY_ACCESS_URL, ManagedComfyAccess
 
 __all__ = [
     "BRIDGE_SCHEMA",
@@ -55,4 +56,6 @@ __all__ = [
     "V2LocalTranslationAdapter",
     "V2TranslationResult",
     "build_v2_local_translation_adapter",
+    "COMFY_ACCESS_URL",
+    "ManagedComfyAccess",
 ]

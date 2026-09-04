@@ -1,6 +1,13 @@
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {ApiClientError, apiRequest} from "../lib/api";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
+import type {ArtistRanking} from "../lib/types";
+
+const rankingOptions: Array<{id: ArtistRanking; label: string; detail: string}> = [
+  {id: "tag_fit", label: "题材贴合", detail: "按标签关联强度排序，专项作者会靠前。"},
+  {id: "volume", label: "投稿量优先", detail: "先留下投稿量 ≥ 400 且该场景共现 ≥ 50 的画师，再按题材排序。"},
+  {id: "balanced", label: "题材与投稿量均衡", detail: "在同时有题材名次和投稿量名次的人里，按两个名次之和重排。"},
+];
 
 type AuthType = "password" | "private_key" | "agent";
 
@@ -19,7 +26,18 @@ type RemoteProfile = {
 };
 
 type Workflow = {id: string; display_name: string; workflow_kind: string; notes: string};
-type SettingsResponse = {items: RemoteProfile[]; workflows: Workflow[]; credential_store_available: boolean};
+type ComfyAccess = {
+  state: "stopped" | "connecting" | "ready" | "error";
+  ready: boolean;
+  remote_profile_id: string | null;
+  remote_display_name: string | null;
+  local_url: string;
+  message: string;
+  devices: string[];
+  queue_running: number;
+  queue_pending: number;
+};
+type SettingsResponse = {items: RemoteProfile[]; workflows: Workflow[]; credential_store_available: boolean; comfy_access?: ComfyAccess | null};
 type ProfileForm = Omit<RemoteProfile, "id" | "has_saved_password" | "host_fingerprint_confirmed" | "comfy_endpoint"> & {password: string; remember_password: boolean};
 
 const newProfile = (): ProfileForm => ({
@@ -58,14 +76,23 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
   const [fingerprint, setFingerprint] = useState("");
   const [probing, setProbing] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [comfyOpening, setComfyOpening] = useState(false);
+  const [comfyAccess, setComfyAccess] = useState<ComfyAccess | null>(null);
   const [privateKeyPassphrase, setPrivateKeyPassphrase] = useState("");
+  const [artistRanking, setArtistRanking] = useState<ArtistRanking>("tag_fit");
+  const [rankingBusy, setRankingBusy] = useState(false);
 
   const selected = useMemo(() => settings?.items.find((item) => item.id === selectedId) || null, [settings, selectedId]);
   const refresh = useCallback(async () => {
     setError(null);
     try {
-      const response = await apiRequest<SettingsResponse>("/api/v3/settings/remote-profiles");
+      const [response, ranking] = await Promise.all([
+        apiRequest<SettingsResponse>("/api/v3/settings/remote-profiles"),
+        apiRequest<{ranking: ArtistRanking}>("/api/v3/settings/artist-ranking"),
+      ]);
       setSettings(response);
+      setComfyAccess(response.comfy_access || null);
+      setArtistRanking(ranking.ranking);
       setSelectedId((current) => current && response.items.some((item) => item.id === current) ? current : response.items[0]?.id || null);
     } catch (caught) {
       setError(caught as ApiClientError);
@@ -151,6 +178,24 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
     }
   }
 
+  async function saveArtistRanking(next: ArtistRanking) {
+    setRankingBusy(true);
+    setError(null);
+    setNotice("");
+    try {
+      const saved = await apiRequest<{ranking: ArtistRanking}>("/api/v3/settings/artist-ranking", {
+        method: "PUT",
+        body: JSON.stringify({ranking: next}),
+      });
+      setArtistRanking(saved.ranking);
+      setNotice("画师排序已保存。工作台下次编译或刷新推荐时使用新排序。");
+    } catch (caught) {
+      setError(caught as ApiClientError);
+    } finally {
+      setRankingBusy(false);
+    }
+  }
+
   async function testConnection() {
     if (!selectedId) return;
     setTesting(true);
@@ -173,6 +218,32 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
     }
   }
 
+  async function openComfy() {
+    if (!selectedId) return;
+    const popup = window.open("about:blank", "anima-comfyui");
+    setComfyOpening(true);
+    setError(null);
+    setNotice("");
+    try {
+      const result = await apiRequest<ComfyAccess>(`/api/v3/settings/remote-profiles/${selectedId}/open-comfy`, {
+        method: "POST",
+        body: JSON.stringify({
+          ...(form.password ? {password: form.password} : {}),
+          ...(privateKeyPassphrase ? {passphrase: privateKeyPassphrase} : {}),
+        }),
+      });
+      setComfyAccess(result);
+      setNotice(`ComfyUI 维护入口已连接：${result.local_url}`);
+      if (popup) popup.location.replace(result.local_url);
+      else window.open(result.local_url, "_blank", "noopener,noreferrer");
+    } catch (caught) {
+      popup?.close();
+      setError(caught as ApiClientError);
+    } finally {
+      setComfyOpening(false);
+    }
+  }
+
   if (!remoteEnabled) {
     return <section className="page settings-page"><SettingsHeader count="—" /><EmptyState title="远程设置尚未启用" detail="请从 V3 桌面入口启动，并让它检测到 V2 数据库；V3 会复用其中的云主机、工作流和 Windows 凭据。" /></section>;
   }
@@ -180,7 +251,19 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
   return <section className="page settings-page">
     <SettingsHeader count={settings?.items.length ?? "—"} />
     {error && <ErrorState message={error.message} requestId={error.requestId} />}
-    {!settings ? <LoadingState label="正在读取 V2 远程连接配置…" /> : <div className="settings-layout">
+    {!settings ? <LoadingState label="正在读取 V2 远程连接配置…" /> : <>
+    <div className="settings-ranking" aria-label="画师排序">
+      <div><span className="eyebrow">ARTIST RANKING</span><h2>画师推荐排序</h2><p>三种排序并列，只改变推荐名单，不会自动写入提示词。</p></div>
+      <div className="settings-ranking-options">
+        {rankingOptions.map((option) => (
+          <label key={option.id} className={`settings-ranking-option${artistRanking === option.id ? " is-selected" : ""}`}>
+            <input type="radio" name="artist-ranking" value={option.id} checked={artistRanking === option.id} disabled={rankingBusy} onChange={() => void saveArtistRanking(option.id)} />
+            <span><strong>{option.label}</strong><small>{option.detail}</small></span>
+          </label>
+        ))}
+      </div>
+    </div>
+    <div className="settings-layout">
       <aside className="settings-side">
         <div className="settings-side-head"><span>REMOTE CONNECTIONS</span><button type="button" className="button button--secondary" onClick={startNew}>＋ 新建</button></div>
         <div className="remote-profile-list">
@@ -211,8 +294,18 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
           <label className="check-label"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({...form, enabled: event.target.checked})} /> 在生成列表中启用此连接</label>
         </fieldset>
         <div className="settings-security"><strong>SSH 指纹与连接测试</strong><p>{selected?.host_fingerprint_confirmed ? "主机指纹已确认。更改地址、端口、用户名、认证方式或私钥后会自动要求重新确认。完整测试会继续验证 SSH 登录、隧道和 ComfyUI API。" : "新建连接尚未确认主机指纹。检测不会自动信任主机；请核对显示的指纹后确认保存。"}</p>{selected && <div className="host-key-actions"><button type="button" className="button button--secondary" onClick={() => void probeHostKey()} disabled={probing || testing}>{probing ? "检测中…" : "检测 SSH 指纹"}</button>{fingerprint && <><code>{fingerprint}</code><button type="button" className="button button--secondary" onClick={() => void confirmHostKey()} disabled={probing || testing}>确认并保存指纹</button></>}<button type="button" className="button button--primary" onClick={() => void testConnection()} disabled={!selected.host_fingerprint_confirmed || probing || testing}>{testing ? "正在测试 SSH 与 ComfyUI…" : "测试完整连接"}</button></div>}</div>
+        <div className="settings-security">
+          <strong>ComfyUI 网页维护入口</strong>
+          <p>云端 8188 继续禁止公网直连。项目运行期间通过本机 SSH 隧道访问，关闭项目后入口自动失效。</p>
+          <div className="host-key-actions">
+            <a href={comfyAccess?.local_url || "http://127.0.0.1:18188"} target="_blank" rel="noreferrer"><code>{comfyAccess?.local_url || "http://127.0.0.1:18188"}</code></a>
+            <button type="button" className="button button--primary" onClick={() => void openComfy()} disabled={!selected?.host_fingerprint_confirmed || comfyOpening || testing || probing}>{comfyOpening ? "正在建立维护隧道…" : "打开 ComfyUI 网页"}</button>
+          </div>
+          <small>{comfyAccess?.message || "项目启动后会自动连接默认云主机；也可以选择连接后点击按钮。"}</small>
+        </div>
       </form>
-    </div>}
+    </div>
+    </>}
   </section>;
 }
 

@@ -34,6 +34,7 @@ class LocalApiServer:
             raise ValueError("v2_database 不能与手动注入的 V2 适配器同时指定。")
         self._owned_generation_queue = None
         self._owned_gallery_service = None
+        self._owned_comfy_access = None
         if v2_database is not None:
             try:
                 from ..adapters.v2 import (
@@ -41,6 +42,7 @@ class LocalApiServer:
                     build_v2_generation_queue,
                     build_v2_intent_parser,
                     build_v2_local_translation_adapter,
+                    ManagedComfyAccess,
                 )
             except ModuleNotFoundError as exc:
                 raise RuntimeError("当前安装不包含 V2 兼容运行时。") from exc
@@ -50,6 +52,7 @@ class LocalApiServer:
             gallery_service = build_v2_gallery_service(v2_database)
             translation_service = build_v2_local_translation_adapter()
             self._owned_gallery_service = gallery_service
+            self._owned_comfy_access = ManagedComfyAccess(v2_database)
         self.runtime: ApiRuntime = create_api_runtime(
             reference_db,
             frontend_dist=frontend_dist,
@@ -59,6 +62,7 @@ class LocalApiServer:
             intent_parser=intent_parser,
             gallery_service=gallery_service,
             translation_service=translation_service,
+            comfy_access=self._owned_comfy_access,
             app_version=app_version,
         )
         self._socket: socket.socket | None = None
@@ -111,6 +115,8 @@ class LocalApiServer:
             if not self._server.started:
                 self.stop()
                 raise RuntimeError("localhost API 启动超时或提前退出。")
+            if self._owned_comfy_access is not None:
+                self._owned_comfy_access.start_default_async()
             return self
         except Exception:
             if self._socket is None:
@@ -136,6 +142,9 @@ class LocalApiServer:
         if self._owned_gallery_service is not None:
             self._owned_gallery_service.shutdown(timeout=timeout)
             self._owned_gallery_service = None
+        if self._owned_comfy_access is not None:
+            self._owned_comfy_access.close()
+            self._owned_comfy_access = None
 
     def __enter__(self) -> "LocalApiServer":
         return self.start()

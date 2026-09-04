@@ -9,6 +9,13 @@ from .benchmark import (
     StaticBenchmarkSuite,
 )
 
+from .direct_prompt import (
+    DIRECT_ALGORITHM_VERSION,
+    DirectPromptInspection,
+    DirectPromptToken,
+    inspect_direct_prompt,
+    split_prompt_tokens,
+)
 from .literal import (
     LITERAL_ALGORITHM_VERSION,
     LiteralCandidateGenerator,
@@ -47,6 +54,11 @@ __all__ = [
     "StaticBenchmarkReport",
     "StaticBenchmarkRunner",
     "StaticBenchmarkSuite",
+    "DIRECT_ALGORITHM_VERSION",
+    "DirectPromptInspection",
+    "DirectPromptToken",
+    "inspect_direct_prompt",
+    "split_prompt_tokens",
     "LITERAL_ALGORITHM_VERSION",
     "HYBRID_ALGORITHM_VERSION",
     "ARTIST_ALGORITHM_VERSION",

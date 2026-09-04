@@ -1,7 +1,8 @@
-import {fireEvent, render, screen, waitFor, within} from "@testing-library/react";
+import {cleanup, fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import {MemoryRouter} from "react-router-dom";
-import {beforeEach, expect, it, vi} from "vitest";
+import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import type {PromptCandidate, SceneDraft, WorkbenchResponse} from "../lib/types";
+import {resetDirectImportForTests, storeDirectImport} from "../lib/directPrompt";
 import {WorkbenchPage} from "./WorkbenchPage";
 
 const candidate: PromptCandidate = {
@@ -22,10 +23,30 @@ const candidate: PromptCandidate = {
   versions: {data_pack: "pack-r1", algorithm: "literal-v1", templates: "renderer-v1", model_profile: "anima_base_v1"},
 };
 
+const baseRecipeContract = {
+  default_recipe_id: "stable_baseline",
+  generation_recipes: [
+    {id: "stable_baseline", display_name: "稳定基线", objective: "baseline", parameters: {steps: 30, cfg: 4, sampler: "er_sde", scheduler: "simple"}, notes: "工作流模板基线。", evidence: "workflow_template"},
+    {id: "detail_study", display_name: "细节实验", objective: "detail_study", parameters: {steps: 40, cfg: 4.5, sampler: "er_sde", scheduler: "simple"}, notes: "固定 Seed 对照实验。", evidence: "experimental"},
+  ],
+  parameter_capabilities: {
+    steps: {mode: "editable", value: 30, minimum: 30, maximum: 50, options: [], reason: "验证范围"},
+    cfg: {mode: "editable", value: 4, minimum: 4, maximum: 5, options: [], reason: "验证范围"},
+    sampler: {mode: "editable", value: "er_sde", options: ["er_sde", "euler", "dpmpp_2m_sde_gpu"], reason: "风格取向"},
+    scheduler: {mode: "fixed", value: "simple", options: [], reason: "工作流固定"},
+  },
+};
+
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.setItem("anima-v3-session", "session-token");
+  resetDirectImportForTests();
   vi.restoreAllMocks();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
 });
 
 it("imports selected supermarket tags into the structured draft", () => {
@@ -33,6 +54,20 @@ it("imports selected supermarket tags into the structured draft", () => {
 
   expect(screen.getByLabelText("希望画面中出现")).toHaveValue("maid，twintails");
   expect(screen.getByText("2 个正向概念")).toBeInTheDocument();
+});
+
+it("imports a Chinese gloss from the English passthrough page", () => {
+  storeDirectImport({
+    positive_text: "女仆，全身，看向观众",
+    excluded_text: "低画质",
+    english_positive: "maid, full body, looking at viewer",
+    english_negative: "low quality",
+  });
+  render(<MemoryRouter initialEntries={["/workbench?from=direct"]}><WorkbenchPage /></MemoryRouter>);
+
+  expect(screen.getByLabelText("希望画面中出现")).toHaveValue("女仆，全身，看向观众");
+  expect(screen.getByLabelText("明确排除")).toHaveValue("低画质");
+  expect(screen.getByText(/已从英文直出导入中文对照/)).toBeInTheDocument();
 });
 
 it("submits structured required, locked and excluded concepts and renders candidates", async () => {
@@ -150,6 +185,233 @@ it("keeps local mapping suggestions out of candidates until the user selects one
     selected_tags: ["rain"],
   });
   expect(await screen.findByText("用户从建议池确认加入")).toBeInTheDocument();
+});
+
+it("keeps character identity matches out of candidates until the user confirms the English tag", async () => {
+  const sceneDraft = {
+    source_text: "博丽灵梦穿女仆装",
+    translated_text: "Hakurei Reimu wears a maid outfit",
+    confirmed: [{id: "e_local_confirmed_1", text: "女仆", canonical_tag: "maid", source: "source_exact", fact_type: "clothing", reason: "中文原文精确匹配", source_start: 4, source_end: 6}],
+    exclusions: [],
+    suggestions: [{id: "s_local_identity_1", text: "博丽灵梦", canonical_tag: "hakurei_reimu", source: "identity_candidate", fact_type: "character", reason: "匹配到角色或作品标签", source_start: 0, source_end: 4, cn_name: "博丽灵梦"}],
+    unresolved: [],
+    risk_notes: ["发现疑似角色或作品标签，不会自动加入提示词。"],
+  } as const;
+  const first = {
+    intent: {source_text: sceneDraft.source_text, source_language: "zh", graph: {elements: []}},
+    candidates: [{...candidate, positive_prompt: "maid", tags: [{name: "maid", rendered: "maid", state: "required", source: "exact", source_element_ids: ["e_local_confirmed_1"], reason: "中文精确映射", raw_score: null, display_score: null, removable: true}]}],
+    validation: {valid: true, error_count: 0},
+    data_pack_id: "pack-r1",
+    scene_draft: sceneDraft,
+    tag_suggestions: [],
+    local_translation: {translated_text: sceneDraft.translated_text, engine: "内置离线基础翻译", local_only: true},
+  };
+  const second = {
+    ...first,
+    candidates: [{...candidate, positive_prompt: "maid, hakurei reimu", tags: [
+      {name: "maid", rendered: "maid", state: "required", source: "exact", source_element_ids: ["e_local_confirmed_1"], reason: "中文精确映射", raw_score: null, display_score: null, removable: true},
+      {name: "hakurei_reimu", rendered: "hakurei reimu", state: "user_selected", source: "exact", source_element_ids: ["e_local_selected_1"], reason: "用户确认", raw_score: null, display_score: null, removable: true},
+    ]}],
+    scene_draft: {
+      ...sceneDraft,
+      confirmed: [
+        ...sceneDraft.confirmed,
+        {id: "e_local_selected_1", text: "博丽灵梦", canonical_tag: "hakurei_reimu", source: "user_selected", fact_type: "character", reason: "用户从建议池确认加入", source_start: null, source_end: null, cn_name: "博丽灵梦"},
+      ],
+      suggestions: [],
+    },
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify(first), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify(second), {status: 200}));
+
+  render(<MemoryRouter><WorkbenchPage naturalLanguageEnabled /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("tab", {name: "自然语言描述"}));
+  fireEvent.change(screen.getByLabelText("描述你想生成的画面"), {target: {value: sceneDraft.source_text}});
+  fireEvent.click(screen.getByRole("button", {name: "编译并生成候选"}));
+
+  expect(await screen.findByText("疑似角色/作品，需确认")).toBeInTheDocument();
+  expect(screen.getByRole("button", {name: /博丽灵梦/})).toBeInTheDocument();
+  expect(screen.queryByText("maid, hakurei reimu")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: /博丽灵梦/}));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  const recompileRequest = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+  expect(recompileRequest.selected_tags).toEqual(["hakurei_reimu"]);
+  expect(await screen.findByText("maid, hakurei reimu")).toBeInTheDocument();
+});
+
+it("keeps excluded character identity out of the negative prompt until the user confirms the English tag", async () => {
+  const sceneDraft = {
+    source_text: "女仆，不要博丽灵梦",
+    translated_text: "A maid",
+    confirmed: [{id: "e_local_confirmed_1", text: "女仆", canonical_tag: "maid", source: "source_exact" as const, fact_type: "clothing" as const, reason: "中文原文精确匹配", source_start: 0, source_end: 2}],
+    exclusions: [],
+    suggestions: [{id: "s_local_identity_exclusion_1", text: "博丽灵梦", canonical_tag: "hakurei_reimu", source: "identity_exclusion" as const, fact_type: "character" as const, reason: "匹配到角色或作品标签", source_start: 3, source_end: 7, cn_name: "博丽灵梦"}],
+    unresolved: [],
+    risk_notes: ["发现要从画面中排除的疑似角色或作品，不会自动写入负向提示词。"],
+  };
+  const first = {
+    intent: {source_text: sceneDraft.source_text, source_language: "zh", graph: {elements: []}},
+    candidates: [{...candidate, positive_prompt: "maid", negative_prompt: ""}],
+    validation: {valid: true, error_count: 0},
+    data_pack_id: "pack-r1",
+    scene_draft: sceneDraft,
+    tag_suggestions: [],
+    local_translation: {translated_text: sceneDraft.translated_text, engine: "内置离线基础翻译", local_only: true},
+  };
+  const second = {
+    ...first,
+    candidates: [{...candidate, positive_prompt: "maid", negative_prompt: "hakurei reimu"}],
+    scene_draft: {
+      ...sceneDraft,
+      exclusions: [{id: "e_local_excluded_1", text: "hakurei_reimu", canonical_tag: "hakurei_reimu", source: "source_excluded" as const, fact_type: "character" as const, reason: "用户明确排除", source_start: null, source_end: null, cn_name: "博丽灵梦"}],
+      suggestions: [],
+    },
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify(first), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify(second), {status: 200}));
+
+  render(<MemoryRouter><WorkbenchPage naturalLanguageEnabled /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("tab", {name: "自然语言描述"}));
+  fireEvent.change(screen.getByLabelText("描述你想生成的画面"), {target: {value: sceneDraft.source_text}});
+  fireEvent.click(screen.getByRole("button", {name: "编译并生成候选"}));
+
+  expect(await screen.findByText("疑似要排除的角色/作品，需确认")).toBeInTheDocument();
+  expect(screen.queryByText("Negative")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: /博丽灵梦/}));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  const recompileRequest = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+  expect(recompileRequest.excluded_text).toBe("hakurei_reimu");
+  expect(recompileRequest.selected_tags).toEqual([]);
+  expect(await screen.findByText("Negative")).toBeInTheDocument();
+  const review = screen.getByRole("region", {name: "Scene Draft"});
+  expect(within(review).getByText("明确排除")).toBeInTheDocument();
+  expect(within(review).getByText("博丽灵梦")).toBeInTheDocument();
+});
+
+it("applies a composition preset to chips without replacing the page", async () => {
+  const palette = [
+    {axis: "shot" as const, canonical_tag: "cowboy_shot", label_zh: "膝上", render_name: "cowboy shot", state: "available" as const, side: "positive" as const, reason: "膝上大约裁到大腿，是改框最明显的景别。"},
+    {axis: "gaze" as const, canonical_tag: "looking_at_viewer", label_zh: "看镜头", render_name: "looking at viewer", state: "available" as const, side: "positive" as const, reason: "模型常见默认。"},
+    {axis: "gaze" as const, canonical_tag: "looking_away", label_zh: "看向画外", render_name: "looking away", state: "available" as const, side: "positive" as const, reason: "把视线拧开。"},
+  ];
+  const presets = [
+    {id: "none", label_zh: "不套预设", tags: [] as string[], note: "不写入构图标签。未指定视线时模型仍可能看镜头。", group_zh: "基础"},
+    {id: "cowboy_viewer", label_zh: "膝上立绘", tags: ["cowboy_shot", "looking_at_viewer"], note: "常见人物肖像：膝上并看镜头。", group_zh: "常用立绘"},
+  ];
+  const first = {
+    intent: {source_text: "女仆", source_language: "zh", graph: {elements: []}},
+    candidates: [{...candidate, positive_prompt: "maid"}],
+    validation: {valid: true, error_count: 0},
+    data_pack_id: "pack-r1",
+    scene_draft: {
+      source_text: "女仆",
+      translated_text: "A maid",
+      confirmed: [{id: "e_maid", text: "女仆", canonical_tag: "maid", source: "source_exact", fact_type: "clothing", reason: "中文原文精确匹配", source_start: 0, source_end: 2}],
+      exclusions: [],
+      suggestions: [],
+      unresolved: [],
+      composition_palette: palette,
+      composition_presets: presets,
+      risk_notes: [],
+    },
+    tag_suggestions: [],
+    local_translation: {translated_text: "A maid", engine: "内置离线基础翻译", local_only: true},
+  };
+  const second = {
+    ...first,
+    candidates: [{...candidate, positive_prompt: "maid, cowboy shot, looking at viewer"}],
+    scene_draft: {
+      ...first.scene_draft,
+      composition_palette: palette.map((item) => item.canonical_tag === "cowboy_shot" || item.canonical_tag === "looking_at_viewer" ? {...item, state: "selected" as const} : item),
+    },
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify(first), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify(second), {status: 200}));
+
+  render(<MemoryRouter><WorkbenchPage naturalLanguageEnabled /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("tab", {name: "自然语言描述"}));
+  fireEvent.change(screen.getByLabelText("描述你想生成的画面"), {target: {value: "女仆"}});
+  fireEvent.click(screen.getByRole("button", {name: "编译并生成候选"}));
+
+  const review = await screen.findByRole("region", {name: "Scene Draft"});
+  const presetSelect = within(review).getByLabelText("快速构图") as HTMLSelectElement;
+  expect(presetSelect).toHaveValue("none");
+  fireEvent.change(presetSelect, {target: {value: "cowboy_viewer"}});
+  expect(within(review).getByRole("button", {name: /膝上/})).toHaveAttribute("aria-pressed", "true");
+  expect(within(review).getByRole("button", {name: /看镜头/})).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("heading", {name: "高保真基准"})).toBeInTheDocument();
+  expect(screen.queryByText("正在映射标签、计算推荐并验证候选…")).not.toBeInTheDocument();
+  expect(presetSelect).toHaveValue("cowboy_viewer");
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), {timeout: 1500});
+  expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).selected_tags).toEqual(["cowboy_shot", "looking_at_viewer"]);
+});
+
+it("lets the user pick composition chips immediately without replacing the page", async () => {
+  const palette = [
+    {axis: "shot" as const, canonical_tag: "cowboy_shot", label_zh: "膝上", render_name: "cowboy shot", state: "available" as const, side: "positive" as const, reason: "膝上大约裁到大腿，是改框最明显的景别。", notes: {available: "膝上大约裁到大腿，是改框最明显的景别。", selected: "已选用膝上。裁切大约到大腿，会明显改框，不一定是全身。"}},
+    {axis: "gaze" as const, canonical_tag: "looking_away", label_zh: "看向画外", render_name: "looking away", state: "suggested" as const, side: "positive" as const, reason: "仅把「看镜头」放进负向通常打不破先验，请点选「看向画外」。", notes: {suggested: "仅把「看镜头」放进负向通常打不破先验，请点选「看向画外」。", selected: "已选用看向画外，并排除 looking at viewer。仅放进负向通常打不破看镜头。"}},
+    {axis: "gaze" as const, canonical_tag: "looking_at_viewer", label_zh: "看镜头", render_name: "looking at viewer", state: "excluded" as const, side: "excluded" as const, reason: "已排除看镜头，写入负向。仅负向通常不够，请再点选「看向画外」。"},
+  ];
+  const first = {
+    intent: {source_text: "女仆，不要看镜头", source_language: "zh", graph: {elements: []}},
+    candidates: [{...candidate, positive_prompt: "maid", negative_prompt: "looking at viewer"}],
+    validation: {valid: true, error_count: 0},
+    data_pack_id: "pack-r1",
+    scene_draft: {
+      source_text: "女仆，不要看镜头",
+      translated_text: "A maid",
+      confirmed: [{id: "e_maid", text: "女仆", canonical_tag: "maid", source: "source_exact", fact_type: "clothing", reason: "中文原文精确匹配", source_start: 0, source_end: 2}],
+      exclusions: [{id: "e_gaze", text: "看镜头", canonical_tag: "looking_at_viewer", source: "source_excluded", fact_type: "composition", reason: "用户明确排除", source_start: 3, source_end: 6}],
+      suggestions: [],
+      unresolved: [],
+      composition_palette: palette,
+      risk_notes: ["仅把「看镜头」放进负向通常打不破先验，请点选「看向画外」。"],
+    },
+    tag_suggestions: [],
+    local_translation: {translated_text: "A maid", engine: "内置离线基础翻译", local_only: true},
+  };
+  const secondPalette = palette.map((item) => {
+    if (item.canonical_tag === "looking_away") return {...item, state: "selected" as const, reason: item.notes?.selected || item.reason};
+    if (item.canonical_tag === "cowboy_shot") return {...item, state: "selected" as const, reason: item.notes?.selected || item.reason};
+    return item;
+  });
+  const second = {
+    ...first,
+    candidates: [{...candidate, positive_prompt: "maid, cowboy shot, looking away", negative_prompt: "looking at viewer"}],
+    scene_draft: {...first.scene_draft, composition_palette: secondPalette},
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify(first), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify(second), {status: 200}));
+
+  render(<MemoryRouter><WorkbenchPage naturalLanguageEnabled /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("tab", {name: "自然语言描述"}));
+  fireEvent.change(screen.getByLabelText("描述你想生成的画面"), {target: {value: "女仆，不要看镜头"}});
+  fireEvent.click(screen.getByRole("button", {name: "编译并生成候选"}));
+
+  const review = await screen.findByRole("region", {name: "Scene Draft"});
+  expect(within(review).getByText("构图镜头")).toBeInTheDocument();
+  expect(within(review).getByRole("list", {name: "当前构图注意"})).toHaveTextContent("请点选「看向画外」");
+  expect(screen.getByRole("heading", {name: "高保真基准"})).toBeInTheDocument();
+
+  fireEvent.click(within(review).getByRole("button", {name: /看向画外/}));
+  fireEvent.click(within(review).getByRole("button", {name: /膝上/}));
+  expect(within(review).getByRole("button", {name: /看向画外/})).toHaveAttribute("aria-pressed", "true");
+  expect(within(review).getByRole("button", {name: /膝上/})).toHaveAttribute("aria-pressed", "true");
+  expect(within(review).getByRole("button", {name: /看向画外/})).not.toBeDisabled();
+  expect(screen.getByRole("heading", {name: "高保真基准"})).toBeInTheDocument();
+  expect(screen.queryByText("正在映射标签、计算推荐并验证候选…")).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), {timeout: 1500});
+  expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).selected_tags).toEqual(["looking_away", "cowboy_shot"]);
+  expect(await screen.findByText("maid, cowboy shot, looking away")).toBeInTheDocument();
 });
 
 it("keeps exclusions separate and reapplies an edited scene plan without translation", async () => {
@@ -306,6 +568,7 @@ it("previews V2 local translation without compiling it into candidates", async (
 
   render(<MemoryRouter><WorkbenchPage localTranslationEnabled /></MemoryRouter>);
   fireEvent.change(screen.getByLabelText("希望画面中出现"), {target: {value: "一个女孩，白发"}});
+  fireEvent.click(screen.getByRole("button", {name: "展开本地翻译"}));
   fireEvent.click(screen.getByRole("button", {name: "翻译当前输入"}));
 
   expect(await screen.findByText("one girl, white hair")).toBeInTheDocument();
@@ -345,6 +608,7 @@ it("shows the artist comparison pool without injecting artists into candidates",
   fireEvent.change(screen.getByLabelText("希望画面中出现"), {target: {value: "女仆装"}});
   fireEvent.click(screen.getByRole("button", {name: "生成候选"}));
 
+  fireEvent.click(await screen.findByRole("button", {name: "展开画师对照"}));
   expect(await screen.findByRole("region", {name: "画师对照"})).toBeInTheDocument();
   expect(screen.getByText("@artist a")).toBeInTheDocument();
   expect(screen.getByText(/匹配 .*maid · 1 项证据 · 共现 80/)).toBeInTheDocument();
@@ -476,6 +740,7 @@ it("keeps same-named connections distinct and submits to the selected cloud host
       host_fingerprint_ready: true,
       auth_type: "agent",
       private_key_passphrase_configured: false,
+      ...baseRecipeContract,
     }, {
       remote_profile_id: "remote-2",
       remote_display_name: "测试云主机",
@@ -488,6 +753,7 @@ it("keeps same-named connections distinct and submits to the selected cloud host
       host_fingerprint_ready: true,
       auth_type: "agent",
       private_key_passphrase_configured: false,
+      ...baseRecipeContract,
     }, {
       remote_profile_id: "remote-3",
       remote_display_name: "新云显卡",
@@ -500,11 +766,13 @@ it("keeps same-named connections distinct and submits to the selected cloud host
       host_fingerprint_ready: false,
       auth_type: "agent",
       private_key_passphrase_configured: false,
+      ...baseRecipeContract,
     }]}), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({
       intent: {source_text: "女仆", source_language: "zh", graph: {elements: []}},
       candidates: [candidate], validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1",
     }), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({remote_profile_id: "remote-2"}), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({
       id: "run-1", state: "draft", progress: 0, available_actions: ["cancel_queued"],
     }), {status: 202}));
@@ -523,13 +791,60 @@ it("keeps same-named connections distinct and submits to the selected cloud host
   expect(screen.getByLabelText("远程工作流")).toHaveValue("workflow-1");
   fireEvent.click(screen.getByRole("button", {name: "远程生图"}));
 
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-  const request = JSON.parse(String(fetchMock.mock.calls[2][1]?.body));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+  expect(fetchMock.mock.calls[2][0]).toBe("/api/v3/settings/default-remote-profile");
+  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({remote_profile_id: "remote-2"});
+  const request = JSON.parse(String(fetchMock.mock.calls[3][1]?.body));
   expect(request.remote_profile_id).toBe("remote-2");
   expect(request.workflow_profile_id).toBe("workflow-1");
   expect(request.candidate.id).toBe("candidate_literal");
-  expect(request.settings).toEqual({preset_id: "balanced", width: 896, height: 1152, seed: -1, batch_size: 1});
-  expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get("Idempotency-Key")).toMatch(/^web-/);
+  expect(request.settings).toEqual({preset_id: "stable_baseline", width: 896, height: 1152, steps: 30, cfg: 4, sampler: "er_sde", scheduler: "simple", seed: -1, batch_size: 1});
+  expect(new Headers(fetchMock.mock.calls[3][1]?.headers).get("Idempotency-Key")).toMatch(/^web-/);
+});
+
+it("keeps the database-preferred cloud host while changing model workflows", async () => {
+  localStorage.setItem("anima-v3-generation-target", "remote-1::aesthetic");
+  const target = (remote: string, workflow: string, model: string) => ({
+    remote_profile_id: remote,
+    remote_display_name: remote === "remote-2" ? "固定云显卡" : "旧云显卡",
+    remote_ssh_host: remote === "remote-2" ? "203.0.113.12" : "203.0.113.10",
+    remote_ssh_port: 23,
+    workflow_profile_id: workflow,
+    workflow_display_name: workflow,
+    workflow_kind: "txt2img_basic",
+    compatible_model_profiles: [model],
+    host_fingerprint_ready: true,
+    auth_type: "agent",
+    private_key_passphrase_configured: false,
+  });
+  const targets = [
+    target("remote-1", "aesthetic", "anima_aesthetic_v1"),
+    target("remote-1", "base", "anima_base_v1"),
+    target("remote-2", "aesthetic", "anima_aesthetic_v1"),
+    target("remote-2", "base", "anima_base_v1"),
+  ];
+  const response = new Response(JSON.stringify({
+    intent: {source_text: "女仆", source_language: "zh", graph: {elements: []}},
+    candidates: [candidate], validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1",
+  }), {status: 200});
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: targets, preferred_remote_profile_id: "remote-2"}), {status: 200}))
+    .mockResolvedValueOnce(response)
+    .mockResolvedValueOnce(response.clone());
+
+  render(<MemoryRouter><WorkbenchPage remoteEnabled /></MemoryRouter>);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  fireEvent.change(screen.getByLabelText("希望画面中出现"), {target: {value: "女仆"}});
+  fireEvent.click(screen.getByRole("button", {name: "生成候选"}));
+  await screen.findByRole("heading", {name: "高保真基准"});
+  expect(screen.getByLabelText("云主机连接")).toHaveValue("remote-2");
+  expect(screen.getByLabelText("远程工作流")).toHaveValue("aesthetic");
+
+  fireEvent.change(screen.getByLabelText("模型配置"), {target: {value: "anima_base_v1"}});
+  fireEvent.click(screen.getByRole("button", {name: "生成候选"}));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  expect(screen.getByLabelText("云主机连接")).toHaveValue("remote-2");
+  expect(screen.getByLabelText("远程工作流")).toHaveValue("base");
 });
 
 it("locks one candidate and submits separate fixed-seed jobs for selected artists", async () => {
@@ -539,7 +854,7 @@ it("locks one candidate and submits separate fixed-seed jobs for selected artist
   ];
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify({items: [{
-      remote_profile_id: "remote-1", remote_display_name: "测试云主机", workflow_profile_id: "workflow-1", workflow_display_name: "ANIMA Base", workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_base_v1", "anima_aesthetic_v1"], host_fingerprint_ready: true, auth_type: "agent", private_key_passphrase_configured: false,
+      remote_profile_id: "remote-1", remote_display_name: "测试云主机", workflow_profile_id: "workflow-1", workflow_display_name: "ANIMA Base", workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_base_v1", "anima_aesthetic_v1"], host_fingerprint_ready: true, auth_type: "agent", private_key_passphrase_configured: false, ...baseRecipeContract,
     }]}), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({
       intent: {source_text: "女仆", source_language: "zh", graph: {elements: []}}, candidates: [candidate], validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1", artist_suggestions: artists,
@@ -566,7 +881,7 @@ it("locks one candidate and submits separate fixed-seed jobs for selected artist
   expect(fetchMock.mock.calls[3][0]).toBe("/api/v3/artist-comparisons");
   const request = JSON.parse(String(fetchMock.mock.calls[3][1]?.body));
   expect(request.artist_names).toEqual(["artist_a", "artist_b"]);
-  expect(request.settings).toEqual({preset_id: "balanced", width: 896, height: 1152, seed: 123, batch_size: 1});
+  expect(request.settings).toEqual({preset_id: "stable_baseline", width: 896, height: 1152, steps: 30, cfg: 4, sampler: "er_sde", scheduler: "simple", seed: 123, batch_size: 1});
   expect(request.candidate.id).toBe("candidate_literal");
   expect(new Headers(fetchMock.mock.calls[3][1]?.headers).get("Idempotency-Key")).toMatch(/^artist-comparison-/);
 });
@@ -662,7 +977,7 @@ it("annotates English scene plans with Chinese back-translation and lets users d
 it("writes the visible generation spec into the remote request", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify({items: [{
-      remote_profile_id: "remote-1", remote_display_name: "测试云主机", workflow_profile_id: "workflow-1", workflow_display_name: "ANIMA Aesthetic", workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_aesthetic_v1"], host_fingerprint_ready: true, auth_type: "agent", private_key_passphrase_configured: false,
+      remote_profile_id: "remote-1", remote_display_name: "测试云主机", workflow_profile_id: "workflow-1", workflow_display_name: "ANIMA Aesthetic", workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_aesthetic_v1"], host_fingerprint_ready: true, auth_type: "agent", private_key_passphrase_configured: false, ...baseRecipeContract,
     }]}), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({
       intent: {source_text: "女仆", source_language: "zh", graph: {elements: []}}, candidates: [candidate], validation: {valid: true, error_count: 0}, data_pack_id: "pack-r1",
@@ -672,7 +987,10 @@ it("writes the visible generation spec into the remote request", async () => {
   render(<MemoryRouter><WorkbenchPage remoteEnabled /></MemoryRouter>);
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   fireEvent.change(screen.getByLabelText("画幅"), {target: {value: "landscape"}});
-  fireEvent.change(screen.getByLabelText("预设"), {target: {value: "quality"}});
+  fireEvent.change(screen.getByLabelText("生成配方"), {target: {value: "detail_study"}});
+  fireEvent.change(screen.getByLabelText("采样步数 Steps"), {target: {value: "46"}});
+  fireEvent.change(screen.getByLabelText("CFG"), {target: {value: "4.2"}});
+  fireEvent.change(screen.getByLabelText("采样器 Sampler"), {target: {value: "dpmpp_2m_sde_gpu"}});
   fireEvent.change(screen.getByLabelText("Seed"), {target: {value: "42"}});
   fireEvent.change(screen.getByLabelText("希望画面中出现"), {target: {value: "女仆"}});
   fireEvent.click(screen.getByRole("button", {name: "生成候选"}));
@@ -680,7 +998,7 @@ it("writes the visible generation spec into the remote request", async () => {
   fireEvent.click(screen.getByRole("button", {name: "远程生图"}));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).settings).toEqual({preset_id: "quality", width: 1152, height: 896, seed: 42, batch_size: 1});
+  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).settings).toEqual({preset_id: "custom", width: 1152, height: 896, steps: 46, cfg: 4.2, sampler: "dpmpp_2m_sde_gpu", scheduler: "simple", seed: 42, batch_size: 1});
 });
 
 it("keeps English structured tags bilingual and suppressed after recompiling", async () => {
