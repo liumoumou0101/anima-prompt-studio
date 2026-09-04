@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 
 from anima_prompt_studio.domain.execution_models import GenerationRun, GenerationRunState
 from anima_prompt_studio_v3.adapters.v2 import CandidateToV2PromptJobAdapter
@@ -94,6 +95,21 @@ def test_prepare_direct_sends_pasted_english_unchanged() -> None:
     assert prepared.job.compiled_prompt_state.value == "locked"
     assert prepared.job.integration_metadata["origin"] == "direct_prompt"
     assert prepared.checkpoint_logical_name == "anima_aesthetic_v1"
+
+
+@pytest.mark.parametrize("model_profile", [
+    "animayume_v1_0_final",
+    "miaomiao_harem_anima_v1_6",
+])
+def test_prepare_direct_supports_community_model_profiles(model_profile: str) -> None:
+    prepared = CandidateToV2PromptJobAdapter().prepare_direct(
+        positive_prompt="1girl, solo, portrait",
+        model_profile_id=model_profile,
+    )
+
+    assert prepared.job.model_profile_id == model_profile
+    assert prepared.checkpoint_logical_name == model_profile
+    assert prepared.job.positive_prompt == "1girl, solo, portrait"
 
 
 def test_direct_prompt_preview_and_run_api_do_not_compile(tmp_path: Path) -> None:

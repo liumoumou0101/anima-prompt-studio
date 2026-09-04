@@ -66,6 +66,49 @@ it("offers every current built-in model when bootstrap profile labels are unavai
   ]);
 });
 
+it("refreshes remote targets and submits a community model in the same click", async () => {
+  const communityTarget = {
+    remote_profile_id: "remote-community",
+    remote_display_name: "社区模型云主机",
+    workflow_profile_id: "workflow-yume",
+    workflow_display_name: "AnimaYume 验证基线",
+    workflow_kind: "txt2img_basic",
+    workflow_notes: "社区模型专用工作流",
+    compatible_model_profiles: ["animayume_v1_0_final"],
+    host_fingerprint_ready: true,
+    auth_type: "agent",
+    private_key_passphrase_configured: false,
+    default_recipe_id: "yume_creator",
+    generation_recipes: [{id: "yume_creator", display_name: "作者参数基线", objective: "baseline", parameters: {steps: 30, cfg: 5.5, sampler: "euler_ancestral", scheduler: "normal"}, notes: "作者参数。", evidence: "model_guidance"}],
+    parameter_capabilities: {
+      steps: {mode: "editable", value: 30, minimum: 25, maximum: 40, options: [], reason: "作者建议"},
+      cfg: {mode: "editable", value: 5.5, minimum: 4, maximum: 7, options: [], reason: "作者建议"},
+      sampler: {mode: "editable", value: "euler_ancestral", options: ["euler_ancestral"], reason: "作者建议"},
+      scheduler: {mode: "editable", value: "normal", options: ["normal"], reason: "作者建议"},
+    },
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: []}), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [communityTarget], preferred_remote_profile_id: "remote-community"}), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({id: "run-community", state: "draft"}), {status: 202}));
+
+  render(<MemoryRouter><DirectPromptPage remoteEnabled /></MemoryRouter>);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  fireEvent.change(screen.getByLabelText("模型配置"), {target: {value: "animayume_v1_0_final"}});
+  fireEvent.change(screen.getByLabelText("正向提示词（英文，原样发送）"), {target: {value: "1girl, solo, portrait"}});
+  fireEvent.click(screen.getByRole("button", {name: "按原文生图"}));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  const body = JSON.parse(String(fetchMock.mock.calls[2][1]?.body));
+  expect(body).toMatchObject({
+    model_profile: "animayume_v1_0_final",
+    remote_profile_id: "remote-community",
+    workflow_profile_id: "workflow-yume",
+    settings: {preset_id: "yume_creator", steps: 30, cfg: 5.5, sampler: "euler_ancestral", scheduler: "normal"},
+  });
+  expect(await screen.findByText(/已按原文提交远程队列/)).toBeInTheDocument();
+});
+
 it("submits the original English prompt without compiling", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify({

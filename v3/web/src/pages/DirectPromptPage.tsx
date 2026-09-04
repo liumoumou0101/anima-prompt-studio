@@ -37,6 +37,7 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
   const [notice, setNotice] = useState<string | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [generationBusy, setGenerationBusy] = useState(false);
+  const [targetsBusy, setTargetsBusy] = useState(false);
   const [generationTargets, setGenerationTargets] = useState<GenerationTarget[]>([]);
   const [selectedTarget, setSelectedTarget] = useState(() => {
     if (draft.generation_settings.remote_profile_id && draft.generation_settings.workflow_profile_id) return `${draft.generation_settings.remote_profile_id}::${draft.generation_settings.workflow_profile_id}`;
@@ -51,6 +52,7 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
   });
   const [privateKeyPassphrase, setPrivateKeyPassphrase] = useState("");
   const idempotencyKey = useRef<string | null>(null);
+  const targetRequest = useRef<Promise<GenerationTarget[]> | null>(null);
 
   const compatibleTargets = useMemo(() => generationTargets.filter((target) => (
     target.compatible_model_profiles.includes(draft.model_profile)
@@ -72,16 +74,29 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
 
   useEffect(() => {
     if (!remoteEnabled) return;
-    apiRequest<GenerationTargetListResponse>("/api/v3/generation-targets")
+    void loadGenerationTargets()
+      .catch((caught) => setNotice((caught as ApiClientError).message));
+  }, [remoteEnabled]);
+
+  function loadGenerationTargets(): Promise<GenerationTarget[]> {
+    if (targetRequest.current) return targetRequest.current;
+    setTargetsBusy(true);
+    const request = apiRequest<GenerationTargetListResponse>("/api/v3/generation-targets")
       .then((payload) => {
         setGenerationTargets(payload.items);
         if (payload.preferred_remote_profile_id) {
           setPreferredRemoteId(payload.preferred_remote_profile_id);
           try { localStorage.setItem(PREFERRED_REMOTE_KEY, payload.preferred_remote_profile_id); } catch { /* best-effort */ }
         }
+        return payload.items;
       })
-      .catch((caught) => setNotice((caught as ApiClientError).message));
-  }, [remoteEnabled]);
+      .finally(() => {
+        targetRequest.current = null;
+        setTargetsBusy(false);
+      });
+    targetRequest.current = request;
+    return request;
+  }
 
   useEffect(() => {
     if (!compatibleTargets.length) return;
@@ -148,18 +163,35 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
 
   async function submitDirect() {
     if (!draft.positive_prompt.trim()) return;
-    const target = compatibleTargets.find((item) => targetKey(item) === selectedTarget) || compatibleTargets[0];
-    if (!target) {
-      setNotice("当前模型没有可用的远程工作流。");
-      return;
-    }
-    if (!idempotencyKey.current) {
-      idempotencyKey.current = `direct-${crypto.randomUUID()}`;
-    }
     setGenerationBusy(true);
     setNotice(null);
     setError(null);
     try {
+      let target = compatibleTargets.find((item) => targetKey(item) === selectedTarget) || compatibleTargets[0];
+      if (!target) {
+        const refreshed = await loadGenerationTargets();
+        const compatible = refreshed.filter((item) => item.compatible_model_profiles.includes(draft.model_profile));
+        target = compatible.find((item) => targetKey(item) === selectedTarget)
+          || compatible.find((item) => item.remote_profile_id === preferredRemoteId)
+          || compatible[0];
+      }
+      if (!target) {
+        setNotice("同步完成，但当前模型仍没有可用的远程工作流。");
+        return;
+      }
+      const targetMatchesSettings = settings.remote_profile_id === target.remote_profile_id
+        && settings.workflow_profile_id === target.workflow_profile_id
+        && (settings.preset_id === "custom" || Boolean(findGenerationRecipe(target, settings.preset_id)));
+      const submissionSettings = targetMatchesSettings ? settings : applyGenerationRecipe(settings, target);
+      if (!targetMatchesSettings) {
+        const key = targetKey(target);
+        setSelectedTarget(key);
+        try { localStorage.setItem(GENERATION_TARGET_KEY, key); } catch { /* best-effort */ }
+        setDraft((current) => ({...current, generation_settings: submissionSettings}));
+      }
+      if (!idempotencyKey.current) {
+        idempotencyKey.current = `direct-${crypto.randomUUID()}`;
+      }
       if (target.auth_type === "private_key" && privateKeyPassphrase) {
         await apiRequest<{configured: boolean}>("/api/v3/generation-credentials/private-key-passphrase", {
           method: "POST",
@@ -176,7 +208,7 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
           negative_prompt: draft.negative_prompt,
           model_profile: draft.model_profile,
           project_name: draft.project_name.trim() || "英文提示词直出",
-          settings: resolvedGenerationSettings(draft.generation_settings),
+          settings: resolvedGenerationSettings(submissionSettings),
           remote_profile_id: target.remote_profile_id,
           workflow_profile_id: target.workflow_profile_id,
         }),
@@ -280,11 +312,11 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
           {remoteEnabled && <>
             <label htmlFor="direct-remote">云主机连接</label>
             <select id="direct-remote" aria-label="云主机连接" value={selectedRemoteId || ""} onChange={(event) => selectRemoteConnection(event.target.value)} disabled={!remoteConnections.length}>
-              {remoteConnections.length ? remoteConnections.map((target) => <option key={target.remote_profile_id} value={target.remote_profile_id}>{target.remote_display_name}{target.host_fingerprint_ready ? "" : " · 待确认指纹"}</option>) : <option value="">无可用连接</option>}
+              {remoteConnections.length ? remoteConnections.map((target) => <option key={target.remote_profile_id} value={target.remote_profile_id}>{target.remote_display_name}{target.host_fingerprint_ready ? "" : " · 待确认指纹"}</option>) : <option value="">{targetsBusy ? "正在同步远程连接…" : "无可用连接"}</option>}
             </select>
             <label htmlFor="direct-workflow">工作流</label>
             <select id="direct-workflow" aria-label="远程工作流" value={selectedWorkflowId || ""} onChange={(event) => { const target = connectionWorkflows.find((item) => item.workflow_profile_id === event.target.value); if (target) chooseGenerationTarget(target); }} disabled={!connectionWorkflows.length}>
-              {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}</option>) : <option value="">当前模型无兼容工作流</option>}
+              {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}</option>) : <option value="">{targetsBusy ? "正在同步兼容工作流…" : "当前模型无兼容工作流"}</option>}
             </select>
             {activeTarget?.auth_type === "private_key" && <label className="passphrase-input"><span>私钥口令（可选）</span><input type="password" autoComplete="current-password" value={privateKeyPassphrase} onChange={(event) => setPrivateKeyPassphrase(event.target.value)} placeholder={activeTarget.private_key_passphrase_configured ? "已在本次运行中设置" : "私钥未加密可留空"} /></label>}
           </>}
