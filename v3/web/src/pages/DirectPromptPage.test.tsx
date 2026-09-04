@@ -52,6 +52,20 @@ it("matches whole comma tokens and sends the Chinese gloss to the workbench", as
   expect(consumeDirectImport()?.excluded_text).toBe("低画质");
 });
 
+it("offers every current built-in model when bootstrap profile labels are unavailable", () => {
+  render(<MemoryRouter><DirectPromptPage /></MemoryRouter>);
+
+  const modelSelect = screen.getByLabelText("模型配置") as HTMLSelectElement;
+  expect(Array.from(modelSelect.options, (option) => option.value)).toEqual([
+    "anima_base_v1",
+    "anima_aesthetic_v1",
+    "anima_turbo_v1",
+    "anima_turbo_v1_1",
+    "animayume_v1_0_final",
+    "miaomiao_harem_anima_v1_6",
+  ]);
+});
+
 it("submits the original English prompt without compiling", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify({

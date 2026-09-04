@@ -5,6 +5,7 @@ import {useSearchParams} from "react-router-dom";
 import {apiRequest, ApiClientError} from "../lib/api";
 import {consumeDirectImport} from "../lib/directPrompt";
 import {applyAspect, applyGenerationRecipe, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
+import {modelProfileChoices} from "../lib/modelProfiles";
 import type {ArtistComparisonSubmission, ArtistRanking, ArtistSuggestion, CandidateLane, CandidateTag, CompositionChip, CompositionPreset, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, IntentParseResponse, ModelProfileOption, PromptCandidate, SceneDraft, SceneDraftItem, SceneRelation, TagSuggestion, TranslationResponse, WorkbenchGenerationSettings, WorkbenchResponse, WorkspaceDraft, WorkspaceListResponse, WorkspaceRecord} from "../lib/types";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
 
@@ -14,11 +15,6 @@ const artistRankingLabels: Record<ArtistRanking, string> = {
   balanced: "题材与投稿量均衡",
 };
 
-const FALLBACK_PROFILES = [
-  {id: "anima_base_v1", label: "ANIMA Base"},
-  {id: "anima_aesthetic_v1", label: "ANIMA Aesthetic"},
-  {id: "anima_turbo_v1", label: "ANIMA Turbo"},
-];
 const RECOVERY_KEY = "anima-v3-workbench-recovery";
 const GENERATION_TARGET_KEY = "anima-v3-generation-target";
 const PREFERRED_REMOTE_KEY = "anima-v3-preferred-remote";
@@ -36,9 +32,7 @@ const laneMeta: Record<CandidateLane, {index: string; label: string; detail: str
 };
 
 export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLanguageEnabled = false, localTranslationEnabled = false}: {modelProfiles?: ModelProfileOption[]; remoteEnabled?: boolean; naturalLanguageEnabled?: boolean; localTranslationEnabled?: boolean}) {
-  const profiles = modelProfiles?.length
-    ? modelProfiles.map((item) => ({id: item.id, label: item.display_name}))
-    : FALLBACK_PROFILES;
+  const profiles = modelProfileChoices(modelProfiles);
   const [searchParams] = useSearchParams();
   const importedTags = useMemo(() => Array.from(new Set(searchParams.getAll("tag").map((item) => item.trim()).filter(Boolean))), []);
   const directImport = useMemo(consumeDirectImport, []);
