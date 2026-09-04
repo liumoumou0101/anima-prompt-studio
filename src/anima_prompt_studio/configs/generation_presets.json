@@ -13,5 +13,20 @@
     {"id":"fast","display_name":"快速","steps":8,"cfg":1.0,"sampler":"euler","scheduler":"normal","notes":"Turbo 官方建议区间下沿，适合快速迭代。"},
     {"id":"balanced","display_name":"平衡","steps":10,"cfg":1.0,"sampler":"euler","scheduler":"normal","notes":"沿用 V1 已验证的 Turbo 默认参数。"},
     {"id":"quality","display_name":"高质量","steps":12,"cfg":1.0,"sampler":"euler","scheduler":"normal","notes":"Turbo 官方建议区间上沿，不等同于 Base/Aesthetic 的高步数模式。"}
+  ],
+  "anima_turbo_v1_1": [
+    {"id":"fast","display_name":"快速预览","steps":8,"cfg":1.0,"sampler":"er_sde","scheduler":"simple","notes":"完整 Turbo v1.1 的 8 步预览基线。"},
+    {"id":"balanced","display_name":"标准","steps":10,"cfg":1.0,"sampler":"er_sde","scheduler":"simple","notes":"完整 Turbo v1.1 的 10 步稳定基线。"},
+    {"id":"quality","display_name":"步数上沿","steps":12,"cfg":1.0,"sampler":"er_sde","scheduler":"simple","notes":"推荐步数区间上沿；不等同于高步数精修。"}
+  ],
+  "animayume_v1_0_final": [
+    {"id":"fast","display_name":"作者区间下沿","steps":25,"cfg":4.0,"sampler":"euler_ancestral","scheduler":"normal","notes":"作者建议范围内的低成本起点。"},
+    {"id":"balanced","display_name":"作者推荐基线","steps":30,"cfg":5.5,"sampler":"euler_ancestral","scheduler":"normal","notes":"用于固定 Seed 验证的默认组合。"},
+    {"id":"quality","display_name":"细节对照","steps":40,"cfg":7.0,"sampler":"euler_ancestral","scheduler":"normal","notes":"作者建议范围上沿，仅用于对照验证。"}
+  ],
+  "miaomiao_harem_anima_v1_6": [
+    {"id":"fast","display_name":"Euler 基线","steps":30,"cfg":4.0,"sampler":"euler","scheduler":"normal","notes":"作者建议 CFG 区间下沿。"},
+    {"id":"balanced","display_name":"作者推荐基线","steps":30,"cfg":4.5,"sampler":"euler","scheduler":"normal","notes":"搭配 shift 3 与专用文本编码器。"},
+    {"id":"quality","display_name":"Euler a 对照","steps":30,"cfg":5.0,"sampler":"euler_ancestral","scheduler":"normal","notes":"作者建议的另一采样器与 CFG 上沿对照。"}
   ]
 }

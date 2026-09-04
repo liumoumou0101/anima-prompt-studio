@@ -3,13 +3,13 @@ import {useNavigate} from "react-router-dom";
 import {ApiClientError, apiRequest} from "../lib/api";
 import {storeDirectImport} from "../lib/directPrompt";
 import {applyAspect, applyGenerationRecipe, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
-import type {DirectPromptPreview, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, WorkbenchGenerationSettings} from "../lib/types";
+import type {DirectPromptPreview, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, ModelProfileOption, WorkbenchGenerationSettings} from "../lib/types";
 import {ErrorState} from "../components/States";
 
 const DRAFT_KEY = "anima-v3-direct-prompt-draft";
 const GENERATION_TARGET_KEY = "anima-v3-generation-target";
 const PREFERRED_REMOTE_KEY = "anima-v3-preferred-remote";
-const profiles = [
+const FALLBACK_PROFILES = [
   {id: "anima_base_v1", label: "ANIMA Base"},
   {id: "anima_aesthetic_v1", label: "ANIMA Aesthetic"},
   {id: "anima_turbo_v1", label: "ANIMA Turbo"},
@@ -32,7 +32,10 @@ const emptyDraft: DirectDraft = {
   generation_settings: defaultGenerationSettings(),
 };
 
-export function DirectPromptPage({remoteEnabled = false}: {remoteEnabled?: boolean}) {
+export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelProfiles?: ModelProfileOption[]; remoteEnabled?: boolean}) {
+  const profiles = modelProfiles?.length
+    ? modelProfiles.map((item) => ({id: item.id, label: item.display_name}))
+    : FALLBACK_PROFILES;
   const navigate = useNavigate();
   const [draft, setDraft] = useState<DirectDraft>(loadDraft);
   const [preview, setPreview] = useState<DirectPromptPreview | null>(null);
@@ -56,7 +59,7 @@ export function DirectPromptPage({remoteEnabled = false}: {remoteEnabled?: boole
   const idempotencyKey = useRef<string | null>(null);
 
   const compatibleTargets = useMemo(() => generationTargets.filter((target) => (
-    !target.compatible_model_profiles.length || target.compatible_model_profiles.includes(draft.model_profile)
+    target.compatible_model_profiles.includes(draft.model_profile)
   )), [generationTargets, draft.model_profile]);
   const remoteConnections = useMemo(() => {
     const unique = new Map<string, GenerationTarget>();
@@ -204,8 +207,8 @@ export function DirectPromptPage({remoteEnabled = false}: {remoteEnabled?: boole
   const capabilities = activeTarget?.parameter_capabilities;
 
   function changeModel(modelProfile: string) {
-    const target = generationTargets.find((item) => (!item.compatible_model_profiles.length || item.compatible_model_profiles.includes(modelProfile)) && item.remote_profile_id === selectedRemoteId)
-      || generationTargets.find((item) => !item.compatible_model_profiles.length || item.compatible_model_profiles.includes(modelProfile));
+    const target = generationTargets.find((item) => item.compatible_model_profiles.includes(modelProfile) && item.remote_profile_id === selectedRemoteId)
+      || generationTargets.find((item) => item.compatible_model_profiles.includes(modelProfile));
     if (target) {
       setSelectedTarget(targetKey(target));
       editDraft({model_profile: modelProfile, generation_settings: applyGenerationRecipe(settings, target)});
@@ -257,6 +260,7 @@ export function DirectPromptPage({remoteEnabled = false}: {remoteEnabled?: boole
               {(activeTarget?.generation_recipes || []).map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.display_name}{recipe.evidence === "experimental" ? " · 实验" : ""}</option>)}
             </select>
             <small>{activeRecipe?.notes || "选择工作流后加载对应的 V3 生成配方。"}</small>
+            {activeTarget?.workflow_notes && <small>{activeTarget.workflow_notes}</small>}
             <details className="generation-advanced" open>
               <summary>高级参数</summary>
               <div className="generation-advanced-grid">

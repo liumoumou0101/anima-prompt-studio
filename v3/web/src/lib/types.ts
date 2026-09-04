@@ -12,7 +12,14 @@ export interface BootstrapResponse {
   data_pack: DataPackSummary;
   features: Record<string, boolean>;
   model_profiles: string[];
+  model_profile_options?: ModelProfileOption[];
   settings_summary: Record<string, unknown>;
+}
+
+export interface ModelProfileOption {
+  id: string;
+  display_name: string;
+  variant: string;
 }
 
 export interface TagSearchItem {
@@ -558,6 +565,7 @@ export interface GenerationTarget {
   workflow_profile_id: string;
   workflow_display_name: string;
   workflow_kind: string;
+  workflow_notes?: string;
   compatible_model_profiles: string[];
   host_fingerprint_ready: boolean;
   auth_type: "private_key" | "password" | "agent";
@@ -633,6 +641,7 @@ export interface GalleryResponse {
   projects: string[];
   models: string[];
   trash_count: number;
+  indexed_at?: string;
   processing?: GalleryProcessingConfiguration;
 }
 

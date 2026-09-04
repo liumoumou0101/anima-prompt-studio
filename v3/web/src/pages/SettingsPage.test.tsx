@@ -60,3 +60,31 @@ it("saves a parallel artist ranking without treating it as a quality upgrade", a
   expect(await screen.findByText(/画师排序已保存/)).toBeInTheDocument();
   expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).ranking).toBe("balanced");
 });
+
+it("opens the selected remote ComfyUI through the managed local tunnel", async () => {
+  const ready = {...profile, host_fingerprint_confirmed: true};
+  const popup = {location: {replace: vi.fn()}, close: vi.fn()} as unknown as Window;
+  vi.spyOn(window, "open").mockReturnValue(popup);
+  const access = {
+    state: "ready",
+    ready: true,
+    remote_profile_id: ready.id,
+    remote_display_name: ready.display_name,
+    local_url: "http://127.0.0.1:18188",
+    message: "ComfyUI 网页已连接。",
+    devices: ["NVIDIA Test GPU"],
+    queue_running: 0,
+    queue_pending: 0,
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [ready], workflows: [], credential_store_available: true, comfy_access: {state: "stopped", ready: false, local_url: access.local_url}}), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ranking: "tag_fit"}), {status: 200}))
+    .mockResolvedValueOnce(new Response(JSON.stringify(access), {status: 200}));
+
+  render(<SettingsPage remoteEnabled />);
+  fireEvent.click(await screen.findByRole("button", {name: "打开 ComfyUI 网页"}));
+
+  expect(await screen.findByText(/ComfyUI 维护入口已连接/)).toHaveTextContent(access.local_url);
+  expect(fetchMock.mock.calls[2][0]).toBe("/api/v3/settings/remote-profiles/remote-new/open-comfy");
+  expect(popup.location.replace).toHaveBeenCalledWith(access.local_url);
+});

@@ -35,6 +35,7 @@ class ComfyUIClient:
             session = requests.Session()
         self.session = session
         self.timeout = timeout
+        self._object_info_cache: dict[str, Any] | None = None
 
     def validate_environment(self) -> EnvironmentReport:
         stats = self._get_json("/system_stats")
@@ -46,21 +47,63 @@ class ComfyUIClient:
                 devices.append(str(name))
         running = queue.get("queue_running", [])
         pending = queue.get("queue_pending", [])
+        warnings: list[str] = []
+        arguments = stats.get("system", {}).get("argv", stats.get("system", {}).get("arguments", []))
+        if isinstance(arguments, list):
+            rendered_arguments = " ".join(str(item) for item in arguments)
+            if "--listen 0.0.0.0" in rendered_arguments:
+                warnings.append("ComfyUI 正在监听 0.0.0.0；请关闭公网端口，仅通过 SSH 隧道访问。")
         return EnvironmentReport(
             system_stats=stats,
             queue_running=len(running) if isinstance(running, list) else 0,
             queue_pending=len(pending) if isinstance(pending, list) else 0,
             devices=devices,
+            warnings=warnings,
         )
 
     def validate_workflow_nodes(self, workflow: dict[str, Any]) -> list[str]:
-        object_info = self._get_json("/object_info")
+        object_info = self._object_info()
         required = {
             str(node.get("class_type"))
             for node in workflow.values()
             if isinstance(node, dict) and node.get("class_type")
         }
         return sorted(required - set(object_info))
+
+    def validate_workflow_inputs(self, workflow: dict[str, Any]) -> list[str]:
+        """Validate enum-backed inputs such as model files before queueing."""
+        object_info = self._object_info()
+        errors: list[str] = []
+        for node_id, node in workflow.items():
+            if not isinstance(node, dict):
+                continue
+            class_type = str(node.get("class_type", ""))
+            definition = object_info.get(class_type, {})
+            input_groups = definition.get("input", {}) if isinstance(definition, dict) else {}
+            specifications: dict[str, Any] = {}
+            for group_name in ("required", "optional"):
+                group = input_groups.get(group_name, {}) if isinstance(input_groups, dict) else {}
+                if isinstance(group, dict):
+                    specifications.update(group)
+            for input_name, value in node.get("inputs", {}).items():
+                if isinstance(value, (list, tuple, dict)):
+                    continue
+                spec = specifications.get(input_name)
+                choices = spec[0] if isinstance(spec, (list, tuple)) and spec else None
+                if not isinstance(choices, (list, tuple)) or value in choices:
+                    continue
+                preview = ", ".join(str(item) for item in choices[:5])
+                suffix = "…" if len(choices) > 5 else ""
+                errors.append(
+                    f"节点 {node_id} ({class_type}) 的 {input_name}={value!r} 不可用"
+                    f"；可选：{preview}{suffix}"
+                )
+        return errors
+
+    def _object_info(self) -> dict[str, Any]:
+        if self._object_info_cache is None:
+            self._object_info_cache = self._get_json("/object_info")
+        return self._object_info_cache
 
     def submit(self, workflow: dict[str, Any], client_id: str, prompt_id: str) -> str:
         result = self._post_json(

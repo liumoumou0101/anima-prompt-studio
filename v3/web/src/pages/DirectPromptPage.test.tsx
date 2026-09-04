@@ -61,6 +61,7 @@ it("submits the original English prompt without compiling", async () => {
         workflow_profile_id: "workflow-1",
         workflow_display_name: "基础工作流",
         workflow_kind: "txt2img_basic",
+        workflow_notes: "实验工作流说明",
         compatible_model_profiles: ["anima_aesthetic_v1"],
         host_fingerprint_ready: true,
         auth_type: "agent",
@@ -81,6 +82,7 @@ it("submits the original English prompt without compiling", async () => {
   fireEvent.change(screen.getByLabelText("正向提示词（英文，原样发送）"), {target: {value: "1girl, finger to lips, clean delicate lineart"}});
   expect(await screen.findByRole("option", {name: "测试云主机"})).toBeInTheDocument();
   await waitFor(() => expect(screen.getByLabelText("云主机连接")).toHaveValue("remote-1"));
+  expect(screen.getByText("实验工作流说明")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: "按原文生图"}));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));

@@ -30,6 +30,7 @@ from anima_prompt_studio.services.remote.execution_coordinator import (
 from anima_prompt_studio.services.remote.result_organizer import ResultOrganizer
 from anima_prompt_studio.services.remote.ssh_tunnel import SshTunnel
 from anima_prompt_studio.services.remote.workflow_renderer import WorkflowRenderer, WorkflowRenderResult
+from anima_prompt_studio.services.remote.workflow_compatibility import infer_workflow_model_profiles
 
 
 GALLERY_UPSCALE_OPERATION = "gallery_upscale_1_5x"
@@ -46,16 +47,22 @@ def choose_txt2img_workflow(
     candidates = [
         profile for profile in profiles
         if profile.workflow_kind == "txt2img_basic"
-        and (
-            not profile.compatible_model_profiles
-            or model_profile_id in profile.compatible_model_profiles
+        and model_profile_id in (
+            profile.compatible_model_profiles
+            or infer_workflow_model_profiles(
+                profile.api_workflow,
+                profile.source_path or profile.display_name or profile.id,
+            )
         )
     ]
-    if not candidates:
-        candidates = [profile for profile in profiles if profile.workflow_kind == "txt2img_basic"]
-    preferred = "02" if model_profile_id == "anima_turbo_v1" else (
-        "22" if model_profile_id == "anima_aesthetic_v1" else "01"
-    )
+    preferred = {
+        "anima_base_v1": "01",
+        "anima_turbo_v1": "02",
+        "anima_aesthetic_v1": "22",
+        "anima_turbo_v1_1": "23",
+        "animayume_v1_0_final": "24",
+        "miaomiao_harem_anima_v1_6": "25",
+    }.get(model_profile_id, "")
     return next((item for item in candidates if item.id.startswith(preferred)), None) or (
         candidates[0] if candidates else None
     )
@@ -409,6 +416,14 @@ class GalleryUpscaleCoordinator:
                         "云端缺少放大工作流节点：" + ", ".join(missing_nodes),
                         code="missing_nodes",
                     )
+                input_validator = getattr(client, "validate_workflow_inputs", None)
+                invalid_inputs = input_validator(rendered.workflow) if callable(input_validator) else []
+                if invalid_inputs:
+                    raise ComfyAPIError(
+                        "云端工作流参数预检失败：" + "；".join(invalid_inputs),
+                        code="invalid_workflow_inputs",
+                        details=invalid_inputs,
+                    )
                 run.actual_workflow = rendered.workflow
                 run.request_json["resolved_seed"] = rendered.seed
                 run.request_json["render_metadata"] = rendered.metadata
@@ -644,7 +659,6 @@ class GalleryUpscaleManager:
             queued = [job for job in self._jobs.values() if job.state == "queued"]
             failed = [job for job in self._jobs.values() if job.state == "failed"]
             regen_reason = self._regen_reason()
-            regen_workflow = choose_txt2img_workflow(self._txt2img_workflows, "anima_base_v1")
             return {
                 "available": not reason,
                 "reason": reason,
@@ -652,7 +666,7 @@ class GalleryUpscaleManager:
                 "workflowName": self._workflow_profile.display_name if self._workflow_profile else "",
                 "regenAvailable": not regen_reason,
                 "regenReason": regen_reason,
-                "regenWorkflowName": regen_workflow.display_name if regen_workflow else "",
+                "regenWorkflowName": "按原图模型自动选择" if not regen_reason else "",
                 "regenMaxCount": GALLERY_REGEN_MAX_COUNT,
                 "activeJob": active_job.payload() if active_job else None,
                 "activeCount": 1 if active_job else 0,
@@ -888,7 +902,21 @@ class GalleryUpscaleManager:
         connection = self._connection_reason()
         if connection:
             return connection
-        if choose_txt2img_workflow(self._txt2img_workflows, model_profile_id or "anima_base_v1") is None:
+        if model_profile_id:
+            available = choose_txt2img_workflow(self._txt2img_workflows, model_profile_id) is not None
+        else:
+            available = any(
+                profile.workflow_kind == "txt2img_basic"
+                and bool(
+                    profile.compatible_model_profiles
+                    or infer_workflow_model_profiles(
+                        profile.api_workflow,
+                        profile.source_path or profile.display_name or profile.id,
+                    )
+                )
+                for profile in self._txt2img_workflows
+            )
+        if not available:
             return "没有找到可用的基础文生图工作流。"
         return ""
 
@@ -1170,11 +1198,14 @@ class GalleryUpscaleManager:
             on_update=on_update,
         )
         try:
+            checkpoint_logical_name = ConfigService().get_model(
+                job.model_profile_id
+            ).checkpoint_logical_name
             result = coordinator.execute(
                 job,
                 remote,
                 workflow,
-                job.model_profile_id,
+                checkpoint_logical_name,
                 credentials,
             )
             repository.save_generation_run(result.run)

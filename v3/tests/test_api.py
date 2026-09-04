@@ -119,6 +119,19 @@ def test_health_session_exchange_is_one_time_and_bootstrap_is_protected(referenc
         "ready": True,
         "cutoff_mode": "approximate",
     }
+    assert bootstrap.json()["model_profiles"] == [
+        "anima_aesthetic_v1",
+        "anima_base_v1",
+        "anima_turbo_v1",
+        "anima_turbo_v1_1",
+        "animayume_v1_0_final",
+        "miaomiao_harem_anima_v1_6",
+    ]
+    assert bootstrap.json()["model_profile_options"][-1] == {
+        "id": "miaomiao_harem_anima_v1_6",
+        "display_name": "MiaoMiao Harem ANIMA v1.6",
+        "variant": "community",
+    }
     assert "access-control-allow-origin" not in bootstrap.headers
 
 
@@ -489,6 +502,63 @@ def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
     assert events == ["ssh", "comfy", "close"]
 
 
+def test_v3_settings_opens_managed_comfy_browser_access(
+    reference_db: Path,
+    tmp_path: Path,
+) -> None:
+    v2_database = tmp_path / "v2.db"
+    repository = SQLiteRepository(v2_database)
+    try:
+        from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
+
+        repository.save_remote_profile(RemoteProfile(
+            id="browser-ready",
+            display_name="网页维护云主机",
+            ssh_host="gpu.example",
+            ssh_user="root",
+            auth_type=RemoteAuthType.AGENT,
+            known_host_fingerprint="SHA256:confirmed",
+        ))
+    finally:
+        repository.close()
+
+    calls: list[tuple[str, str, str]] = []
+
+    class FakeComfyAccess:
+        def status(self):
+            return {"state": "stopped", "ready": False, "local_url": "http://127.0.0.1:18188"}
+
+        def open(self, profile_id: str, *, password: str, passphrase: str):
+            calls.append((profile_id, password, passphrase))
+            return {"state": "ready", "ready": True, "local_url": "http://127.0.0.1:18188"}
+
+    runtime = create_api_runtime(
+        reference_db,
+        v2_database=v2_database,
+        comfy_access=FakeComfyAccess(),
+    )
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchanged = client.post(
+        "/api/v3/session/exchange",
+        json={"bootstrap_token": runtime.bootstrap_token},
+        headers={"Origin": ORIGIN},
+    )
+    headers = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
+
+    listed = client.get("/api/v3/settings/remote-profiles", headers=headers)
+    opened = client.post(
+        "/api/v3/settings/remote-profiles/browser-ready/open-comfy",
+        json={"password": "temporary", "passphrase": "key-secret"},
+        headers=headers,
+    )
+
+    assert listed.status_code == 200
+    assert listed.json()["comfy_access"]["local_url"] == "http://127.0.0.1:18188"
+    assert opened.status_code == 200
+    assert opened.json()["ready"] is True
+    assert calls == [("browser-ready", "temporary", "key-secret")]
+
+
 def test_session_manager_revoke_invalidates_token() -> None:
     manager = SessionManager()
     exchange = manager.exchange(manager.issue_bootstrap_token())
@@ -525,6 +595,50 @@ def test_local_api_server_uses_random_loopback_port_and_stops(reference_db: Path
             assert json.loads(response.read())["name"] == "maid"
     with pytest.raises(RuntimeError, match="尚未启动"):
         _ = server.port
+
+
+def test_local_api_server_owns_comfy_access_lifecycle(
+    reference_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import anima_prompt_studio_v3.adapters.v2 as adapters
+
+    events: list[str] = []
+    v2_database = tmp_path / "v2.db"
+    v2_database.write_bytes(b"placeholder")
+
+    class FakeQueue:
+        def shutdown(self, **_kwargs) -> None:
+            events.append("queue-close")
+
+    class FakeGallery:
+        def shutdown(self, **_kwargs) -> None:
+            events.append("gallery-close")
+
+    class FakeComfyAccess:
+        def __init__(self, database: Path) -> None:
+            assert database == v2_database
+
+        def start_default_async(self) -> None:
+            events.append("comfy-start")
+
+        def close(self) -> None:
+            events.append("comfy-close")
+
+        def status(self):
+            return {"state": "stopped", "ready": False, "local_url": "http://127.0.0.1:18188"}
+
+    monkeypatch.setattr(adapters, "build_v2_generation_queue", lambda _database: FakeQueue())
+    monkeypatch.setattr(adapters, "build_v2_gallery_service", lambda _database: FakeGallery())
+    monkeypatch.setattr(adapters, "build_v2_intent_parser", lambda _database: object())
+    monkeypatch.setattr(adapters, "build_v2_local_translation_adapter", lambda: object())
+    monkeypatch.setattr(adapters, "ManagedComfyAccess", FakeComfyAccess)
+
+    with LocalApiServer(reference_db, v2_database=v2_database):
+        assert "comfy-start" in events
+
+    assert "comfy-close" in events
 
 
 def test_frontend_dist_serves_assets_and_spa_without_masking_api_404(

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from copy import deepcopy
+from datetime import datetime, timezone
+import json
 from pathlib import Path
+from threading import RLock
 from typing import Any
 import os
 import subprocess
@@ -16,7 +21,7 @@ from anima_prompt_studio.services.gallery_assets import (
     resolve_gallery_trash_image,
     restore_images_from_trash,
 )
-from anima_prompt_studio.services.gallery_index import load_gallery_batches
+from anima_prompt_studio.services.gallery_index import GalleryBatch, _batch_from_manifest, load_gallery_batches
 from anima_prompt_studio.services.gallery_thumbnail import GalleryThumbnailCache
 from anima_prompt_studio.services.gallery_thumbnail import gallery_image_dimensions
 from anima_prompt_studio.services.gallery_upscale import (
@@ -42,12 +47,39 @@ class V2GalleryReadService:
         self.output_root = Path(output_root).expanduser().resolve()
         self.thumbnail_cache = GalleryThumbnailCache(self.database.parent / "v3_gallery_thumbnails")
         self.process_manager = process_manager
+        self._index_path = self.database.with_name(f"{self.database.stem}.gallery-index-v1.json")
+        self._index_lock = RLock()
+        self._cached_filesystem: dict[str, dict[str, int]] | None = None
+        self._cached_payload = self._load_cached_payload()
 
     @property
     def available(self) -> bool:
         return self.database.is_file()
 
-    def list_assets(self, *, limit: int = 500) -> dict[str, object]:
+    def list_assets(
+        self,
+        *,
+        limit: int = 500,
+        refresh: bool = False,
+        rebuild: bool = False,
+    ) -> dict[str, object]:
+        """Return a cached gallery snapshot and rebuild it only when requested.
+
+        The web client renders the last good snapshot immediately, then asks for a
+        refresh in the background.  This keeps route changes and application
+        restarts from blocking on a complete Windows filesystem walk.
+        """
+        with self._index_lock:
+            if self._cached_payload is None or rebuild:
+                self._cached_payload = self._build_assets(limit=1000)
+                self._cached_filesystem = self._scan_filesystem()
+                self._write_cached_payload(self._cached_payload)
+            elif refresh:
+                self._cached_payload = self._refresh_assets(limit=1000)
+                self._write_cached_payload(self._cached_payload)
+            return self._slice_cached_payload(self._cached_payload, limit)
+
+    def _build_assets(self, *, limit: int) -> dict[str, object]:
         repository = SQLiteRepository(self.database)
         try:
             batches = load_gallery_batches(repository, self.output_root, limit=limit)
@@ -58,62 +90,264 @@ class V2GalleryReadService:
         assets: list[dict[str, Any]] = []
         for batch in batches:
             for path in batch.image_paths:
-                relative = self._relative(path)
-                if relative is None:
-                    continue
-                parameters = dict(batch.parameters) if isinstance(batch.parameters, dict) else {}
-                integration = parameters.get("integration_metadata")
-                if not isinstance(integration, dict):
-                    integration = {}
-                candidate = integration.get("candidate")
-                candidate = candidate if isinstance(candidate, dict) else {}
-                comparison = integration.get("artist_comparison")
-                comparison = comparison if isinstance(comparison, dict) else None
-                try:
-                    stat = path.stat()
-                except OSError:
-                    continue
-                width, height = gallery_image_dimensions(
-                    path,
-                    _positive_int(parameters.get("width")) or 0,
-                    _positive_int(parameters.get("height")) or 0,
-                )
-                assets.append({
-                    "id": relative,
-                    "path": relative,
-                    "name": path.name,
-                    "project": batch.project_name,
-                    "model_profile": batch.model_profile_id,
-                    "batch_id": batch.run_id,
-                    "batch_title": batch.title,
-                    "created_at": batch.created_at.isoformat(),
-                    "positive_prompt": batch.positive_prompt,
-                    "negative_prompt": str(parameters.get("negative_prompt") or ""),
-                    "width": width or None,
-                    "height": height or None,
-                    "byte_size": stat.st_size,
-                    "generation_params": _gallery_generation_params(parameters),
-                    "source": "external" if batch.run_id.startswith("folder:") else "generated",
-                    "state": states.get(relative, ""),
-                    "candidate": {
-                        "id": str(candidate.get("id") or ""),
-                        "lane": str(candidate.get("lane") or ""),
-                        "versions": candidate.get("versions") if isinstance(candidate.get("versions"), dict) else {},
-                    },
-                    "artist_comparison": comparison,
-                    "content_url": f"/api/v3/gallery/assets/content?path={_query_value(relative)}",
-                    "thumbnail_url": f"/api/v3/gallery/assets/thumbnail?path={_query_value(relative)}&size=640",
-                })
+                asset = self._asset_from_batch(batch, path, states)
+                if asset is not None:
+                    assets.append(asset)
         assets.sort(key=lambda item: str(item["created_at"]), reverse=True)
         assets = assets[:limit]
+        return self._payload(assets)
+
+    def _refresh_assets(self, *, limit: int) -> dict[str, object]:
+        current_filesystem = self._scan_filesystem()
+        if self._cached_filesystem is None:
+            payload = self._build_assets(limit=limit)
+            self._cached_filesystem = current_filesystem
+            return payload
+
+        old_filesystem = self._cached_filesystem
+        changed_paths = {
+            relative
+            for relative in old_filesystem.keys() | current_filesystem.keys()
+            if old_filesystem.get(relative) != current_filesystem.get(relative)
+        }
+        repository = SQLiteRepository(self.database)
+        try:
+            states = repository.list_gallery_asset_states(self.output_root)
+        finally:
+            repository.close()
+
+        if not changed_paths:
+            assets = [
+                {**item, "state": states.get(str(item.get("path") or ""), "")}
+                for item in self._cached_payload.get("items", [])
+            ]
+        else:
+            changed_folders = {_parent_key(relative) for relative in changed_paths}
+            assets = [
+                {**item, "state": states.get(str(item.get("path") or ""), "")}
+                for item in self._cached_payload.get("items", [])
+                if str(item.get("path") or "") in current_filesystem
+                and _parent_key(str(item.get("path") or "")) not in changed_folders
+            ]
+            for folder_key in changed_folders:
+                assets.extend(self._rebuild_folder_assets(folder_key, current_filesystem, states))
+
+        assets.sort(key=lambda item: str(item["created_at"]), reverse=True)
+        self._cached_filesystem = current_filesystem
+        return self._payload(assets[:limit])
+
+    def _asset_from_batch(
+        self,
+        batch: GalleryBatch,
+        path: Path,
+        states: dict[str, str],
+    ) -> dict[str, Any] | None:
+        relative = self._relative(path)
+        if relative is None:
+            return None
+        parameters = dict(batch.parameters) if isinstance(batch.parameters, dict) else {}
+        integration = parameters.get("integration_metadata")
+        if not isinstance(integration, dict):
+            integration = {}
+        candidate = integration.get("candidate")
+        candidate = candidate if isinstance(candidate, dict) else {}
+        comparison = integration.get("artist_comparison")
+        comparison = comparison if isinstance(comparison, dict) else None
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        width, height = gallery_image_dimensions(
+            path,
+            _positive_int(parameters.get("width")) or 0,
+            _positive_int(parameters.get("height")) or 0,
+        )
+        return {
+            "id": relative,
+            "path": relative,
+            "name": path.name,
+            "project": batch.project_name,
+            "model_profile": batch.model_profile_id,
+            "batch_id": batch.run_id,
+            "batch_title": batch.title,
+            "created_at": batch.created_at.isoformat(),
+            "positive_prompt": batch.positive_prompt,
+            "negative_prompt": str(parameters.get("negative_prompt") or ""),
+            "width": width or None,
+            "height": height or None,
+            "byte_size": stat.st_size,
+            "generation_params": _gallery_generation_params(parameters),
+            "source": "external" if batch.run_id.startswith("folder:") else "generated",
+            "state": states.get(relative, ""),
+            "candidate": {
+                "id": str(candidate.get("id") or ""),
+                "lane": str(candidate.get("lane") or ""),
+                "versions": candidate.get("versions") if isinstance(candidate.get("versions"), dict) else {},
+            },
+            "artist_comparison": comparison,
+            "content_url": f"/api/v3/gallery/assets/content?path={_query_value(relative)}",
+            "thumbnail_url": f"/api/v3/gallery/assets/thumbnail?path={_query_value(relative)}&size=640",
+        }
+
+    def _rebuild_folder_assets(
+        self,
+        folder_key: str,
+        filesystem: dict[str, dict[str, int]],
+        states: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        folder = self.output_root if folder_key == "." else self.output_root.joinpath(*Path(folder_key).parts)
+        image_paths = [
+            self.output_root.joinpath(*Path(relative).parts)
+            for relative in filesystem
+            if _parent_key(relative) == folder_key
+        ]
+        indexed: list[dict[str, Any]] = []
+        tracked: set[str] = set()
+        manifest = folder / "manifest.json"
+        if manifest.is_file():
+            batch = _batch_from_manifest(manifest, self.output_root)
+            if batch is not None:
+                for path in batch.image_paths:
+                    asset = self._asset_from_batch(batch, path, states)
+                    if asset is not None:
+                        indexed.append(asset)
+                        tracked.add(str(asset["path"]))
+
+        extras = [path for path in image_paths if self._relative(path) not in tracked]
+        if extras:
+            try:
+                relative_folder = folder.relative_to(self.output_root)
+                project = relative_folder.parts[0] if relative_folder.parts else "未分类"
+                model = next((part for part in relative_folder.parts if part.startswith("anima_")), "")
+                created = datetime.fromtimestamp(max(path.stat().st_mtime for path in extras)).astimezone()
+            except (OSError, ValueError):
+                return indexed
+            batch = GalleryBatch(
+                run_id="folder:" + str(folder.resolve()),
+                output_dir=folder,
+                created_at=created,
+                project_name=project,
+                model_profile_id=model,
+                image_paths=extras,
+            )
+            for path in extras:
+                asset = self._asset_from_batch(batch, path, states)
+                if asset is not None:
+                    indexed.append(asset)
+        return indexed
+
+    def _scan_filesystem(self) -> dict[str, dict[str, int]]:
+        signatures: dict[str, dict[str, int]] = {}
+        if not self.output_root.is_dir():
+            return signatures
+        for folder_name, directory_names, file_names in os.walk(self.output_root):
+            directory_names[:] = [name for name in directory_names if name != TRASH_DIR_NAME]
+            folder = Path(folder_name)
+            manifest_mtime = 0
+            manifest_size = 0
+            if "manifest.json" in file_names:
+                try:
+                    manifest_stat = (folder / "manifest.json").stat()
+                    manifest_mtime = manifest_stat.st_mtime_ns
+                    manifest_size = manifest_stat.st_size
+                except OSError:
+                    pass
+            for name in file_names:
+                if Path(name).suffix.casefold() not in IMAGE_SUFFIXES:
+                    continue
+                path = folder / name
+                try:
+                    stat = path.stat()
+                    relative = path.relative_to(self.output_root).as_posix()
+                except (OSError, ValueError):
+                    continue
+                signatures[relative] = {
+                    "mtime_ns": stat.st_mtime_ns,
+                    "size": stat.st_size,
+                    "manifest_mtime_ns": manifest_mtime,
+                    "manifest_size": manifest_size,
+                }
+        return signatures
+
+    def _payload(self, assets: list[dict[str, Any]]) -> dict[str, object]:
         return {
             "root": str(self.output_root),
             "items": assets,
             "projects": sorted({str(item["project"]) for item in assets}),
             "models": sorted({str(item["model_profile"]) for item in assets if item["model_profile"]}),
             "trash_count": self._trash_count(),
-            "processing": self.process_configuration(),
+            "indexed_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    def _slice_cached_payload(self, payload: dict[str, object], limit: int) -> dict[str, object]:
+        result = deepcopy(payload)
+        items = result.get("items")
+        if isinstance(items, list):
+            result["items"] = items[:limit]
+            result["projects"] = sorted({str(item["project"]) for item in result["items"]})
+            result["models"] = sorted({str(item["model_profile"]) for item in result["items"] if item.get("model_profile")})
+        result["processing"] = self.process_configuration()
+        return result
+
+    def _load_cached_payload(self) -> dict[str, object] | None:
+        try:
+            envelope = json.loads(self._index_path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if (
+            not isinstance(envelope, dict)
+            or envelope.get("schema") != 2
+            or envelope.get("database") != str(self.database)
+            or envelope.get("output_root") != str(self.output_root)
+            or not isinstance(envelope.get("payload"), dict)
+            or not isinstance(envelope["payload"].get("items"), list)
+            or not isinstance(envelope.get("filesystem"), dict)
+        ):
+            return None
+        filesystem = envelope["filesystem"]
+        if not all(isinstance(path, str) and isinstance(signature, dict) for path, signature in filesystem.items()):
+            return None
+        self._cached_filesystem = filesystem
+        return envelope["payload"]
+
+    def _write_cached_payload(self, payload: dict[str, object]) -> None:
+        envelope = {
+            "schema": 2,
+            "database": str(self.database),
+            "output_root": str(self.output_root),
+            "payload": payload,
+            "filesystem": self._cached_filesystem or {},
+        }
+        temporary = self._index_path.with_suffix(self._index_path.suffix + ".tmp")
+        try:
+            temporary.write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(self._index_path)
+        except OSError:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _update_cached_payload(self, update: Callable[[dict[str, object]], None]) -> None:
+        with self._index_lock:
+            if self._cached_payload is None:
+                return
+            update(self._cached_payload)
+            items = self._cached_payload.get("items")
+            if isinstance(items, list):
+                self._cached_payload["projects"] = sorted({str(item["project"]) for item in items})
+                self._cached_payload["models"] = sorted({str(item["model_profile"]) for item in items if item.get("model_profile")})
+            self._cached_payload["indexed_at"] = datetime.now(timezone.utc).isoformat()
+            self._write_cached_payload(self._cached_payload)
+
+    def _invalidate_cached_payload(self) -> None:
+        with self._index_lock:
+            self._cached_payload = None
+            self._cached_filesystem = None
+            try:
+                self._index_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def resolve_content(self, relative_path: str) -> Path | None:
         return resolve_gallery_image(relative_path, self.output_root)
@@ -129,6 +363,14 @@ class V2GalleryReadService:
             repository.set_gallery_asset_states(self.output_root, valid, state)
         finally:
             repository.close()
+        valid_set = set(valid)
+
+        def update_states(payload: dict[str, object]) -> None:
+            for item in payload.get("items", []):
+                if item.get("path") in valid_set:
+                    item["state"] = state
+
+        self._update_cached_payload(update_states)
         return {"updated": valid, "state": state}
 
     def move_to_trash(self, relative_paths: list[str]) -> dict[str, object]:
@@ -157,6 +399,16 @@ class V2GalleryReadService:
                 repository.set_gallery_asset_states(self.output_root, sorted(moved_originals), "")
             finally:
                 repository.close()
+            moved_set = set(moved_originals)
+
+            def remove_moved(payload: dict[str, object]) -> None:
+                payload["items"] = [item for item in payload.get("items", []) if item.get("path") not in moved_set]
+                payload["trash_count"] = int(payload.get("trash_count") or 0) + len(moved_set)
+                if self._cached_filesystem is not None:
+                    for relative in moved_set:
+                        self._cached_filesystem.pop(relative, None)
+
+            self._update_cached_payload(remove_moved)
         return {
             "moved": sorted(moved_originals),
             "trash_paths": sorted(path.relative_to(self.output_root / TRASH_DIR_NAME).as_posix() for path in moved),
@@ -192,6 +444,15 @@ class V2GalleryReadService:
                 repository.set_gallery_asset_states(self.output_root, deleted_originals, "")
             finally:
                 repository.close()
+            deleted_set = set(deleted_originals)
+
+            def remove_deleted(payload: dict[str, object]) -> None:
+                payload["items"] = [item for item in payload.get("items", []) if item.get("path") not in deleted_set]
+                if self._cached_filesystem is not None:
+                    for relative in deleted_set:
+                        self._cached_filesystem.pop(relative, None)
+
+            self._update_cached_payload(remove_deleted)
         return {"deleted": deleted_originals, "failed": failed}
 
     def list_trash(self, *, limit: int = 500) -> dict[str, object]:
@@ -233,6 +494,8 @@ class V2GalleryReadService:
             if (path := resolve_gallery_trash_image(relative, self.output_root)) is not None
         ]
         restored, failed = restore_images_from_trash(resolved, self.output_root)
+        if restored:
+            self._invalidate_cached_payload()
         return {
             "restored": [path.relative_to(self.output_root).as_posix() for path in restored],
             "failed": [{"path": str(path), "error": error} for path, error in failed],
@@ -250,6 +513,11 @@ class V2GalleryReadService:
             self.thumbnail_cache.purge(path, aliases=aliases)
             resolved.append(path)
         deleted, failed = delete_images_permanently(resolved, self.output_root)
+        if deleted:
+            deleted_count = len(deleted)
+            self._update_cached_payload(lambda payload: payload.update({
+                "trash_count": max(0, int(payload.get("trash_count") or 0) - deleted_count),
+            }))
         trash_root = self.output_root / TRASH_DIR_NAME
         return {
             "deleted": [path.relative_to(trash_root).as_posix() for path in deleted],
@@ -434,6 +702,11 @@ def _positive_int(value: object) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+def _parent_key(relative_path: str) -> str:
+    parent = Path(relative_path).parent.as_posix()
+    return parent or "."
 
 
 def _query_value(value: str) -> str:

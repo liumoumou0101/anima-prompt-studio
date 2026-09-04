@@ -1,0 +1,9 @@
+{
+  "id": "miaomiao_harem_anima_v1_6", "display_name": "MiaoMiao Harem ANIMA v1.6", "family": "anima", "variant": "community",
+  "checkpoint_logical_name": "miaomiao_harem_anima_v1_6", "default_steps": 30, "default_cfg": 4.5,
+  "default_sampler": "euler", "default_scheduler": "normal", "negative_prompt_mode": "enabled",
+  "positive_prefix": ["best quality", "score_7", "score_9", "sensitive", "very aesthetic", "ultra detailed", "fair skin", "high contrast"],
+  "negative_prompt": ["worst quality", "low quality", "score_1", "score_2", "score_3", "artist name", "shiny skin"],
+  "default_width": 896, "default_height": 1152, "workflow_template_id": "miaomiao_harem_anima_v1_6_baseline",
+  "status": "experimental", "notes": "社区模型作者建议基线：shift 3、30 步、CFG 4–5、Euler/Euler a + normal；优先使用随模型提供的专用文本编码器。"
+}

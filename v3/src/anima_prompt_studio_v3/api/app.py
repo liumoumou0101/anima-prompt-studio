@@ -202,6 +202,7 @@ def create_api_runtime(
     intent_parser: object | None = None,
     gallery_service: object | None = None,
     translation_service: object | None = None,
+    comfy_access: object | None = None,
     app_version: str | None = None,
     allowed_hosts: set[str] | None = None,
     bootstrap_ttl: int = 120,
@@ -223,6 +224,7 @@ def create_api_runtime(
     app.state.intent_parser = intent_parser
     app.state.gallery_service = gallery_service
     app.state.translation_service = translation_service
+    app.state.comfy_access = comfy_access
     profiles = ModelProfileRegistry.built_in()
     generation_bridge = CandidateToV2PromptJobAdapter() if CandidateToV2PromptJobAdapter is not None else None
 
@@ -423,8 +425,17 @@ def create_api_runtime(
                 ),
                 "local_translation": app.state.translation_service is not None,
                 "gallery": app.state.gallery_service is not None,
+                "comfy_browser_access": app.state.comfy_access is not None,
             },
-            "model_profiles": ["anima_base_v1", "anima_aesthetic_v1", "anima_turbo_v1"],
+            "model_profiles": [profile.id for profile in profiles.all()],
+            "model_profile_options": [
+                {
+                    "id": profile.id,
+                    "display_name": profile.display_name,
+                    "variant": profile.variant.value,
+                }
+                for profile in profiles.all()
+            ],
             "settings_summary": {},
         }
 
@@ -1245,6 +1256,11 @@ def create_api_runtime(
                     for item in workflows
                 ],
                 "credential_store_available": credentials.available,
+                "comfy_access": (
+                    app.state.comfy_access.status()
+                    if app.state.comfy_access is not None
+                    else None
+                ),
             }
         finally:
             repository.close()
@@ -1356,6 +1372,41 @@ def create_api_runtime(
             "comfy_endpoint": f"{profile.comfy_host}:{profile.comfy_port}",
         }
 
+    @app.get(
+        f"{API_PREFIX}/settings/comfy-access",
+        dependencies=[Depends(require_session)],
+    )
+    def get_comfy_access() -> dict[str, object]:
+        manager = app.state.comfy_access
+        if manager is None:
+            raise ApiError(503, "comfy_access_unavailable", "当前启动方式没有启用 ComfyUI 网页入口。")
+        return manager.status()
+
+    @app.post(
+        f"{API_PREFIX}/settings/remote-profiles/{{profile_id}}/open-comfy",
+        dependencies=[Depends(require_session)],
+    )
+    def open_remote_profile_comfy(
+        profile_id: str,
+        payload: RemoteConnectionTestRequest,
+    ) -> dict[str, object]:
+        manager = app.state.comfy_access
+        if manager is None:
+            raise ApiError(503, "comfy_access_unavailable", "当前启动方式没有启用 ComfyUI 网页入口。")
+        password = payload.password.get_secret_value() if payload.password is not None else ""
+        passphrase = payload.passphrase.get_secret_value() if payload.passphrase is not None else ""
+        try:
+            return manager.open(profile_id, password=password, passphrase=passphrase)
+        except KeyError as exc:
+            raise ApiError(404, "remote_profile_not_found", "云主机配置不存在。") from exc
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ApiError(
+                502,
+                "comfy_access_failed",
+                f"无法打开 ComfyUI 网页入口：{exc}",
+                retryable=True,
+            ) from exc
+
     @app.post(
         f"{API_PREFIX}/generation-credentials/private-key-passphrase",
         dependencies=[Depends(require_session)],
@@ -1404,10 +1455,18 @@ def create_api_runtime(
             raise ApiError(422, "workflow_incompatible", str(exc)) from exc
 
     @app.get(f"{API_PREFIX}/gallery/assets", dependencies=[Depends(require_session)])
-    def list_gallery_assets(limit: int = Query(default=500, ge=1, le=1000)) -> dict[str, object]:
+    def list_gallery_assets(
+        limit: int = Query(default=500, ge=1, le=1000),
+        refresh: bool = Query(default=False),
+        rebuild: bool = Query(default=False),
+    ) -> dict[str, object]:
         service = app.state.gallery_service
         if service is None:
             raise ApiError(503, "gallery_not_configured", "画廊尚未连接 V2 图片目录。")
+        if rebuild:
+            return service.list_assets(limit=limit, rebuild=True)
+        if refresh:
+            return service.list_assets(limit=limit, refresh=True)
         return service.list_assets(limit=limit)
 
     @app.get(f"{API_PREFIX}/gallery/assets/content", dependencies=[Depends(require_session)])

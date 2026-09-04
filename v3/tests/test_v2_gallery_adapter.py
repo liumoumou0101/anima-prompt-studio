@@ -7,6 +7,7 @@ from pathlib import Path
 from anima_prompt_studio.repositories import SQLiteRepository
 
 from anima_prompt_studio_v3.adapters.v2 import V2GalleryReadService, build_v2_gallery_service
+from anima_prompt_studio_v3.adapters.v2 import gallery as gallery_adapter
 
 
 def make_gallery(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -90,6 +91,62 @@ def test_v2_gallery_adapter_blocks_outside_and_trash_paths(tmp_path: Path) -> No
     assert service.resolve_content("../outside.png") is None
     assert service.resolve_content(".trash/batch/removed.png") is None
     assert all(".trash" not in item["path"] for item in service.list_assets()["items"])
+
+
+def test_gallery_snapshot_is_reused_until_an_explicit_refresh(tmp_path: Path) -> None:
+    database, root, image = make_gallery(tmp_path)
+    service = V2GalleryReadService(database, root)
+
+    initial = service.list_assets()
+    assert len(initial["items"]) == 1
+    assert service._index_path.is_file()
+    envelope = json.loads(service._index_path.read_text(encoding="utf-8"))
+    assert envelope["schema"] == 2
+    assert list(envelope["filesystem"]) == [image.relative_to(root).as_posix()]
+
+    added = image.with_name("added-after-index.webp")
+    added.write_bytes(b"second-image")
+    assert len(service.list_assets()["items"]) == 1
+    assert len(V2GalleryReadService(database, root).list_assets()["items"]) == 1
+
+    refreshed = service.list_assets(refresh=True)
+    assert {item["name"] for item in refreshed["items"]} == {"result.png", "added-after-index.webp"}
+
+
+def test_incremental_refresh_rebuilds_only_a_changed_manifest_folder(tmp_path: Path, monkeypatch) -> None:
+    database, root, image = make_gallery(tmp_path)
+    service = V2GalleryReadService(database, root)
+    service.list_assets()
+    manifest_path = image.parent / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["prompt_job"]["positive_prompt"] = "updated prompt from changed manifest"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    def reject_full_scan(*_args, **_kwargs):
+        raise AssertionError("incremental refresh unexpectedly used the full gallery loader")
+
+    monkeypatch.setattr(gallery_adapter, "load_gallery_batches", reject_full_scan)
+    refreshed = service.list_assets(refresh=True)
+
+    assert refreshed["items"][0]["positive_prompt"] == "updated prompt from changed manifest"
+
+
+def test_gallery_index_supports_an_explicit_full_rebuild(tmp_path: Path, monkeypatch) -> None:
+    database, root, _image = make_gallery(tmp_path)
+    service = V2GalleryReadService(database, root)
+    service.list_assets()
+    calls = 0
+    original = gallery_adapter.load_gallery_batches
+
+    def count_full_scan(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(gallery_adapter, "load_gallery_batches", count_full_scan)
+    service.list_assets(rebuild=True)
+
+    assert calls == 1
 
 
 def test_gallery_state_and_recoverable_trash_respect_active_process_lock(tmp_path: Path) -> None:

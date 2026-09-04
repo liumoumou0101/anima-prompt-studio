@@ -1,6 +1,7 @@
 import {fireEvent, render, screen} from "@testing-library/react";
 import type {ReactNode} from "react";
 import {beforeEach, expect, it, vi} from "vitest";
+import {resetGalleryStoreForTests} from "../lib/galleryStore";
 import {GalleryPage} from "./GalleryPage";
 
 vi.mock("react-photo-album", () => ({
@@ -28,6 +29,7 @@ const assets = [
 ];
 
 beforeEach(() => {
+  resetGalleryStoreForTests();
   sessionStorage.setItem("anima-v3-session", "session-token");
   vi.restoreAllMocks();
 });
@@ -53,6 +55,42 @@ it("filters local assets and opens traceable image details", async () => {
   expect(screen.getByText("pack-r1")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: "关闭图片详情"}));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("shows refresh progress and reports newly indexed images", async () => {
+  let resolveRefresh!: (response: Response) => void;
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({
+      root: "D:/gallery", items: [assets[0]], projects: ["雨夜项目"], models: ["anima_base_v1"], trash_count: 0,
+    }), {status: 200}))
+    .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveRefresh = resolve; }));
+
+  render(<GalleryPage enabled />);
+  await screen.findByAltText("one.png");
+  fireEvent.click(screen.getByRole("button", {name: "刷新画廊"}));
+  expect(screen.getByRole("button", {name: "正在刷新…"})).toBeDisabled();
+  expect(screen.getByText("正在同步画廊索引…")).toBeInTheDocument();
+
+  resolveRefresh(new Response(JSON.stringify({
+    root: "D:/gallery", items: assets, projects: ["外部图片", "雨夜项目"], models: ["anima_base_v1"], trash_count: 0,
+  }), {status: 200}));
+  expect(await screen.findByText("已发现 1 张新图片。")).toBeInTheDocument();
+  expect(fetchMock.mock.calls[1][0]).toBe("/api/v3/gallery/assets?limit=1000&refresh=true");
+});
+
+it("renders a bounded first page and progressively exposes the rest", async () => {
+  const manyAssets = Array.from({length: 100}, (_, index) => ({
+    ...assets[0], id: `asset-${index}`, path: `batch/asset-${index}.png`, name: `asset-${index}.png`,
+  }));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+    root: "D:/gallery", items: manyAssets, projects: ["雨夜项目"], models: ["anima_base_v1"], trash_count: 0,
+  }), {status: 200}));
+
+  render(<GalleryPage enabled />);
+  expect(await screen.findByText("100 张")).toBeInTheDocument();
+  expect(screen.getAllByRole("img")).toHaveLength(80);
+  fireEvent.click(screen.getByRole("button", {name: "继续加载（剩余 20 张）"}));
+  expect(screen.getAllByRole("img")).toHaveLength(100);
 });
 
 it("moves an image to recoverable trash and restores it", async () => {
@@ -82,7 +120,7 @@ it("moves an image to recoverable trash and restores it", async () => {
     "/api/v3/gallery/assets/trash",
     "/api/v3/gallery/trash?limit=1000",
     "/api/v3/gallery/trash/restore",
-    "/api/v3/gallery/assets?limit=1000",
+    "/api/v3/gallery/assets?limit=1000&refresh=true",
   ]);
 });
 

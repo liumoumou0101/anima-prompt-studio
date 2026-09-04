@@ -82,6 +82,7 @@ class WorkflowProfile(BaseModel):
     workflow_kind: Literal["txt2img_basic", "txt2img_hiresfix_1_5x", "unknown"] = "unknown"
     lora_slots: list[LoRASlotBinding] = Field(default_factory=list)
     compatible_model_profiles: list[str] = Field(default_factory=list)
+    runtime_assets: dict[str, str | float] = Field(default_factory=dict)
     source_path: str = ""
     notes: str = ""
 

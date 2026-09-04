@@ -1,0 +1,11 @@
+{
+  "id": "miaomiao_harem_anima_v1_6",
+  "display_name": "MiaoMiao Harem ANIMA v1.6",
+  "family": "anima",
+  "variant": "community",
+  "positive_prefix": ["best quality", "score_7", "score_9", "sensitive", "very aesthetic", "ultra detailed", "fair skin", "high contrast"],
+  "negative_prompt": ["worst quality", "low quality", "score_1", "score_2", "score_3", "artist name", "shiny skin"],
+  "negative_prompt_mode": "enabled",
+  "tag_separator": ", ",
+  "renderer_version": "anima-renderer-v1"
+}

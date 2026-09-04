@@ -123,6 +123,9 @@ def test_builtin_profiles_are_packaged_and_variant_safe() -> None:
         "anima_aesthetic_v1",
         "anima_base_v1",
         "anima_turbo_v1",
+        "anima_turbo_v1_1",
+        "animayume_v1_0_final",
+        "miaomiao_harem_anima_v1_6",
     ]
     assert registry.get("anima_base_v1").positive_prefix == ("score_7",)
     assert registry.get("anima_aesthetic_v1").positive_prefix == ()

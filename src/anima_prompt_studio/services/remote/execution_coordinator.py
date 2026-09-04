@@ -140,6 +140,14 @@ class RemoteExecutionCoordinator:
                             "云端缺少工作流节点：" + ", ".join(missing_nodes),
                             code="missing_nodes",
                         )
+                    input_validator = getattr(client, "validate_workflow_inputs", None)
+                    invalid_inputs = input_validator(rendered.workflow) if callable(input_validator) else []
+                    if invalid_inputs:
+                        raise ComfyAPIError(
+                            "云端工作流参数预检失败：" + "；".join(invalid_inputs),
+                            code="invalid_workflow_inputs",
+                            details=invalid_inputs,
+                        )
                     run.actual_workflow = rendered.workflow
                     run.request_json["resolved_seed"] = rendered.resolved_seed
                     run.request_json["checkpoint_name"] = rendered.checkpoint_name

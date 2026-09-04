@@ -51,6 +51,10 @@ WORKFLOW_FIELDS = {
     "positive_prompt": ("正向提示词节点", "text"),
     "negative_prompt": ("负向提示词节点", "text"),
     "checkpoint": ("Checkpoint 节点", "ckpt_name"),
+    "text_encoder": ("文本编码器节点", "clip_name"),
+    "text_encoder_type": ("文本编码器类型", "type"),
+    "vae": ("VAE 节点", "vae_name"),
+    "model_shift": ("模型采样 Shift", "shift"),
     "seed": ("采样节点（Seed）", "seed"),
     "steps": ("采样节点（Steps）", "steps"),
     "cfg": ("采样节点（CFG）", "cfg"),
@@ -64,6 +68,7 @@ WORKFLOW_FIELDS = {
 
 AUTO_REQUIRED_FIELDS = {
     "positive_prompt",
+    "negative_prompt",
     "checkpoint",
     "seed",
     "steps",
@@ -194,10 +199,17 @@ def detect_workflow_bindings(workflow: dict[str, Any]) -> dict[str, WorkflowBind
     if not checkpoint:
         checkpoint = first_matching("CheckpointLoaderSimple", "CheckpointLoader", "UNETLoader")
     save = first_matching("SaveImage")
+    text_encoder = first_matching("CLIPLoader")
+    vae = first_matching("VAELoader")
+    model_sampling = first_matching("ModelSamplingAuraFlow")
     node_map = {
         "positive_prompt": positive,
         "negative_prompt": negative,
         "checkpoint": checkpoint,
+        "text_encoder": text_encoder,
+        "text_encoder_type": text_encoder,
+        "vae": vae,
+        "model_shift": model_sampling,
         "seed": sampler,
         "steps": sampler,
         "cfg": sampler,
@@ -332,10 +344,27 @@ def build_auto_workflow_profile(
             if compatible_model_profile
             else infer_workflow_model_profiles(workflow, source_path.name)
         ),
+        runtime_assets=detect_runtime_assets(workflow, bindings),
         source_path=str(source_path),
         notes="由软件根据 ComfyUI API 工作流连线自动识别。",
     )
     return profile, missing
+
+
+def detect_runtime_assets(
+    workflow: dict[str, Any],
+    bindings: dict[str, WorkflowBinding],
+) -> dict[str, str | float]:
+    """Snapshot loader inputs that must stay coupled to this workflow."""
+    assets: dict[str, str | float] = {}
+    for field_name in ("checkpoint", "text_encoder", "text_encoder_type", "vae", "model_shift"):
+        binding = bindings.get(field_name)
+        if binding is None:
+            continue
+        value = workflow.get(binding.node_id, {}).get("inputs", {}).get(binding.input_name)
+        if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+            assets[field_name] = float(value) if field_name == "model_shift" else str(value)
+    return assets
 
 
 def detect_lora_slots(workflow: dict[str, Any]) -> list[LoRASlotBinding]:

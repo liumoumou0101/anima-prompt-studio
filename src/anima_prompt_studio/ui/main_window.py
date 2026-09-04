@@ -297,8 +297,7 @@ class MainWindow(QMainWindow):
         primary_header.addWidget(self.model_combo, 1)
         primary_header.addWidget(QLabel("生成预设"))
         self.generation_combo = NoWheelComboBox()
-        for preset in self.configs.generation_presets["anima_turbo_v1"].values():
-            self.generation_combo.addItem(preset.display_name, preset.id)
+        self._populate_generation_combo(self.job.model_profile_id, self.job.generation_preset_id)
         self.generation_combo.currentIndexChanged.connect(self.on_generation_preset_changed)
         primary_header.addWidget(self.generation_combo, 1)
         primary_header.addWidget(QLabel("质量预设"))
@@ -931,7 +930,9 @@ class MainWindow(QMainWindow):
         self.project_name.setText(j.project_name); self.chinese.setPlainText(j.original_zh); self.english.setPlainText(j.translated_en)
         self.back_chinese.setPlainText(j.back_translated_zh); self.lock_english.setChecked(j.translation_state == ItemState.LOCKED)
         self.lock_compiled_prompt.setChecked(j.compiled_prompt_state == ItemState.LOCKED)
-        self._set_combo_data(self.model_combo, j.model_profile_id); self._set_combo_data(self.generation_combo, j.generation_preset_id); self._set_combo_data(self.quality_combo, j.quality_profile_id)
+        self._set_combo_data(self.model_combo, j.model_profile_id)
+        self._populate_generation_combo(j.model_profile_id, j.generation_preset_id)
+        self._set_combo_data(self.quality_combo, j.quality_profile_id)
         c = j.composition; self.people_count.setValue(c.people_count)
         self._set_combo_data(self.subject_mode, j.subject_mode.value)
         self._set_combo_data(self.composition_mode, c.mode)
@@ -960,6 +961,23 @@ class MainWindow(QMainWindow):
     def _set_combo_data(combo: QComboBox, data: str) -> None:
         index = combo.findData(data)
         if index >= 0: combo.setCurrentIndex(index)
+
+    def _populate_generation_combo(self, model_profile_id: str, selected_id: str = "") -> None:
+        presets = self.configs.generation_presets.get(model_profile_id, {})
+        previous = self.generation_combo.blockSignals(True)
+        try:
+            self.generation_combo.clear()
+            for preset in presets.values():
+                self.generation_combo.addItem(preset.display_name, preset.id)
+                if preset.notes:
+                    self.generation_combo.setItemData(
+                        self.generation_combo.count() - 1,
+                        preset.notes,
+                        Qt.ItemDataRole.ToolTipRole,
+                    )
+            self._set_combo_data(self.generation_combo, selected_id or "balanced")
+        finally:
+            self.generation_combo.blockSignals(previous)
 
     def _refresh_results(self) -> None:
         j = self.job
@@ -993,7 +1011,7 @@ class MainWindow(QMainWindow):
             self._set_combo_data(self.composition_state_boxes[field_name], decision.state.value)
             combo.setEnabled(decision.state != CompositionFieldState.LOCKED)
             self.composition_reason_labels[field_name].setText(decision.reason or "")
-        self._set_combo_data(self.generation_combo, j.generation_preset_id)
+        self._populate_generation_combo(j.model_profile_id, j.generation_preset_id)
         p = j.generation_params
         self.width.setValue(p.width); self.height.setValue(p.height); self.steps.setValue(p.steps); self.cfg.setValue(p.cfg)
         self.sampler.setText(p.sampler); self.scheduler.setText(p.scheduler)
@@ -2184,7 +2202,12 @@ class MainWindow(QMainWindow):
                         + "、".join(missing)
                     )
                 else:
-                    profile.notes = "通过 SSH 从优云智算镜像自动发现并转换。"
+                    profile.notes = (
+                        "实验 A/B：移植社区工作流的 NAG + Layer Replay，不包含旧 Turbo LoRA；"
+                        "固定 Seed 验证显示它会明显改变构图和质感，因此不作为默认工作流。"
+                        if "nag-replay-experiment" in remote_path
+                        else "通过 SSH 从优云智算镜像自动发现并转换。"
+                    )
                 self.repository.save_workflow_profile(profile)
                 imported_ids.append(profile.id)
                 if not missing and profile.workflow_kind in SUPPORTED_GENERATION_WORKFLOW_KINDS:
@@ -2194,12 +2217,14 @@ class MainWindow(QMainWindow):
         if imported_ids:
             self._refresh_remote_controls(selected_workflow_id=(supported_ids or imported_ids)[0])
         device = report.devices[0] if report.devices else "设备信息未知"
+        warning_suffix = f" · 安全警告：{report.warnings[0]}" if report.warnings else ""
         self.remote_status.setText(
             f"已连接 · {device} · 队列 {report.queue_running + report.queue_pending}"
             + (
                 f" · 自动发现 {len(imported_ids)} 个工作流，其中 {len(supported_ids)} 个可直接执行"
                 if imported_ids else ""
             )
+            + warning_suffix
         )
         self.statusBar().showMessage(
             "SSH 隧道和 ComfyUI API 连接正常。"
@@ -2210,6 +2235,8 @@ class MainWindow(QMainWindow):
             ),
             8000,
         )
+        if report.warnings:
+            log.warning("远程 ComfyUI 环境警告：%s", "；".join(report.warnings))
         self._sync_gallery_upscale_config()
 
     def generate_remote(self) -> None:

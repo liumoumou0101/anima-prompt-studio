@@ -90,8 +90,13 @@ def build_workflow_recipe_contract(workflow: WorkflowProfile) -> dict[str, objec
     template = _template_parameters(workflow)
     model_profiles = set(workflow.compatible_model_profiles)
     workflow_label = f"{workflow.id} {workflow.display_name}".lower()
-    is_turbo = "anima_turbo_v1" in model_profiles
-    is_dmdx = "dmdx" in workflow_label or (is_turbo and template.steps <= 4)
+    is_turbo_v11 = "anima_turbo_v1_1" in model_profiles
+    is_yume = "animayume_v1_0_final" in model_profiles
+    is_miaomiao = "miaomiao_harem_anima_v1_6" in model_profiles
+    is_turbo = bool(model_profiles & {"anima_turbo_v1", "anima_turbo_v1_1"})
+    is_dmdx = "dmdx" in workflow_label or (
+        "anima_turbo_v1" in model_profiles and template.steps <= 4
+    )
 
     if workflow.workflow_kind == HIRES_FIX_WORKFLOW_KIND:
         default_recipe_id = "hires_template"
@@ -141,6 +146,55 @@ def build_workflow_recipe_contract(workflow: WorkflowProfile) -> dict[str, objec
             for field in ("steps", "cfg", "sampler", "scheduler")
         }
         stages = [{"id": "base", "display_name": "蒸馏生成", **template.model_dump(mode="json")}]
+    elif is_yume:
+        default_recipe_id = "yume_creator"
+        creator = RecipeParameters(steps=30, cfg=5.5, sampler="euler_ancestral", scheduler="normal")
+        community = RecipeParameters(steps=30, cfg=4.0, sampler="er_sde", scheduler="simple")
+        recipes = [
+            _recipe("yume_creator", "作者参数基线", "baseline", creator, "30 步、CFG 5.5、Euler a + normal。", "model_guidance"),
+            _recipe("yume_community", "社区工作流对照", "creative", community, "用于与现有 ANIMA 社区图做固定 Seed 对照。", "experimental"),
+        ]
+        capabilities = {
+            "steps": ParameterCapability(mode="editable", value=30, minimum=25, maximum=40, reason="模型作者建议 25–40 步。"),
+            "cfg": ParameterCapability(mode="editable", value=5.5, minimum=4, maximum=7, reason="模型作者建议 CFG 4–7。"),
+            "sampler": ParameterCapability(mode="editable", value="euler_ancestral", options=["euler_ancestral", "euler", "er_sde"], reason="先验证作者配方，再与社区图对照。"),
+            "scheduler": ParameterCapability(mode="editable", value="normal", options=["normal", "simple"], reason="调度器与采样器作为成套配方验证。"),
+        }
+        stages = [{"id": "base", "display_name": "AnimaYume 单阶段", **creator.model_dump(mode="json")}]
+    elif is_miaomiao:
+        default_recipe_id = "miaomiao_creator"
+        creator = RecipeParameters(steps=30, cfg=4.5, sampler="euler", scheduler="normal")
+        euler_a = creator.model_copy(update={"sampler": "euler_ancestral"})
+        community = creator.model_copy(update={"sampler": "er_sde", "scheduler": "simple"})
+        recipes = [
+            _recipe("miaomiao_creator", "作者参数基线", "baseline", creator, "shift 3、30 步、CFG 4.5、Euler + normal，并使用专用文本编码器。", "model_guidance"),
+            _recipe("miaomiao_euler_a", "Euler a 对照", "creative", euler_a, "作者建议的另一采样器对照。", "model_guidance"),
+            _recipe("miaomiao_community", "社区工作流对照", "detail_study", community, "用于确认现有社区采样链是否更适合该模型。", "experimental"),
+        ]
+        capabilities = {
+            "steps": ParameterCapability(mode="fixed", value=30, reason="首轮验证固定 30 步，避免同时改变过多变量。"),
+            "cfg": ParameterCapability(mode="editable", value=4.5, minimum=4, maximum=5, reason="模型作者建议 CFG 4–5。"),
+            "sampler": ParameterCapability(mode="editable", value="euler", options=["euler", "euler_ancestral", "er_sde"], reason="Euler、Euler a 与社区链分别做固定 Seed 对照。"),
+            "scheduler": ParameterCapability(mode="editable", value="normal", options=["normal", "simple"], reason="调度器与采样器作为成套配方验证。"),
+        }
+        stages = [{"id": "base", "display_name": "MiaoMiao 单阶段", **creator.model_dump(mode="json")}]
+    elif is_turbo_v11:
+        default_recipe_id = "turbo_v11_baseline"
+        baseline = RecipeParameters(steps=10, cfg=1.0, sampler="er_sde", scheduler="simple")
+        euler = RecipeParameters(steps=10, cfg=1.0, sampler="euler", scheduler="normal")
+        recipes = [
+            _recipe("turbo_v11_preview", "Turbo v1.1 快速预览", "speed", baseline.model_copy(update={"steps": 8}), "8 步快速构图预览。", "model_guidance"),
+            _recipe("turbo_v11_baseline", "Turbo v1.1 稳定基线", "baseline", baseline, "完整 v1.1 模型，不叠加旧 Turbo LoRA。", "workflow_template"),
+            _recipe("turbo_v11_euler", "Euler 对照", "creative", euler, "与 Euler + normal 做固定 Seed 对照。", "experimental"),
+            _recipe("turbo_v11_upper", "Turbo v1.1 步数上沿", "detail_study", baseline.model_copy(update={"steps": 12}), "推荐区间上沿。", "model_guidance"),
+        ]
+        capabilities = {
+            "steps": ParameterCapability(mode="editable", value=10, minimum=8, maximum=12, reason="Turbo v1.1 推荐范围为 8–12 步。"),
+            "cfg": ParameterCapability(mode="fixed", value=1.0, reason="Turbo v1.1 使用 CFG 1。"),
+            "sampler": ParameterCapability(mode="editable", value="er_sde", options=["er_sde", "euler"], reason="首轮只比较两套明确配方。"),
+            "scheduler": ParameterCapability(mode="editable", value="simple", options=["simple", "normal"], reason="调度器必须与配方同步切换。"),
+        }
+        stages = [{"id": "base", "display_name": "Turbo v1.1 单阶段", **baseline.model_dump(mode="json")}]
     elif is_turbo:
         default_recipe_id = "turbo_standard"
         def turbo(steps: int) -> RecipeParameters:

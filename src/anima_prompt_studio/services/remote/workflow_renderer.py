@@ -30,6 +30,7 @@ class WorkflowRenderResult:
 class WorkflowRenderer:
     CORE_BINDINGS = {
         "positive_prompt",
+        "negative_prompt",
         "checkpoint",
         "seed",
         "steps",
@@ -81,6 +82,10 @@ class WorkflowRenderer:
             workflow_profile.api_workflow,
             workflow_profile.source_path or workflow_profile.display_name or workflow_profile.id,
         )
+        if not compatible_models:
+            raise WorkflowRenderError(
+                f"工作流 {workflow_profile.display_name} 尚未声明兼容模型，不能安全提交。"
+            )
         if compatible_models and job.model_profile_id not in compatible_models:
             raise WorkflowRenderError(
                 f"工作流 {workflow_profile.display_name} 不支持模型配置 {job.model_profile_id}。"
@@ -114,6 +119,9 @@ class WorkflowRenderer:
             "filename_prefix": f"Anima_{run_id[:8]}",
         }
         values = dict(common_values)
+        for field_name in ("text_encoder", "text_encoder_type", "vae", "model_shift"):
+            if field_name in workflow_profile.runtime_assets:
+                values[field_name] = workflow_profile.runtime_assets[field_name]
         recipe_metadata = job.integration_metadata.get("generation_recipe", {})
         is_v3_recipe = isinstance(recipe_metadata, dict) and recipe_metadata.get("schema") == "v3-workflow-recipe/1"
         if workflow_profile.workflow_kind != HIRES_FIX_WORKFLOW_KIND or is_v3_recipe:
@@ -128,7 +136,10 @@ class WorkflowRenderer:
             if binding is not None:
                 self._set_binding(workflow, binding, value)
 
-        metadata: dict[str, Any] = {"workflow_kind": workflow_profile.workflow_kind}
+        metadata: dict[str, Any] = {
+            "workflow_kind": workflow_profile.workflow_kind,
+            "runtime_assets": self._runtime_asset_snapshot(workflow),
+        }
         if workflow_profile.workflow_kind == HIRES_FIX_WORKFLOW_KIND:
             refiner_seed = (seed + 1) % (2**63 - 1)
             refiner_seed_binding = workflow_profile.bindings.get("refiner_seed")
@@ -203,3 +214,30 @@ class WorkflowRenderer:
             for key in ("seed", "steps", "cfg", "sampler_name", "scheduler", "denoise")
             if key in inputs and not isinstance(inputs[key], (list, tuple, dict))
         }
+
+    @staticmethod
+    def _runtime_asset_snapshot(workflow: dict[str, Any]) -> dict[str, Any]:
+        fields = {
+            "unet_name": "checkpoint",
+            "ckpt_name": "checkpoint",
+            "clip_name": "text_encoder",
+            "type": "text_encoder_type",
+            "vae_name": "vae",
+            "shift": "model_shift",
+        }
+        snapshot: dict[str, Any] = {}
+        for node in workflow.values():
+            if not isinstance(node, dict):
+                continue
+            class_type = str(node.get("class_type", "")).casefold()
+            inputs = node.get("inputs", {})
+            for input_name, output_name in fields.items():
+                value = inputs.get(input_name)
+                if isinstance(value, (str, int, float)) and (
+                    (input_name in {"unet_name", "ckpt_name"} and "loader" in class_type)
+                    or (input_name in {"clip_name", "type"} and "cliploader" in class_type)
+                    or (input_name == "vae_name" and "vaeloader" in class_type)
+                    or (input_name == "shift" and "modelsampling" in class_type)
+                ):
+                    snapshot[output_name] = value
+        return snapshot

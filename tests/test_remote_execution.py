@@ -2,6 +2,7 @@ import json
 import io
 import sqlite3
 import threading
+from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -13,6 +14,7 @@ from anima_prompt_studio.domain.execution_models import (
     GenerationRunState,
     HIRES_FIX_WORKFLOW_KIND,
     RemoteArtifact,
+    RemoteCredentials,
     RemoteProfile,
     WorkflowBinding,
     WorkflowProfile,
@@ -23,6 +25,7 @@ from anima_prompt_studio.services.remote.comfy_client import ComfyAPIError, Comf
 from anima_prompt_studio.services.remote.execution_coordinator import RemoteExecutionCoordinator, RemoteExecutionError
 from anima_prompt_studio.services.remote.result_organizer import ResultOrganizer, sanitize_path_segment
 from anima_prompt_studio.services.remote.workflow_renderer import WorkflowRenderError, WorkflowRenderer
+from anima_prompt_studio.services.remote.ssh_tunnel import SshTunnel
 from anima_prompt_studio.services.remote.workflow_discovery import (
     discover_compshare_workflows,
     frontend_workflow_to_api,
@@ -299,6 +302,54 @@ def test_compshare_discovery_derives_aesthetic_workflows_when_models_exist():
     assert discovered[2][2]["4"]["inputs"]["unet_name"] == "anima-aesthetic-v1.1.safetensors"
 
 
+def test_compshare_discovery_derives_isolated_new_model_baselines():
+    workflow = api_workflow()
+    workflow["4"] = {"class_type": "UNETLoader", "inputs": {"unet_name": "anima-base-v1.0.safetensors"}}
+    workflow["9"] = {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_06b_base.safetensors", "type": "stable_diffusion"}}
+    workflow["10"] = {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_vae.safetensors"}}
+    workflow["11"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["4", 0], "shift": 3}}
+    workflow["3"]["inputs"]["model"] = ["11", 0]
+    payload = json.dumps({"prompt": workflow}).encode()
+
+    class FakeSFTP:
+        def listdir(self, root):
+            if root.endswith("diffusion_models"):
+                return ["anima-turbo-v1.1.safetensors", "animayume_v10BaseFinal.safetensors", "miaomiaoHarem_anima16.safetensors"]
+            if root.endswith("text_encoders"):
+                return ["qwen_3_06b_base.safetensors", "miaomiaoHarem_anima16_txt.safetensors"]
+            if root.endswith("vae"):
+                return ["qwen_image_vae.safetensors"]
+            return ["01_基础文生图.json"]
+
+        def open(self, path, mode):
+            return io.BytesIO(payload)
+
+        def close(self):
+            pass
+
+    class FakeClient:
+        def open_sftp(self):
+            return FakeSFTP()
+
+    class FakeTunnel:
+        client = FakeClient()
+
+    discovered = discover_compshare_workflows(FakeTunnel())
+    by_name = {name[:2]: graph for name, _source, graph in discovered}
+
+    assert {"23", "24", "25", "26", "27", "28"} <= set(by_name)
+    assert by_name["23"]["4"]["inputs"]["unet_name"] == "anima-turbo-v1.1.safetensors"
+    assert by_name["24"]["3"]["inputs"]["sampler_name"] == "euler_ancestral"
+    assert by_name["25"]["9"]["inputs"]["clip_name"] == "miaomiaoHarem_anima16_txt.safetensors"
+    assert by_name["25"]["11"]["inputs"]["shift"] == 3.0
+    assert by_name["26"]["3"]["inputs"]["model"] == ["902", 0]
+    assert by_name["26"]["901"]["inputs"]["model"] == ["11", 0]
+    assert all(
+        "loraloader" not in str(node.get("class_type", "")).casefold()
+        for node in by_name["26"].values()
+    )
+
+
 def test_workflow_binding_detection_finds_standard_comfy_nodes():
     bindings = detect_workflow_bindings(api_workflow())
     assert bindings["positive_prompt"].node_id == "6"
@@ -408,6 +459,9 @@ def test_v3_hires_recipe_writes_the_declared_base_stage_parameters(tmp_path):
     ("02_Turbo极速文生图.json", "anima-turbo-v1.0.safetensors", "anima_turbo_v1"),
     ("05_DMDX少步文生图.json", "anima-base-v1.0.safetensors", "anima_turbo_v1"),
     ("21_美学文生图_Aesthetic_v1.0.json", "anima-aesthetic-v1.0.safetensors", "anima_aesthetic_v1"),
+    ("26_Turbo_v1.1_社区优化实验.json", "anima-turbo-v1.1.safetensors", "anima_turbo_v1_1"),
+    ("27_AnimaYume_社区优化实验.json", "animayume_v10BaseFinal.safetensors", "animayume_v1_0_final"),
+    ("28_MiaoMiao_社区优化实验.json", "miaomiaoHarem_anima16.safetensors", "miaomiao_harem_anima_v1_6"),
 ])
 def test_compshare_workflow_name_infers_model_profile(filename, checkpoint, expected, tmp_path):
     workflow = api_workflow()
@@ -592,6 +646,29 @@ def test_comfy_client_health_submit_history_and_download():
     assert content == b"image" and mime_type == "image/png"
 
 
+def test_comfy_client_preflights_enum_backed_model_inputs():
+    class ObjectInfoSession(FakeSession):
+        def get(self, url, timeout=None):
+            if url.endswith("/object_info"):
+                return FakeResponse({
+                    "UNETLoader": {"input": {"required": {
+                        "unet_name": [["available.safetensors"]],
+                        "weight_dtype": [["default", "fp8_e4m3fn"]],
+                    }}},
+                })
+            return super().get(url, timeout)
+
+    client = ComfyUIClient("http://127.0.0.1:8188", ObjectInfoSession())
+    errors = client.validate_workflow_inputs({
+        "1": {"class_type": "UNETLoader", "inputs": {
+            "unet_name": "missing.safetensors", "weight_dtype": "default",
+        }},
+    })
+
+    assert len(errors) == 1
+    assert "missing.safetensors" in errors[0]
+
+
 def test_comfy_client_against_local_protocol_server():
     pytest.importorskip("requests")
 
@@ -665,6 +742,59 @@ def test_comfy_client_does_not_globally_interrupt_running_shared_task():
     with pytest.raises(ComfyAPIError) as captured:
         client.wait_for_completion("prompt-running", is_cancelled=lambda: True, sleep=lambda _: None)
     assert captured.value.code == "running_cancel_unsupported"
+
+
+def test_ssh_tunnel_retries_transient_handshake_failures(monkeypatch):
+    class FakeSSHException(Exception):
+        pass
+
+    class FakeAuthenticationException(FakeSSHException):
+        pass
+
+    class FakeTransport:
+        @staticmethod
+        def is_active():
+            return True
+
+    class FakeSSHClient:
+        attempts = 0
+
+        def load_system_host_keys(self):
+            pass
+
+        def set_missing_host_key_policy(self, _policy):
+            pass
+
+        def connect(self, **_kwargs):
+            type(self).attempts += 1
+            if type(self).attempts < 3:
+                raise FakeSSHException("No existing session")
+
+        def get_transport(self):
+            return FakeTransport()
+
+        def close(self):
+            pass
+
+    fake_paramiko = SimpleNamespace(
+        SSHClient=FakeSSHClient,
+        SSHException=FakeSSHException,
+        AuthenticationException=FakeAuthenticationException,
+    )
+    profile = remote_profile()
+    profile.known_host_fingerprint = "SHA256:test"
+    tunnel = SshTunnel(profile, local_bind_port=0)
+    monkeypatch.setattr(tunnel, "probe_fingerprint", lambda: profile.known_host_fingerprint)
+    monkeypatch.setattr(tunnel, "_paramiko", lambda: fake_paramiko)
+    monkeypatch.setattr("anima_prompt_studio.services.remote.ssh_tunnel.time.sleep", lambda _seconds: None)
+
+    with tunnel:
+        tunnel.open(RemoteCredentials(password="secret"))
+        assert tunnel.local_port > 0
+        assert tunnel.server is not None
+        assert tunnel.server.server_address[0] == "127.0.0.1"
+
+    assert FakeSSHClient.attempts == 3
 
 
 class FakeTunnel:

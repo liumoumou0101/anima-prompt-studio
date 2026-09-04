@@ -87,6 +87,25 @@ def test_turbo_uses_standard_recipe_as_default_instead_of_fastest_preview() -> N
     assert contract["default_recipe_id"] == "turbo_standard"
 
 
+@pytest.mark.parametrize(("model", "default_recipe", "sampler", "scheduler"), [
+    ("anima_turbo_v1_1", "turbo_v11_baseline", "er_sde", "simple"),
+    ("animayume_v1_0_final", "yume_creator", "euler_ancestral", "normal"),
+    ("miaomiao_harem_anima_v1_6", "miaomiao_creator", "euler", "normal"),
+])
+def test_new_models_expose_model_specific_recipe_contracts(
+    model: str,
+    default_recipe: str,
+    sampler: str,
+    scheduler: str,
+) -> None:
+    contract = build_workflow_recipe_contract(workflow(model=model, steps=30, cfg=4.5))
+
+    assert contract["default_recipe_id"] == default_recipe
+    recipes = {item["id"]: item for item in contract["generation_recipes"]}
+    assert recipes[default_recipe]["parameters"]["sampler"] == sampler
+    assert recipes[default_recipe]["parameters"]["scheduler"] == scheduler
+
+
 def test_hires_contract_exposes_both_effective_stages() -> None:
     contract = build_workflow_recipe_contract(workflow(kind="txt2img_hiresfix_1_5x", steps=34, cfg=4.5))
 

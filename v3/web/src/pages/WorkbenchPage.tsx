@@ -5,7 +5,7 @@ import {useSearchParams} from "react-router-dom";
 import {apiRequest, ApiClientError} from "../lib/api";
 import {consumeDirectImport} from "../lib/directPrompt";
 import {applyAspect, applyGenerationRecipe, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
-import type {ArtistComparisonSubmission, ArtistRanking, ArtistSuggestion, CandidateLane, CandidateTag, CompositionChip, CompositionPreset, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, IntentParseResponse, PromptCandidate, SceneDraft, SceneDraftItem, SceneRelation, TagSuggestion, TranslationResponse, WorkbenchGenerationSettings, WorkbenchResponse, WorkspaceDraft, WorkspaceListResponse, WorkspaceRecord} from "../lib/types";
+import type {ArtistComparisonSubmission, ArtistRanking, ArtistSuggestion, CandidateLane, CandidateTag, CompositionChip, CompositionPreset, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, IntentParseResponse, ModelProfileOption, PromptCandidate, SceneDraft, SceneDraftItem, SceneRelation, TagSuggestion, TranslationResponse, WorkbenchGenerationSettings, WorkbenchResponse, WorkspaceDraft, WorkspaceListResponse, WorkspaceRecord} from "../lib/types";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
 
 const artistRankingLabels: Record<ArtistRanking, string> = {
@@ -14,7 +14,7 @@ const artistRankingLabels: Record<ArtistRanking, string> = {
   balanced: "题材与投稿量均衡",
 };
 
-const profiles = [
+const FALLBACK_PROFILES = [
   {id: "anima_base_v1", label: "ANIMA Base"},
   {id: "anima_aesthetic_v1", label: "ANIMA Aesthetic"},
   {id: "anima_turbo_v1", label: "ANIMA Turbo"},
@@ -35,7 +35,10 @@ const laneMeta: Record<CandidateLane, {index: string; label: string; detail: str
   hybrid: {index: "H", label: "Hybrid", detail: "保留画面计划与明确关系"},
 };
 
-export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = false, localTranslationEnabled = false}: {remoteEnabled?: boolean; naturalLanguageEnabled?: boolean; localTranslationEnabled?: boolean}) {
+export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLanguageEnabled = false, localTranslationEnabled = false}: {modelProfiles?: ModelProfileOption[]; remoteEnabled?: boolean; naturalLanguageEnabled?: boolean; localTranslationEnabled?: boolean}) {
+  const profiles = modelProfiles?.length
+    ? modelProfiles.map((item) => ({id: item.id, label: item.display_name}))
+    : FALLBACK_PROFILES;
   const [searchParams] = useSearchParams();
   const importedTags = useMemo(() => Array.from(new Set(searchParams.getAll("tag").map((item) => item.trim()).filter(Boolean))), []);
   const directImport = useMemo(consumeDirectImport, []);
@@ -127,7 +130,7 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
 
   const positiveItems = useMemo(() => splitConcepts(positiveText), [positiveText]);
   const compatibleTargets = useMemo(() => generationTargets.filter((target) => (
-    !target.compatible_model_profiles.length || target.compatible_model_profiles.includes(profile)
+    target.compatible_model_profiles.includes(profile)
   )), [generationTargets, profile]);
   const remoteConnections = useMemo(() => {
     const unique = new Map<string, GenerationTarget>();
@@ -310,9 +313,9 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
 
   function changeModelProfile(modelProfile: string) {
     const nextTarget = generationTargets.find((target) => (
-      (!target.compatible_model_profiles.length || target.compatible_model_profiles.includes(modelProfile))
+      target.compatible_model_profiles.includes(modelProfile)
       && target.remote_profile_id === selectedRemoteId
-    )) || generationTargets.find((target) => !target.compatible_model_profiles.length || target.compatible_model_profiles.includes(modelProfile));
+    )) || generationTargets.find((target) => target.compatible_model_profiles.includes(modelProfile));
     const nextSettings = nextTarget ? applyGenerationRecipe(generationSettings, nextTarget) : generationSettings;
     if (nextTarget) setSelectedTarget(targetKey(nextTarget));
     editDraft({model_profile: modelProfile, generation_settings: nextSettings});
@@ -1040,6 +1043,7 @@ export function WorkbenchPage({remoteEnabled = false, naturalLanguageEnabled = f
           <div className="generation-recipe-note">
             <span>配方说明</span>
             <p>{activeGenerationRecipe?.notes || (generationSettings.preset_id === "custom" ? "参数已偏离配方，提交时仍会按当前工作流能力校验。" : "选择工作流后加载对应的 V3 生成配方。")}</p>
+            {activeTarget?.workflow_notes && <small>{activeTarget.workflow_notes}</small>}
           </div>
           <details className="generation-advanced" open>
             <summary><span>高级参数</span><small>尺寸、Steps、CFG、采样器与随机种子</small></summary>

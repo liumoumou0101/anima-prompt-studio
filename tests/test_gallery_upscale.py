@@ -391,6 +391,36 @@ def test_choose_txt2img_workflow_prefers_base_quality_for_anima_base():
     assert chosen.id.startswith("01")
 
 
+@pytest.mark.parametrize(
+    ("model", "baseline_id", "experiment_id"),
+    [
+        ("anima_turbo_v1_1", "23_Turbo_v1.1", "26_Turbo_v1.1"),
+        ("animayume_v1_0_final", "24_AnimaYume", "27_AnimaYume"),
+        ("miaomiao_harem_anima_v1_6", "25_MiaoMiao", "28_MiaoMiao"),
+    ],
+)
+def test_choose_txt2img_workflow_keeps_new_model_baseline_as_default(
+    model,
+    baseline_id,
+    experiment_id,
+):
+    profiles = [
+        _txt2img_profile(experiment_id, model),
+        _txt2img_profile(baseline_id, model),
+    ]
+
+    chosen = choose_txt2img_workflow(profiles, model)
+
+    assert chosen is not None
+    assert chosen.id == baseline_id
+
+
+def test_choose_txt2img_workflow_never_falls_back_to_incompatible_model():
+    profiles = [_txt2img_profile("01___Base_Quality_T2I", "anima_base_v1")]
+
+    assert choose_txt2img_workflow(profiles, "animayume_v1_0_final") is None
+
+
 def test_build_gallery_regen_job_requires_prompt_and_keeps_size():
     with pytest.raises(GalleryUpscaleError, match="提示词"):
         build_gallery_regen_job({"width": 640, "height": 832}, workflow_id="01", count=2)
