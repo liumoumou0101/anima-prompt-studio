@@ -32,6 +32,7 @@ from .translation import (
     build_v2_local_translation_adapter,
 )
 from .comfy_access import COMFY_ACCESS_URL, ManagedComfyAccess
+from .packaged_workflows import ensure_packaged_workflow_profiles
 
 __all__ = [
     "BRIDGE_SCHEMA",
@@ -58,4 +59,5 @@ __all__ = [
     "build_v2_local_translation_adapter",
     "COMFY_ACCESS_URL",
     "ManagedComfyAccess",
+    "ensure_packaged_workflow_profiles",
 ]
