@@ -9,7 +9,7 @@ from anima_prompt_studio_v3.adapters.v2 import ensure_packaged_workflow_profiles
 def test_packaged_community_workflows_seed_a_new_v2_database(tmp_path: Path) -> None:
     database = tmp_path / "v2.db"
 
-    assert ensure_packaged_workflow_profiles(database) == 4
+    assert ensure_packaged_workflow_profiles(database) == 6
     assert ensure_packaged_workflow_profiles(database) == 0
 
     repository = SQLiteRepository(database)
@@ -22,3 +22,5 @@ def test_packaged_community_workflows_seed_a_new_v2_database(tmp_path: Path) -> 
     assert profiles["25_MiaoMiao_Harem_ANIMA_v1.6"].runtime_assets["text_encoder"] == "miaomiaoHarem_anima16_txt.safetensors"
     assert profiles["27_AnimaYume"].api_workflow["902"]["class_type"] == "AnimaLayerReplayPatcher"
     assert profiles["28_MiaoMiao"].compatible_model_profiles == ["miaomiao_harem_anima_v1_6"]
+    assert profiles["23_Turbo_v1.1"].runtime_assets["checkpoint"] == "anima-turbo-v1.1.safetensors"
+    assert profiles["26_Turbo_v1.1"].api_workflow["901"]["class_type"] == "AnimaNormalizedAttentionGuidance"
