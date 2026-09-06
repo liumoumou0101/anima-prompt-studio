@@ -107,6 +107,8 @@ class WorkflowRenderer:
             checkpoint_logical_name,
             template_checkpoint or checkpoint_logical_name,
         )
+        if workflow_profile.runtime_assets.get("server_binding") == "v1":
+            checkpoint = template_checkpoint
         params = job.generation_params
         common_values: dict[str, Any] = {
             "positive_prompt": job.positive_prompt,

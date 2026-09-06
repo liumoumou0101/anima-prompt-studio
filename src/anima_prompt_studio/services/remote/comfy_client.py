@@ -80,6 +80,10 @@ class ComfyUIClient:
             class_type = str(node.get("class_type", ""))
             definition = object_info.get(class_type, {})
             input_groups = definition.get("input", {}) if isinstance(definition, dict) else {}
+            required = input_groups.get("required", {}) if isinstance(input_groups, dict) else {}
+            for required_name in required:
+                if required_name not in node.get("inputs", {}):
+                    errors.append(f"节点 {node_id} ({class_type}) 缺少必需输入 {required_name}")
             specifications: dict[str, Any] = {}
             for group_name in ("required", "optional"):
                 group = input_groups.get(group_name, {}) if isinstance(input_groups, dict) else {}
@@ -104,6 +108,11 @@ class ComfyUIClient:
         if self._object_info_cache is None:
             self._object_info_cache = self._get_json("/object_info")
         return self._object_info_cache
+
+    def object_info(self, *, refresh: bool = False) -> dict[str, Any]:
+        if refresh:
+            self._object_info_cache = None
+        return self._object_info()
 
     def submit(self, workflow: dict[str, Any], client_id: str, prompt_id: str) -> str:
         result = self._post_json(

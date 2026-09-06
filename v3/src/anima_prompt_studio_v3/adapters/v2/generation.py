@@ -143,6 +143,7 @@ class CandidateToV2PromptJobAdapter:
         positive = positive_prompt.strip()
         if not positive:
             raise ValueError("英文直出缺少正向提示词。")
+        negative = negative_prompt.strip()
 
         generation_params = GenerationParams(
             width=settings.width or model.default_width,
@@ -161,7 +162,7 @@ class CandidateToV2PromptJobAdapter:
             model_profile_id=model.id,
             generation_preset_id=settings.preset_id,
             positive_prompt=positive,
-            negative_prompt=negative_prompt,
+            negative_prompt=negative,
             compiled_prompt_state=ItemState.LOCKED,
             prompt_origin="user_edited",
             generation_params=generation_params,

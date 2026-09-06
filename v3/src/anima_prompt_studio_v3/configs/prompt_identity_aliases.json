@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "description": "Explicit Chinese name spellings absent from the tag pack. Only used for faithful translation when the canonical tag exists; never auto-confirms a character entity.",
+  "aliases": {
+    "尼肥皮托乌": "neferpitou",
+    "尼飞彼多": "neferpitou",
+    "尼菲彼多": "neferpitou"
+  }
+}

@@ -1173,3 +1173,36 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* Phase 1: 提示词小助手 LLM 生成入口 */
+.llm-generate-button { border-color: #6d64a0; color: var(--accent-bright); background: #201e2c; }
+.llm-generate-button:hover:not(:disabled) { border-color: var(--accent); background: #262234; }
+.llm-generate-button:disabled { opacity: .45; cursor: not-allowed; }
+.llm-prompt-result { margin: 0 0 16px; padding: 14px 16px; border: 1px solid #303644; border-radius: 10px; background: #14161f; }
+.llm-prompt-header { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.llm-prompt-header strong { color: var(--accent-bright); font-size: 13px; }
+.llm-prompt-header span { color: #777f91; font: 600 8px/1 "Cascadia Code", monospace; letter-spacing: .12em; text-transform: uppercase; }
+.llm-prompt-result .prompt-block { margin-top: 10px; }
+.llm-prompt-note { margin: 10px 0 0; color: #8992a5; font-size: 11px; line-height: 1.6; }
+.llm-prompt-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.llm-prompt-actions small { color: #777f91; font-size: 11px; }
+
+/* LLM 服务配置面板 */
+.llm-settings { margin: 0 0 14px; border: 1px solid #303644; border-radius: 10px; background: #14161f; }
+.llm-settings summary { padding: 12px 14px; cursor: pointer; color: var(--accent-bright); font-size: 12px; font-weight: 700; }
+.llm-settings-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 12px 14px 14px; align-items: end; }
+.llm-settings-grid label { display: grid; gap: 6px; color: #8992a5; font-size: 11px; }
+.llm-settings-grid select, .llm-settings-grid input { min-height: 36px; padding: 0 10px; border: 1px solid #353b49; color: #e2e4e9; background: #0d1016; font-size: 11px; }
+.llm-settings-save { min-height: 36px; align-self: end; }
+.llm-settings-note { margin: 0; padding: 0 14px 12px; color: #777f91; font-size: 11px; line-height: 1.6; }
+.llm-settings code { color: var(--accent-bright); }
+.llm-settings .workspace-notice { margin: 0 14px 12px; }
+.llm-settings-grid { margin: 0; border: 0; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.llm-settings-grid input { min-width: 0; width: 100%; box-sizing: border-box; }
+.llm-settings-grid input[type="checkbox"] { width: auto; min-height: auto; justify-self: start; }
+.llm-settings-grid .llm-key-clear { display: flex; align-items: center; }
+.llm-settings-actions { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; }
+.llm-settings > [role="alert"], .llm-settings > [role="status"] { padding: 0 14px; overflow-wrap: anywhere; }
+.llm-prompt-result > label { display: grid; gap: 6px; margin: 12px 0; }
+.llm-prompt-result textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+@media (max-width: 700px) { .llm-settings-grid { grid-template-columns: 1fr; } }

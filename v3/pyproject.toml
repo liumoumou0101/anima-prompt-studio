@@ -13,6 +13,7 @@ dependencies = [
   "fastapi>=0.116,<1",
   "pydantic>=2.7,<3",
   "uvicorn>=0.35,<1",
+  "httpx>=0.27,<1",
 ]
 
 [project.scripts]
@@ -37,7 +38,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-anima_prompt_studio_v3 = ["configs/model_profiles/*.json", "configs/workflow_profiles/*.json"]
+anima_prompt_studio_v3 = ["configs/model_profiles/*.json", "configs/workflow_profiles/*.json", "configs/workflow_catalog.json", "configs/prompt_identity_aliases.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "../src"]

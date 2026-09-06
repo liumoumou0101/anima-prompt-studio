@@ -30,6 +30,8 @@ from anima_prompt_studio.domain.models import PromptJob
 
 from .generation import V2PreparedGeneration
 from ...core.generation_recipes import build_workflow_recipe_contract, validate_job_recipe
+from .workflow_catalog import WorkflowCatalog, catalog
+from .packaged_workflows import workflow_revision
 
 
 class GenerationQueueError(RuntimeError):
@@ -129,12 +131,14 @@ class V2GenerationQueueService:
         existing_artifacts: dict[str, list[GenerationArtifact]] | None = None,
         target_lister: GenerationTargetLister | None = None,
         passphrase_vault: EphemeralPassphraseVault | None = None,
+        recovery_resolver: Callable[[GenerationRun], V2GenerationTarget] | None = None,
     ) -> None:
         if max_pending < 1:
             raise ValueError("max_pending 必须至少为 1。")
         self._target_resolver = target_resolver
         self._target_lister = target_lister
         self._passphrase_vault = passphrase_vault
+        self._recovery_resolver = recovery_resolver
         self._coordinator_factory = coordinator_factory or self._default_coordinator
         self._on_run_saved = on_run_saved
         self._on_artifact_saved = on_artifact_saved
@@ -209,6 +213,8 @@ class V2GenerationQueueService:
             request_json={
                 "prompt_job": job.model_dump(mode="json"),
                 "local_queue": {"idempotency_key": idempotency_key},
+                "workflow_snapshot": target_snapshot.workflow_profile.model_dump(mode="json"),
+                "workflow_revision": workflow_revision(target_snapshot.workflow_profile),
             },
         )
         request = _QueuedGeneration(
@@ -269,7 +275,7 @@ class V2GenerationQueueService:
             remote_profile_id = run.remote_profile_id
             workflow_profile_id = run.workflow_profile_id
 
-        target = self._target_resolver(remote_profile_id, workflow_profile_id)
+        target = self._recovery_resolver(run) if self._recovery_resolver else self._target_resolver(remote_profile_id, workflow_profile_id)
         self._validate_remote_target(target)
         target_snapshot = V2GenerationTarget(
             remote_profile=target.remote_profile.model_copy(deep=True),
@@ -402,6 +408,10 @@ class V2GenerationQueueService:
                     self._condition.notify_all()
 
     def _record_update(self, run: GenerationRun) -> None:
+        # The coordinator emits COMPLETED before returning its artifact list.
+        # Publish completion only after artifacts have been persisted together.
+        if run.state == GenerationRunState.COMPLETED:
+            return
         snapshot = run.model_copy(deep=True)
         with self._condition:
             self._runs[run.id] = snapshot
@@ -409,12 +419,12 @@ class V2GenerationQueueService:
 
     def _record_result(self, result: ExecutionResult) -> None:
         with self._condition:
-            self._runs[result.run.id] = result.run.model_copy(deep=True)
-            self._artifacts[result.run.id] = [item.model_copy(deep=True) for item in result.artifacts]
-            self._save_run(result.run)
             if self._on_artifact_saved:
                 for artifact in result.artifacts:
                     self._on_artifact_saved(artifact.model_copy(deep=True))
+            self._save_run(result.run)
+            self._artifacts[result.run.id] = [item.model_copy(deep=True) for item in result.artifacts]
+            self._runs[result.run.id] = result.run.model_copy(deep=True)
 
     def _save_run(self, run: GenerationRun) -> None:
         if self._on_run_saved:
@@ -453,6 +463,7 @@ def build_v2_generation_queue(
     """Build a queue from existing V2 profiles, workflows and secure credentials."""
 
     database = Path(v2_database).expanduser().resolve()
+    workflows_manager = WorkflowCatalog(database)
     secrets = credential_store or CredentialStore()
     passphrases = EphemeralPassphraseVault()
     repository = SQLiteRepository(database)
@@ -465,11 +476,10 @@ def build_v2_generation_queue(
     finally:
         repository.close()
 
-    def target_resolver(remote_profile_id: str, workflow_profile_id: str) -> V2GenerationTarget:
+    def target_resolver(remote_profile_id: str, workflow_profile_id: str, frozen=None) -> V2GenerationTarget:
         repository = SQLiteRepository(database)
         try:
             profile = repository.get_remote_profile(remote_profile_id)
-            workflow = repository.get_workflow_profile(workflow_profile_id)
             output_root = Path(repository.get_setting(
                 "generation_output_root",
                 str(Path.home() / "Pictures" / "AnimaPromptStudio"),
@@ -480,10 +490,14 @@ def build_v2_generation_queue(
         if profile.auth_type == RemoteAuthType.PASSWORD and not password:
             raise ValueError("当前云主机没有可用的安全存储密码。")
         passphrase = passphrases.get(profile.id) if profile.auth_type == RemoteAuthType.PRIVATE_KEY else ""
+        credentials = RemoteCredentials(password=password, passphrase=passphrase)
+        workflow = WorkflowProfile.model_validate(frozen) if frozen else workflows_manager.resolve_for_submission(remote_profile_id, workflow_profile_id, credentials)
+        if workflows_manager.remote(remote_profile_id) != profile:
+            raise ValueError("检测期间连接配置已更改，请重新提交。")
         return V2GenerationTarget(
             remote_profile=profile,
             workflow_profile=workflow,
-            credentials=RemoteCredentials(password=password, passphrase=passphrase),
+            credentials=credentials,
             output_root=output_root,
         )
 
@@ -491,9 +505,10 @@ def build_v2_generation_queue(
         repository = SQLiteRepository(database)
         try:
             profiles = repository.list_remote_profiles(enabled_only=True)
-            workflows = repository.list_workflow_profiles()
+            workflows = [p for p, _ in catalog(database)]
         finally:
             repository.close()
+        reports = {profile.id: {i["workflow_id"]: i for i in workflows_manager.report(profile.id)["items"]} for profile in profiles}
         return [
             {
                 "remote_profile_id": profile.id,
@@ -508,6 +523,10 @@ def build_v2_generation_queue(
                 "host_fingerprint_ready": bool(profile.known_host_fingerprint),
                 "auth_type": profile.auth_type.value,
                 "private_key_passphrase_configured": passphrases.has(profile.id),
+                "availability": reports[profile.id][workflow.id]["state"],
+                "availability_errors": reports[profile.id][workflow.id]["errors"],
+                "experimental": reports[profile.id][workflow.id]["experimental"],
+                "template_revision": reports[profile.id][workflow.id]["revision"],
                 **build_workflow_recipe_contract(workflow),
             }
             for profile in profiles
@@ -525,10 +544,15 @@ def build_v2_generation_queue(
                 repository.close()
         return save
 
+    def save_run(repository, run):
+        repository.save_generation_run(run)
+        if run.error_code in {"missing_nodes", "invalid_workflow_inputs"}:
+            workflows_manager.invalidate(run.remote_profile_id)
+
     return V2GenerationQueueService(
         target_resolver,
         on_job_saved=with_repository(lambda repository, job: repository.save_job(job)),
-        on_run_saved=with_repository(lambda repository, run: repository.save_generation_run(run)),
+        on_run_saved=with_repository(save_run),
         on_artifact_saved=with_repository(
             lambda repository, artifact: repository.save_generation_artifact(artifact)
         ),
@@ -538,6 +562,7 @@ def build_v2_generation_queue(
         existing_artifacts=existing_artifacts,
         target_lister=target_lister,
         passphrase_vault=passphrases,
+        recovery_resolver=lambda run: target_resolver(run.remote_profile_id, run.workflow_profile_id, run.request_json.get("workflow_snapshot")),
     )
 
 

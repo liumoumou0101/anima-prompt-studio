@@ -93,6 +93,23 @@ class TranslationRequest(ApiModel):
     direction: Literal["zh_en", "en_zh"] = "zh_en"
 
 
+class PromptGenerateRequest(ApiModel):
+    source_text: str = Field(min_length=1, max_length=10_000)
+    excluded_text: str = Field(default="", max_length=10_000)
+    mode: Literal["faithful", "expand"] = "faithful"
+    rule_id: str | None = Field(default=None, min_length=1, max_length=200)
+    source_language: str = Field(default="mixed", pattern=r"^(zh|en|mixed)$")
+
+
+class LlmSettingsUpdateRequest(ApiModel):
+    service_id: str = Field(min_length=1, max_length=100)
+    model_name: str | None = Field(default=None, min_length=1, max_length=200)
+    api_key: SecretStr | None = Field(default=None, max_length=500)
+    base_url: str | None = Field(default=None, max_length=2000)
+    service_type: Literal["openai_compatible", "ollama"] = "openai_compatible"
+    clear_api_key: bool = False
+
+
 class DirectPromptPreviewRequest(ApiModel):
     positive_prompt: str = Field(min_length=1, max_length=20_000)
     negative_prompt: str = Field(default="", max_length=20_000)

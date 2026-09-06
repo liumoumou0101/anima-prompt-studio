@@ -10,6 +10,7 @@ from anima_prompt_studio.services.translation_service import (
     TranslationService,
     marian_runtime_available,
 )
+from ...core.prompt_translation import translate_prompt
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,7 @@ class V2TranslationResult:
     translated_text: str
     engine_name: str
     direction: str
+    segments: tuple[dict, ...] = ()
 
 
 class V2LocalTranslationAdapter:
@@ -45,6 +47,10 @@ class V2LocalTranslationAdapter:
             engine_name=self.engine_name,
             direction=direction,
         )
+
+    def translate_prompt(self, text: str, *, extra_terms: dict[str, str] | None = None) -> V2TranslationResult:
+        translated, segments = translate_prompt(text, self._service.zh_to_en, extra_terms=extra_terms)
+        return V2TranslationResult(translated, self.engine_name + " · 领域锚点保护", "zh_en", tuple(segments))
 
 
 def build_v2_local_translation_adapter(

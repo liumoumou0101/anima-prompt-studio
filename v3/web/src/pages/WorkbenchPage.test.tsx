@@ -49,6 +49,28 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it.each(["unchecked", "stale", "connection_failed", "invalid_inputs"])("keeps model, connection, workflow and recipes selectable when %s", async (availability) => {
+  const items = ["anima_base_v1", "anima_turbo_v1", "animayume_v1_0_final"].map(model => ({
+    remote_profile_id: "cloud", remote_display_name: "测试云显卡", workflow_profile_id: model,
+    workflow_display_name: `${model} 工作流`, workflow_kind: "txt2img_basic", workflow_notes: "",
+    compatible_model_profiles: [model], host_fingerprint_ready: true, auth_type: "agent",
+    private_key_passphrase_configured: false, availability, availability_errors: ["请重新检测"],
+    experimental: false, ...baseRecipeContract,
+  }));
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({items})));
+  render(<MemoryRouter><WorkbenchPage remoteEnabled /></MemoryRouter>);
+  fireEvent.change(screen.getByLabelText("模型配置"), {target: {value: "anima_base_v1"}});
+  await waitFor(() => expect(screen.getByLabelText("远程工作流")).toHaveValue("anima_base_v1"));
+  for (const model of ["anima_turbo_v1", "animayume_v1_0_final", "anima_base_v1"]) {
+    fireEvent.change(screen.getByLabelText("模型配置"), {target: {value: model}});
+    await waitFor(() => expect(screen.getByLabelText("远程工作流")).toHaveValue(model));
+    expect(screen.getByLabelText("云主机连接")).toBeEnabled();
+    expect(screen.getByLabelText("生成配方")).toBeEnabled();
+    expect(screen.getByLabelText("生成配方")).toHaveValue("stable_baseline");
+  }
+  expect(screen.getByRole("link", {name: "前往设置 → 管理工作流检测"})).toHaveAttribute("href", "/settings");
+});
+
 it("imports selected supermarket tags into the structured draft", () => {
   render(<MemoryRouter initialEntries={["/workbench?tag=maid&tag=twintails&tag=maid"]}><WorkbenchPage /></MemoryRouter>);
 
@@ -462,6 +484,7 @@ it("keeps exclusions separate and reapplies an edited scene plan without transla
   expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({excluded_text: "内衣"});
 
   fireEvent.change(within(review).getByLabelText("可编辑画面计划"), {target: {value: "A maid descending from the sky"}});
+  await waitFor(() => expect(within(review).getByRole("button", {name: "应用译文修改"})).toBeEnabled());
   fireEvent.click(within(review).getByRole("button", {name: "应用译文修改"}));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -929,6 +952,8 @@ it("annotates English scene plans with Chinese back-translation and lets users d
   const sceneDraft: SceneDraft = {
     source_text: sourceText,
     translated_text: translatedText,
+    translation_review: {missing_anchors: [{source: "举起相机", expected: "holding up a camera", type: "action"}], requires_review: true, note: "检查领域锚点，不代表全部语义已验证。"},
+    translation_segments: [{source: sourceText, english: translatedText, start: 0, end: sourceText.length, status: "machine_review"}],
     confirmed: [
       {id: "e_local_confirmed_1", text: "博丽灵梦", canonical_tag: "hakurei_reimu", source: "source_exact", fact_type: "character", reason: "中文原文精确匹配", source_start: 0, source_end: 4},
       {id: "e_local_confirmed_2", text: "女仆", canonical_tag: "maid", source: "source_exact", fact_type: "clothing", reason: "中文原文精确匹配", source_start: 5, source_end: 7},
@@ -964,6 +989,9 @@ it("annotates English scene plans with Chinese back-translation and lets users d
   fireEvent.click(screen.getByRole("button", {name: "编译并生成候选"}));
 
   const review = await screen.findByRole("region", {name: "Scene Draft"});
+  expect(screen.getByText("画面保真检查")).toBeInTheDocument();
+  expect(screen.getByText("译文待核对：举起相机 → holding up a camera")).toBeInTheDocument();
+  expect(screen.getByText("逐句查看原文与译文")).toBeInTheDocument();
   expect(within(review).getByRole("region", {name: "英文画面计划的中文回译对照"})).toBeInTheDocument();
   expect(within(review).getAllByText("博丽灵梦穿着女仆装").length).toBeGreaterThan(0);
   fireEvent.click(within(review).getByRole("button", {name: "移除 博丽灵梦"}));

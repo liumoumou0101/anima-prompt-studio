@@ -124,6 +124,9 @@ class LocalApiServer:
             raise
 
     def stop(self, *, timeout: float = 10.0) -> None:
+        workflow_jobs = getattr(self.runtime.app.state, "workflow_jobs", None)
+        if workflow_jobs is not None:
+            workflow_jobs.close()
         if self._server is not None:
             self._server.should_exit = True
         if self._thread is not None and self._thread.is_alive():

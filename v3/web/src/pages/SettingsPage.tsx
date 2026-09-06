@@ -2,6 +2,7 @@ import {useCallback, useEffect, useMemo, useState} from "react";
 import {ApiClientError, apiRequest} from "../lib/api";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
 import type {ArtistRanking} from "../lib/types";
+import {WorkflowManager} from "../components/WorkflowManager";
 
 const rankingOptions: Array<{id: ArtistRanking; label: string; detail: string}> = [
   {id: "tag_fit", label: "题材贴合", detail: "按标签关联强度排序，专项作者会靠前。"},
@@ -276,7 +277,7 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
       </aside>
       <form className="settings-form" onSubmit={(event) => void save(event)}>
         <div className="settings-form-head"><div><span className="eyebrow">REMOTE SSH</span><h2>{selected ? "编辑远程连接" : "新增远程连接"}</h2><p>连接配置与 V2 共用；保存后生成页面会自动读取最新配置。</p></div><button className="button button--primary" type="submit" disabled={saving}>{saving ? "保存中…" : "保存连接"}</button></div>
-        {notice && <div className="workspace-notice">{notice}</div>}
+        {notice && <div className="workspace-notice" role="status" style={{whiteSpace: "pre-wrap"}}>{notice}</div>}
         <fieldset>
           <legend>连接信息</legend>
           <label>显示名称<input required value={form.display_name} onChange={(event) => setForm({...form, display_name: event.target.value})} /></label>
@@ -295,6 +296,11 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
         </fieldset>
         <div className="settings-security"><strong>SSH 指纹与连接测试</strong><p>{selected?.host_fingerprint_confirmed ? "主机指纹已确认。更改地址、端口、用户名、认证方式或私钥后会自动要求重新确认。完整测试会继续验证 SSH 登录、隧道和 ComfyUI API。" : "新建连接尚未确认主机指纹。检测不会自动信任主机；请核对显示的指纹后确认保存。"}</p>{selected && <div className="host-key-actions"><button type="button" className="button button--secondary" onClick={() => void probeHostKey()} disabled={probing || testing}>{probing ? "检测中…" : "检测 SSH 指纹"}</button>{fingerprint && <><code>{fingerprint}</code><button type="button" className="button button--secondary" onClick={() => void confirmHostKey()} disabled={probing || testing}>确认并保存指纹</button></>}<button type="button" className="button button--primary" onClick={() => void testConnection()} disabled={!selected.host_fingerprint_confirmed || probing || testing}>{testing ? "正在测试 SSH 与 ComfyUI…" : "测试完整连接"}</button></div>}</div>
         <div className="settings-security">
+          <strong>模型与工作流检测</strong>
+          <p>检查已保存的服务器连接是否具备内置模板所需节点和模型文件选项。通过检测不代表已完成实际生图验证。</p>
+          <p>模型依赖检测与文件映射请使用下方“管理工作流”，结果按当前服务器保存。</p>
+        </div>
+        <div className="settings-security">
           <strong>ComfyUI 网页维护入口</strong>
           <p>云端 8188 继续禁止公网直连。项目运行期间通过本机 SSH 隧道访问，关闭项目后入口自动失效。</p>
           <div className="host-key-actions">
@@ -304,6 +310,7 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
           <small>{comfyAccess?.message || "项目启动后会自动连接默认云主机；也可以选择连接后点击按钮。"}</small>
         </div>
       </form>
+      {selectedId && <WorkflowManager key={selectedId} remoteId={selectedId} password={form.password} passphrase={privateKeyPassphrase} />}
     </div>
     </>}
   </section>;

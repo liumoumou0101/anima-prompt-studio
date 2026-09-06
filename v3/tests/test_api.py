@@ -501,6 +501,49 @@ def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
     }
     assert events == ["ssh", "comfy", "close"]
 
+    monkeypatch.setattr(FakeComfyClient, "validate_workflow_nodes", lambda self, graph: ["MissingNode"], raising=False)
+    monkeypatch.setattr(FakeComfyClient, "validate_workflow_inputs", lambda self, graph: [], raising=False)
+    inspected = client.post(
+        "/api/v3/settings/remote-profiles/v3-ready/test-connection?inspect_templates=true",
+        json={},
+        headers={"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN},
+    )
+    assert inspected.status_code == 200
+    report = inspected.json()["workflow_inspection"]
+    assert report["remote_profile_id"] == "v3-ready"
+    assert len(report["items"]) == 6
+    assert all(item["state"] == "missing_nodes" for item in report["items"])
+    assert events[-1] == "close"
+
+
+def test_workflow_management_requires_session_and_imports_copies(reference_db, tmp_path):
+    database = tmp_path / "workflows.db"
+    from anima_prompt_studio.domain.execution_models import RemoteProfile
+    from anima_prompt_studio_v3.adapters.v2.workflow_catalog import catalog
+    repo = SQLiteRepository(database)
+    repo.save_remote_profile(RemoteProfile(id="workflow-server", display_name="server", ssh_host="example.invalid", ssh_user="tester", known_host_fingerprint="SHA256:test"))
+    repo.close()
+    runtime = create_api_runtime(reference_db, v2_database=database)
+    client = TestClient(runtime.app, base_url=ORIGIN)
+    path = "/api/v3/workflows/servers/workflow-server"
+    assert client.get(path).status_code == 401
+    exchanged = client.post("/api/v3/session/exchange", json={"bootstrap_token": runtime.bootstrap_token}, headers={"Origin": ORIGIN})
+    headers = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
+    report = client.get(path, headers=headers)
+    assert report.status_code == 200
+    assert len(report.json()["items"]) == 6
+    assert all(i["state"] == "unchecked" for i in report.json()["items"])
+    exported = client.get("/api/v3/workflows/export/23_Turbo_v1.1", headers=headers)
+    imported = client.post("/api/v3/workflows/import", json=exported.json(), headers=headers)
+    assert imported.status_code == 200
+    assert imported.json()["id"].startswith("user:")
+    assert len(catalog(database)) == 7
+    disabled = client.put("/api/v3/workflows/23_Turbo_v1.1/enabled", json={"enabled": False}, headers=headers)
+    assert disabled.status_code == 200
+    diagnostics = client.get(path + "/diagnostics", headers=headers).text
+    assert "example.invalid" not in diagnostics
+    assert "safetensors" not in diagnostics
+
 
 def test_v3_settings_opens_managed_comfy_browser_access(
     reference_db: Path,
@@ -606,7 +649,8 @@ def test_local_api_server_owns_comfy_access_lifecycle(
 
     events: list[str] = []
     v2_database = tmp_path / "v2.db"
-    v2_database.write_bytes(b"placeholder")
+    from anima_prompt_studio.repositories import SQLiteRepository
+    SQLiteRepository(v2_database).close()
 
     class FakeQueue:
         def shutdown(self, **_kwargs) -> None:
@@ -1016,7 +1060,7 @@ def test_local_natural_candidate_requires_user_confirmation_for_fact_ownership(
     literal = next(item for item in third_payload["candidates"] if item["lane"] == "literal")
     hybrid = next(item for item in third_payload["candidates"] if item["lane"] == "hybrid")
     assert literal["positive_prompt"] == selected_payload["candidates"][0]["positive_prompt"]
-    assert "hakurei reimu" in literal["positive_prompt"]
+    assert "hakurei reimu" in literal["positive_prompt"].lower()
     assert "hakurei reimu wearing maid" in hybrid["positive_prompt"]
 
 
@@ -1163,7 +1207,9 @@ def test_local_natural_does_not_auto_confirm_character_identity(
     identity = [item["canonical_tag"] for item in payload["scene_draft"]["suggestions"] if item["source"] == "identity_candidate"]
     assert confirmed == ["maid"]
     assert identity == ["hakurei_reimu"]
-    assert "hakurei reimu" not in payload["candidates"][0]["positive_prompt"]
+    # Explicit source name may be faithfully translated; it is still not an
+    # automatically confirmed character tag/entity (asserted above).
+    assert "hakurei_reimu" not in {tag["name"] for tag in payload["candidates"][0]["tags"]}
     assert any("疑似角色或作品" in note for note in payload["scene_draft"]["risk_notes"])
 
     typed = client.post(
@@ -1449,7 +1495,7 @@ def test_structured_workbench_reuses_scene_draft_translation_when_selecting_tags
     assert response.status_code == 200
     payload = response.json()
     assert payload["local_translation"]["engine"] == "当前工作台译文"
-    assert payload["candidates"][0]["positive_prompt"] == "maid"
+    assert payload["candidates"][0]["positive_prompt"] == "unmapped prose baseline, maid"
 
 
 def test_local_natural_candidate_keeps_a_prose_baseline_when_no_tag_is_confirmed(
@@ -1511,7 +1557,7 @@ def test_local_natural_candidate_applies_only_explicitly_selected_suggestions(
     assert response.status_code == 200
     payload = response.json()
     assert payload["local_translation"]["engine"] == "当前工作台译文"
-    assert payload["candidates"][0]["positive_prompt"] == "maid"
+    assert payload["candidates"][0]["positive_prompt"] == "unmapped prose baseline, maid"
     assert [item["canonical_tag"] for item in payload["scene_draft"]["confirmed"]] == ["maid"]
     assert payload["scene_draft"]["confirmed"][0]["source"] == "user_selected"
     assert payload["intent"]["scene_plan_en"]

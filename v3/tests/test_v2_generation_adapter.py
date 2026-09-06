@@ -255,13 +255,49 @@ def test_ui_independent_queue_is_fifo_idempotent_and_cancels_waiting_job(tmp_pat
         queue.shutdown(timeout=2)
 
 
-def test_v2_database_queue_factory_reuses_profiles_and_persists_results(tmp_path: Path) -> None:
+def seed_capabilities(database):
+    import time
+    from anima_prompt_studio_v3.adapters.v2.workflow_catalog import WorkflowCatalog, fingerprint
+    manager = WorkflowCatalog(database)
+    manager._write("workflow_capabilities:remote-1", {
+        "checked_at": time.time(), "fingerprint": fingerprint(remote_profile()),
+        "object_info": {n["class_type"]: {} for n in workflow_profile().api_workflow.values()},
+    })
+
+
+def test_completion_callback_does_not_publish_before_artifacts():
+    queue = V2GenerationQueueService(lambda *args: None)
+    try:
+        run = GenerationRun(prompt_job_id="test-job", remote_profile_id="r", workflow_profile_id="w")
+        queue._record_update(run)
+        finished = run.model_copy(update={"state": GenerationRunState.COMPLETED})
+        queue._record_update(finished)
+        assert queue.get(run.id).state == GenerationRunState.DRAFT
+        from anima_prompt_studio.services.remote.execution_coordinator import ExecutionResult
+        queue._record_result(ExecutionResult(run=finished, artifacts=[]))
+        assert queue.get(run.id).state == GenerationRunState.COMPLETED
+    finally:
+        queue.shutdown()
+
+
+@pytest.mark.parametrize("freshness", ["ready", "unchecked", "stale"])
+def test_v2_database_queue_factory_reuses_profiles_and_persists_results(tmp_path: Path, monkeypatch, freshness) -> None:
     database = tmp_path / "v2.db"
     repository = SQLiteRepository(database)
     repository.save_remote_profile(remote_profile())
     repository.save_workflow_profile(workflow_profile())
     repository.set_setting("generation_output_root", str(tmp_path / "outputs"))
     repository.close()
+    from anima_prompt_studio_v3.adapters.v2.workflow_catalog import WorkflowCatalog
+    checks = []
+    if freshness != "unchecked":
+        seed_capabilities(database)
+    if freshness == "stale":
+        WorkflowCatalog(database).invalidate("remote-1")
+    def inspect(self, remote_id, credentials):
+        checks.append(remote_id)
+        seed_capabilities(database)
+    monkeypatch.setattr(WorkflowCatalog, "inspect", inspect)
 
     def coordinator_factory(output_root: Path, on_update):
         return RemoteExecutionCoordinator(
@@ -282,6 +318,7 @@ def test_v2_database_queue_factory_reuses_profiles_and_persists_results(tmp_path
             idempotency_key="persisted-run",
         )
         wait_for_state(queue, submitted.id, GenerationRunState.COMPLETED)
+        assert len(checks) == (0 if freshness == "ready" else 1)
     finally:
         queue.shutdown(timeout=2)
 
@@ -315,6 +352,7 @@ def test_database_queue_uses_private_key_passphrase_only_from_process_memory(tmp
     repository.save_workflow_profile(workflow_profile())
     repository.set_setting("generation_output_root", str(tmp_path / "outputs"))
     repository.close()
+    seed_capabilities(database)
     opened_with: list[str] = []
 
     class CapturingTunnel(FakeTunnel):
