@@ -21,6 +21,19 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
+it("checks template dependencies on the selected server and displays missing nodes", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [{...profile, host_fingerprint_confirmed: true}], workflows: [], credential_store_available: true})))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ranking: "tag_fit"})))
+    .mockResolvedValueOnce(new Response(JSON.stringify({remote_profile_id: "remote-new", checked_at: null, items: [{workflow_id: "turbo", revision: "abc", origin: "official", experimental: true, display_name: "Turbo experiment", state: "missing_nodes", errors: ["缺少节点 AnimaLayerReplayPatcher"], assets: []}]})));
+  render(<SettingsPage remoteEnabled />);
+  const button = await screen.findByRole("button", {name: "管理工作流"});
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.click(button);
+  expect(await screen.findByText("缺少节点 AnimaLayerReplayPatcher")).toBeInTheDocument();
+  expect(fetchMock.mock.calls[2][0]).toBe("/api/v3/workflows/servers/remote-new");
+});
+
 it("confirms a new host fingerprint and tests SSH plus ComfyUI entirely in V3", async () => {
   const ready = {...profile, host_fingerprint_confirmed: true};
   const settings = (item = profile) => ({items: [item], workflows: [], credential_store_available: true});

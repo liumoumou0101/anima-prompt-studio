@@ -15,24 +15,23 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
 try:
-    from ..adapters.v2 import (
+    from ..runtime import (
         BRIDGE_SCHEMA,
-        CandidateToV2PromptJobAdapter,
+        CandidateToPromptJobAdapter,
         GenerationQueueError,
         GenerationQueueFullError,
         GenerationRunActionError,
         GenerationRunNotFoundError,
-        GalleryUpscaleError,
-        IntentParseError,
-        IntentParserUnavailableError,
-        V2GenerationSettings,
+        GenerationSettings,
     )
+    from ..adapters.v2.gallery import GalleryUpscaleError
+    from ..adapters.v2.natural_language import IntentParseError, IntentParserUnavailableError
 except ModuleNotFoundError as exc:
     if exc.name != "anima_prompt_studio" and not (exc.name or "").startswith("anima_prompt_studio."):
         raise
     BRIDGE_SCHEMA = "v3-v2-generation-bridge/1"
-    CandidateToV2PromptJobAdapter = None  # type: ignore[assignment,misc]
-    V2GenerationSettings = None  # type: ignore[assignment,misc]
+    CandidateToPromptJobAdapter = None  # type: ignore[assignment,misc]
+    GenerationSettings = None  # type: ignore[assignment,misc]
     GenerationQueueError = RuntimeError  # type: ignore[assignment,misc]
     GenerationQueueFullError = RuntimeError  # type: ignore[assignment,misc]
     GenerationRunActionError = RuntimeError  # type: ignore[assignment,misc]
@@ -67,6 +66,7 @@ from ..core.composition import (
     strip_focus_leftover_tags,
 )
 from ..data import DataContractError, ReferenceDataStore
+from ..core.prompt_translation import domain_conflict, review_translation
 from ..data.store import ARTIST_RANKING_MODES, ARTIST_RANKING_TAG_FIT
 from ..domain import (
     CandidateArtist,
@@ -98,9 +98,11 @@ from .models import (
     GenerationSubmitRequest,
     IntentCandidateRequest,
     IntentParseRequest,
+    LlmSettingsUpdateRequest,
     LocalNaturalCandidateRequest,
     PrivateKeyPassphraseRequest,
     PreferredRemoteProfileRequest,
+    PromptGenerateRequest,
     RemoteConnectionTestRequest,
     RemoteProfileSettingsRequest,
     RemoteHostFingerprintRequest,
@@ -158,7 +160,7 @@ ARTIST_RANKING_SETTING = "v3_artist_ranking"
 def _artist_ranking_from_database(database: Path | None) -> str:
     if database is None or not Path(database).is_file():
         return ARTIST_RANKING_TAG_FIT
-    from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+    from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
     repository = SQLiteRepository(database)
     try:
@@ -226,7 +228,7 @@ def create_api_runtime(
     app.state.translation_service = translation_service
     app.state.comfy_access = comfy_access
     profiles = ModelProfileRegistry.built_in()
-    generation_bridge = CandidateToV2PromptJobAdapter() if CandidateToV2PromptJobAdapter is not None else None
+    generation_bridge = CandidateToPromptJobAdapter() if CandidateToPromptJobAdapter is not None else None
 
     @app.middleware("http")
     async def local_request_guard(request: Request, call_next):
@@ -723,6 +725,7 @@ def create_api_runtime(
                 item.text for item in payload.elements if item.state == IntentState.EXCLUDED
             )
             contains_cjk = _contains_cjk(positive_text)
+            translation_segments = []
             if payload.translated_text:
                 translated_text = payload.translated_text
                 translation_engine = "当前工作台译文"
@@ -731,11 +734,12 @@ def create_api_runtime(
                 translation_engine = "英文原文与本地标签索引"
             else:
                 try:
-                    translated = translator.translate(positive_text, direction="zh_en")
+                    translated = _translate_workbench_prompt(translator, positive_text, database)
                 except (RuntimeError, ValueError) as exc:
                     raise ApiError(422, "translation_failed", str(exc)) from exc
                 translated_text = translated.translated_text
                 translation_engine = translated.engine_name
+                translation_segments = list(getattr(translated, "segments", ()))
             with ReferenceDataStore(database) as store:
                 intent, scene_draft = _local_natural_intent(
                     positive_text,
@@ -759,12 +763,99 @@ def create_api_runtime(
                 "local_only": True,
             }
             response["scene_draft"] = scene_draft
+            scene_draft["translation_segments"] = translation_segments
             return response
         try:
             intent = _workbench_intent(payload)
         except ValueError as exc:
             raise ApiError(422, "invalid_workbench_intent", str(exc)) from exc
         return candidate_response(intent, payload.model_profile, database)
+
+    @app.post(f"{API_PREFIX}/workbench/prompt", dependencies=[Depends(require_session)])
+    async def generate_workbench_prompt(payload: PromptGenerateRequest) -> dict[str, object]:
+        """Generate an explicit, reviewable positive/negative pair; never enqueue here."""
+        try:
+            from .llm_workbench import generate_prompt
+            return await generate_prompt(payload)
+        except ImportError as exc:  # pragma: no cover - 依赖未安装时明确降级
+            raise ApiError(
+                503,
+                "llm_dependency_missing",
+                f"LLM 内核依赖未安装：{exc}",
+                retryable=True,
+            ) from exc
+
+        except TimeoutError as exc:
+            raise ApiError(504, "llm_timeout", "LLM 请求超时；未提交生图。", retryable=True) from exc
+        except ValueError as exc:
+            raise ApiError(422, "invalid_llm_request", str(exc)) from exc
+        except RuntimeError as exc:
+            raise ApiError(502, "llm_generation_failed", str(exc), retryable=True) from exc
+
+    @app.get(f"{API_PREFIX}/llm/settings", dependencies=[Depends(require_session)])
+    def get_llm_settings() -> dict[str, object]:
+        """返回 LLM 服务商与模型列表（API Key 掩码），供前台配置使用。"""
+        try:
+            from ..prompt_assistant.config_manager import config_manager
+        except ImportError as exc:  # pragma: no cover - 依赖未安装时降级
+            raise ApiError(503, "llm_dependency_missing", f"LLM 内核依赖未安装：{exc}", retryable=True) from exc
+        services = config_manager.get_all_services() or []
+        service_items: list[dict[str, object]] = []
+        for svc in services:
+            if svc.get("type") not in ("openai_compatible", "ollama"):
+                continue
+            api_key = svc.get("api_key") or ""
+            service_items.append({
+                "id": svc.get("id", ""),
+                "name": svc.get("name") or svc.get("id", ""),
+                "type": svc.get("type", ""),
+                "base_url": svc.get("base_url") or "",
+                "api_key_masked": "***" if api_key else "",
+                "api_key_exists": bool(api_key),
+                "llm_models": [
+                    {
+                        "name": m.get("name", ""),
+                        "display_name": m.get("display_name") or "",
+                        "is_default": bool(m.get("is_default")),
+                    }
+                    for m in (svc.get("llm_models") or [])
+                ],
+            })
+        current = config_manager.get_llm_config()
+        return {
+            "services": service_items,
+            "current": {
+                "service": current.get("provider") or "",
+                "model": current.get("model") or "",
+            },
+        }
+
+    @app.put(f"{API_PREFIX}/llm/settings", dependencies=[Depends(require_session)])
+    def update_llm_settings(payload: LlmSettingsUpdateRequest) -> dict[str, object]:
+        try:
+            from ..prompt_assistant.config_manager import config_manager
+        except ImportError as exc:  # pragma: no cover - 依赖未安装时降级
+            raise ApiError(503, "llm_dependency_missing", f"LLM 内核依赖未安装：{exc}", retryable=True) from exc
+        from .llm_workbench import save_settings
+        try:
+            save_settings(config_manager, payload)
+        except ValueError as exc:
+            raise ApiError(422, "llm_config_invalid", str(exc)) from exc
+        except RuntimeError as exc:
+            raise ApiError(500, "llm_config_failed", str(exc)) from exc
+        return {"ok": True}
+
+    @app.post(f"{API_PREFIX}/llm/test", dependencies=[Depends(require_session)])
+    async def test_llm_connection() -> dict[str, object]:
+        from .llm_workbench import test_connection
+        try:
+            return await test_connection()
+        except ImportError as exc:
+            raise ApiError(503, "llm_dependency_missing", "LLM 依赖未安装。") from exc
+        except TimeoutError as exc:
+            raise ApiError(504, "llm_timeout", "连接测试超时。", retryable=True) from exc
+        except RuntimeError as exc:
+            raise ApiError(502, "llm_connection_failed", str(exc), retryable=True) from exc
 
     @app.post(f"{API_PREFIX}/intent/parse", dependencies=[Depends(require_session)])
     def parse_intent(payload: IntentParseRequest) -> dict[str, object]:
@@ -845,7 +936,7 @@ def create_api_runtime(
         queue = app.state.generation_queue
         if queue is None:
             raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
-        if generation_bridge is None or V2GenerationSettings is None:
+        if generation_bridge is None or GenerationSettings is None:
             raise ApiError(503, "v2_runtime_missing", "当前安装不包含 V2 兼容运行时。")
         if not idempotency_key or not idempotency_key.strip():
             raise ApiError(422, "invalid_request", "生成任务必须提供 Idempotency-Key。")
@@ -855,7 +946,7 @@ def create_api_runtime(
                 negative_prompt=payload.negative_prompt,
                 model_profile_id=payload.model_profile,
                 project_name=payload.project_name,
-                settings=V2GenerationSettings(**payload.settings.model_dump()),
+                settings=GenerationSettings(**payload.settings.model_dump()),
             )
             run = queue.submit(
                 prepared,
@@ -886,16 +977,18 @@ def create_api_runtime(
         if translator is None:
             raise ApiError(503, "translation_unavailable", "本地翻译服务未安装。")
         evidence = _split_local_natural_evidence(payload.source_text)
+        translation_segments = []
         if payload.translated_text:
             translated_text = payload.translated_text
             translation_engine = "当前工作台译文"
         else:
             try:
-                translated = translator.translate(evidence.positive_text, direction="zh_en")
+                translated = _translate_workbench_prompt(translator, evidence.positive_text, database)
             except (RuntimeError, ValueError) as exc:
                 raise ApiError(422, "translation_failed", str(exc)) from exc
             translated_text = translated.translated_text
             translation_engine = translated.engine_name
+            translation_segments = list(getattr(translated, "segments", ()))
         with ReferenceDataStore(database) as store:
             intent, scene_draft = _local_natural_intent(
                 payload.source_text,
@@ -920,6 +1013,7 @@ def create_api_runtime(
             "local_only": True,
         }
         response["scene_draft"] = scene_draft
+        scene_draft["translation_segments"] = translation_segments
         return response
 
     @app.post(f"{API_PREFIX}/prompt-candidates", dependencies=[Depends(require_session)])
@@ -939,7 +1033,7 @@ def create_api_runtime(
 
     @app.post(f"{API_PREFIX}/generation-requests/preview", dependencies=[Depends(require_session)])
     def preview_generation_request(payload: GenerationBridgePreviewRequest) -> dict[str, object]:
-        if generation_bridge is None or V2GenerationSettings is None:
+        if generation_bridge is None or GenerationSettings is None:
             raise ApiError(
                 503,
                 "v2_runtime_missing",
@@ -950,7 +1044,7 @@ def create_api_runtime(
                 payload.candidate,
                 payload.intent,
                 project_name=payload.project_name,
-                settings=V2GenerationSettings(**payload.settings.model_dump()),
+                settings=GenerationSettings(**payload.settings.model_dump()),
                 workspace_id=payload.workspace_id,
                 workspace_revision=payload.workspace_revision,
             )
@@ -992,7 +1086,7 @@ def create_api_runtime(
         queue = app.state.generation_queue
         if queue is None:
             raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
-        if generation_bridge is None or V2GenerationSettings is None:
+        if generation_bridge is None or GenerationSettings is None:
             raise ApiError(503, "v2_runtime_missing", "当前安装不包含 V2 兼容运行时。")
         if not idempotency_key or not idempotency_key.strip():
             raise ApiError(422, "invalid_request", "生成任务必须提供 Idempotency-Key。")
@@ -1001,7 +1095,7 @@ def create_api_runtime(
                 payload.candidate,
                 payload.intent,
                 project_name=payload.project_name,
-                settings=V2GenerationSettings(**payload.settings.model_dump()),
+                settings=GenerationSettings(**payload.settings.model_dump()),
                 workspace_id=payload.workspace_id,
                 workspace_revision=payload.workspace_revision,
             )
@@ -1038,7 +1132,7 @@ def create_api_runtime(
         queue = app.state.generation_queue
         if queue is None:
             raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
-        if generation_bridge is None or V2GenerationSettings is None:
+        if generation_bridge is None or GenerationSettings is None:
             raise ApiError(503, "v2_runtime_missing", "当前安装不包含 V2 兼容运行时。")
         if not idempotency_key or not idempotency_key.strip():
             raise ApiError(422, "invalid_request", "画师对照任务必须提供 Idempotency-Key。")
@@ -1071,7 +1165,7 @@ def create_api_runtime(
         project_name = f"{payload.project_name} · 画师对照 {payload.comparison_id[-8:]}"
         submitted: list[dict[str, object]] = []
         failed: list[dict[str, str]] = []
-        settings = V2GenerationSettings(**payload.settings.model_dump())
+        settings = GenerationSettings(**payload.settings.model_dump())
 
         for position, name in enumerate(payload.artist_names, start=1):
             recommendation = recommended[name]
@@ -1179,7 +1273,7 @@ def create_api_runtime(
         preferred_remote_profile_id = ""
         database = app.state.v2_database
         if database is not None:
-            from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+            from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
             repository = SQLiteRepository(database)
             try:
                 preferred_remote_profile_id = str(repository.get_setting("last_remote_profile_id", "") or "")
@@ -1198,7 +1292,7 @@ def create_api_runtime(
         payload: PreferredRemoteProfileRequest,
         database: Path = Depends(require_v2_settings_database),
     ) -> dict[str, object]:
-        from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+        from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
         repository = SQLiteRepository(database)
         try:
@@ -1222,7 +1316,7 @@ def create_api_runtime(
         payload: ArtistRankingSettingsRequest,
         database: Path = Depends(require_v2_settings_database),
     ) -> dict[str, object]:
-        from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+        from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
         repository = SQLiteRepository(database)
         try:
@@ -1236,8 +1330,8 @@ def create_api_runtime(
         database: Path = Depends(require_v2_settings_database),
     ) -> dict[str, object]:
         """Expose V2 connection metadata without ever exposing a secret."""
-        from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
-        from anima_prompt_studio.services.remote.credential_store import CredentialStore, CredentialStoreError
+        from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
+        from anima_prompt_studio_v3.remote.credential_store import CredentialStore, CredentialStoreError
 
         repository = SQLiteRepository(database)
         try:
@@ -1297,7 +1391,7 @@ def create_api_runtime(
     ) -> dict[str, object]:
         profile = _get_v2_remote_profile(database, profile_id)
         try:
-            from anima_prompt_studio.services.remote.ssh_tunnel import SshTunnel
+            from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
             fingerprint = SshTunnel(profile).probe_fingerprint()
         except (OSError, RuntimeError) as exc:
             raise ApiError(502, "ssh_host_key_probe_failed", f"无法读取 SSH 主机指纹：{exc}", retryable=True) from exc
@@ -1314,14 +1408,14 @@ def create_api_runtime(
     ) -> dict[str, object]:
         profile = _get_v2_remote_profile(database, profile_id)
         try:
-            from anima_prompt_studio.services.remote.ssh_tunnel import SshTunnel
+            from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
             actual = SshTunnel(profile).probe_fingerprint()
         except (OSError, RuntimeError) as exc:
             raise ApiError(502, "ssh_host_key_probe_failed", f"无法读取 SSH 主机指纹：{exc}", retryable=True) from exc
         if actual != payload.fingerprint:
             raise ApiError(409, "ssh_host_key_changed", "SSH 主机指纹在确认前发生变化，请重新检测。")
-        from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
-        from anima_prompt_studio.services.remote.credential_store import CredentialStore
+        from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
+        from anima_prompt_studio_v3.remote.credential_store import CredentialStore
         repository = SQLiteRepository(database)
         try:
             repository.save_remote_profile(profile.model_copy(update={"known_host_fingerprint": actual}))
@@ -1337,12 +1431,13 @@ def create_api_runtime(
         profile_id: str,
         payload: RemoteConnectionTestRequest,
         database: Path = Depends(require_v2_settings_database),
+        inspect_templates: bool = Query(default=False),
     ) -> dict[str, object]:
         """Validate SSH authentication, the tunnel and the remote ComfyUI API."""
         from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteCredentials
-        from anima_prompt_studio.services.remote.comfy_client import ComfyUIClient
-        from anima_prompt_studio.services.remote.credential_store import CredentialStore
-        from anima_prompt_studio.services.remote.ssh_tunnel import SshTunnel
+        from anima_prompt_studio_v3.remote.comfy_client import ComfyUIClient
+        from anima_prompt_studio_v3.remote.credential_store import CredentialStore
+        from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
 
         profile = _get_v2_remote_profile(database, profile_id)
         if not profile.known_host_fingerprint.strip():
@@ -1359,7 +1454,14 @@ def create_api_runtime(
         tunnel = SshTunnel(profile)
         try:
             tunnel.open(RemoteCredentials(password=password, passphrase=passphrase))
-            report = ComfyUIClient(tunnel.base_url).validate_environment()
+            client = ComfyUIClient(tunnel.base_url)
+            report = client.validate_environment()
+            inspection = None
+            if inspect_templates:
+                from ..runtime.packaged_workflows import packaged_workflow_profiles
+                from ..runtime.workflow_inspection import inspect_workflows
+                inspection = inspect_workflows(client, packaged_workflow_profiles())
+                inspection["remote_profile_id"] = profile.id
         except Exception as exc:
             raise ApiError(502, "remote_connection_test_failed", f"远程连接测试失败：{exc}", retryable=True) from exc
         finally:
@@ -1370,7 +1472,12 @@ def create_api_runtime(
             "queue_running": report.queue_running,
             "queue_pending": report.queue_pending,
             "comfy_endpoint": f"{profile.comfy_host}:{profile.comfy_port}",
+            **({"workflow_inspection": inspection} if inspect_templates else {}),
         }
+
+    if v2_database is not None:
+        from .workflows import register_workflow_routes
+        register_workflow_routes(app, v2_database, require_session)
 
     @app.get(
         f"{API_PREFIX}/settings/comfy-access",
@@ -1731,7 +1838,7 @@ def _remote_profile_settings_response(profile, credentials) -> dict[str, object]
 
 
 def _get_v2_remote_profile(database: Path, profile_id: str):
-    from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+    from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
     repository = SQLiteRepository(database)
     try:
@@ -1749,8 +1856,8 @@ def _save_remote_profile_settings(database: Path, payload: RemoteProfileSettings
     port, user, authentication or key changes would weaken host-key verification.
     """
     from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
-    from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
-    from anima_prompt_studio.services.remote.credential_store import CredentialStore, CredentialStoreError
+    from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
+    from anima_prompt_studio_v3.remote.credential_store import CredentialStore, CredentialStoreError
 
     repository = SQLiteRepository(database)
     credentials = CredentialStore()
@@ -1950,6 +2057,30 @@ def _split_local_natural_evidence(source_text: str) -> _LocalNaturalEvidence:
     return _LocalNaturalEvidence(positive_text, tuple(exclusions))
 
 
+def _translate_workbench_prompt(translator, text: str, database: Path):
+    method = getattr(translator, "translate_prompt", None)
+    if method is None:
+        return translator.translate(text, direction="zh_en")
+    # Translate explicit, unambiguous proper names using the local dictionary.
+    # This does not confirm a character entity or promote related search hits.
+    extra: dict[str, str] = {}
+    with ReferenceDataStore(database) as store:
+        alias_path = Path(__file__).resolve().parents[1] / "configs" / "prompt_identity_aliases.json"
+        if alias_path.is_file():
+            aliases = json.loads(alias_path.read_text(encoding="utf-8"))["aliases"]
+            for source, canonical in aliases.items():
+                if source in text and store.get_tag(canonical):
+                    extra[source] = canonical.replace("_", " ")
+        matches = _local_index_matches(store, _local_lookup_terms(text, ""))
+        confirmed, _ = _confirmed_source_matches(matches)
+        for match in confirmed:
+            detail = store.get_tag(match.canonical_tag)
+            if (len(match.text) >= 3 and detail
+                    and detail.get("category_name") in {"character", "copyright"}):
+                extra[match.text] = match.canonical_tag.replace("_", " ")
+    return method(text, extra_terms=extra)
+
+
 def _local_natural_intent(
     source_text: str,
     translated_text: str,
@@ -1971,6 +2102,8 @@ def _local_natural_intent(
     never erase a natural-language draft.
     """
     evidence = evidence or _split_local_natural_evidence(source_text)
+    if include_scene_plan and len(translated_text.strip()) > 2400:
+        raise ApiError(422, "scene_plan_too_long", "完整译文超过 2400 字符；未截断或丢弃内容。请将画面拆成较短描述后重试。")
     matches = _local_index_matches(store, _local_lookup_terms(source_text, translated_text))
     source_candidates = filter_weak_meta_matches([
         match for match in matches
@@ -1988,6 +2121,8 @@ def _local_natural_intent(
         source_candidates,
         extra_occupiers=phrase_occupiers,
     )
+    source_matches = [match for match in source_matches
+                      if not domain_conflict(source_text, match.start, match.end, match.canonical_tag)]
     source_matches = _merge_glossary_source_matches(evidence.positive_text, source_matches, store)
     source_matches, identity_matches = _divert_protected_identity_matches(source_matches, store)
     excluded_matches, ambiguous_exclusion_terms = _confirmed_source_matches(
@@ -2456,11 +2591,13 @@ def _local_natural_intent(
         translated_text=translated_text.strip(),
         scene_plan_en=(translated_text.strip() or None) if include_scene_plan else None,
         scene_negative_en=[match.canonical_tag.replace("_", " ") for match in excluded_matches],
+        scene_suppressed_en=[name.replace("_", " ") for name in sorted(suppressed)],
         graph=ConstraintGraph(elements=elements, edges=relation_edges),
     )
     scene_draft = {
         "source_text": source_text.strip(),
         "translated_text": translated_text.strip(),
+        "translation_review": review_translation(evidence.positive_text, translated_text),
         "scene_plan_enabled": include_scene_plan,
         "entities": entities,
         "relations": relations,

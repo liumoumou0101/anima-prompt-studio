@@ -23,9 +23,10 @@ from ..domain import (
     intent_state_priority,
 )
 from .profiles import ModelProfile, NegativePromptMode
+from .fidelity import has_local_scene, negative_defaults, render_scene
 
 
-LITERAL_ALGORITHM_VERSION = "literal-mapper-v2"
+LITERAL_ALGORITHM_VERSION = "literal-mapper-v3"
 
 
 _PROMPT_FACT_ORDER = {
@@ -153,6 +154,11 @@ class LiteralCandidateGenerator:
                 if _uses_local_prose_baseline(element, intent):
                     preserved.append(element.id)
                     prose_baseline_ids.append(element.id)
+                    if "local_partial_prose_evidence" in element.notes:
+                        preserved.remove(element.id)
+                        unresolved.append(element.id)
+                        warnings.append(CandidateWarning(code="scene_translation_review",
+                            message="未映射部分已保留在画面译文中，但尚未验证其翻译语义，请核对。", element_ids=[element.id]))
                     continue
                 unresolved.append(element.id)
                 warnings.append(_unresolved_warning(element))
@@ -219,24 +225,35 @@ class LiteralCandidateGenerator:
         ]
 
         positive_parts = _deduplicate([*profile.positive_prefix, *(tag.rendered for tag in tags)])
-        if not tags and prose_baseline_ids and intent.scene_plan_en:
-            positive_parts.append(intent.scene_plan_en.strip())
+        faithful_scene = has_local_scene(intent)
+        if faithful_scene:
+            positive_parts = [render_scene(intent, profile, tags)]
             warnings.append(CandidateWarning(
                 code="local_prose_baseline",
-                message="本地索引没有可确认标签；保留完整本地译文作为可编辑的基准表达。",
+                message="完整保留画面译文；索引标签仅作为识别证据，用户明确选择的补充项才会追加。译文仍需核对，保留不等于翻译正确。",
                 element_ids=prose_baseline_ids,
             ))
-        if not positive_parts:
+        if not any(part.strip() for part in positive_parts):
             raise LiteralGenerationError("literal 没有可安全渲染的正向内容。")
         negative_parts = (
-            _deduplicate([*profile.negative_prompt, *negative])
+            _deduplicate([*negative_defaults(intent, profile), *negative])
             if profile.negative_prompt_mode == NegativePromptMode.ENABLED
             else []
         )
+        if negative_defaults(intent, profile) != list(profile.negative_prompt):
+            warnings.append(CandidateWarning(
+                code="intent_aware_negative",
+                message="已按明确的景深/柔焦/色散意图移除冲突的默认负向；用户主动排除的词仍保留。",
+            ))
+        if profile.variant.value == "aesthetic" and "score_" in profile.tag_separator.join(positive_parts):
+            warnings.append(CandidateWarning(
+                code="aesthetic_score_token",
+                message="此模型通常不需要 score_*；保留你的输入，可在画面计划中自行移除，不再阻断生成。",
+            ))
         candidate = PromptCandidate(
             id="candidate_literal",
             lane=CandidateLane.LITERAL,
-            title="高保真基准",
+            title="原意保留 · 请核对译文" if faithful_scene else "标签基准",
             positive_prompt=profile.tag_separator.join(positive_parts),
             negative_prompt=profile.tag_separator.join(negative_parts),
             tags=tags,
@@ -244,7 +261,7 @@ class LiteralCandidateGenerator:
             unresolved_element_ids=list(dict.fromkeys(unresolved)),
             warnings=warnings,
             score_breakdown={
-                "mapped_elements": float(len(preserved) - len(prose_baseline_ids)),
+                "mapped_elements": float(len(set(preserved) - set(prose_baseline_ids))),
                 "unresolved_elements": float(len(unresolved)),
                 "prose_baseline": float(bool(prose_baseline_ids)),
             },
@@ -318,7 +335,7 @@ def _unresolved_warning(element: IntentElement) -> CandidateWarning:
 def _uses_local_prose_baseline(element: IntentElement, intent: IntentDocument) -> bool:
     return (
         element.type.value == "scene"
-        and "local_prose_baseline" in element.notes
+        and bool({"local_prose_baseline", "local_partial_prose_evidence"} & set(element.notes))
         and element.state in {IntentState.LOCKED, IntentState.REQUIRED}
         and bool((intent.scene_plan_en or "").strip())
     )

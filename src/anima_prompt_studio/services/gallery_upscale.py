@@ -589,11 +589,13 @@ class GalleryUpscaleManager:
         *,
         coordinator_factory: Callable[..., GalleryUpscaleCoordinator] = GalleryUpscaleCoordinator,
         regen_coordinator_factory: Callable[..., RemoteExecutionCoordinator] = RemoteExecutionCoordinator,
+        workflow_provider: Callable[[RemoteProfile], list[WorkflowProfile]] | None = None,
     ) -> None:
         self.repository_path = repository_path
         self.output_root = output_root.expanduser()
         self.coordinator_factory = coordinator_factory
         self.regen_coordinator_factory = regen_coordinator_factory
+        self.workflow_provider = workflow_provider
         self._remote_profile: RemoteProfile | None = None
         self._workflow_profile: WorkflowProfile | None = None
         self._txt2img_workflows: list[WorkflowProfile] = []
@@ -725,6 +727,8 @@ class GalleryUpscaleManager:
         count: int = 1,
     ) -> dict[str, Any]:
         with self._condition:
+            if self.workflow_provider and self._remote_profile:
+                self._txt2img_workflows = self.workflow_provider(self._remote_profile)
             reason = self._regen_reason(str(asset.get("model") or ""))
             if reason:
                 raise GalleryUpscaleError(reason)
@@ -766,6 +770,8 @@ class GalleryUpscaleManager:
                 message=f"等待再出图 · 队列第 {queue_position} 位",
             )
             self._jobs[process_job.id] = process_job
+            if self.workflow_provider:
+                process_job.parameters["workflow_snapshot"] = workflow.model_dump(mode="json")
             self._persist_locked(process_job)
             self._condition.notify_all()
             return process_job.payload()
@@ -975,6 +981,8 @@ class GalleryUpscaleManager:
 
     def _job_ready_locked(self, job: GalleryProcessJob) -> bool:
         if job.operation == GALLERY_REGEN_OPERATION:
+            if job.parameters.get("workflow_snapshot"):
+                return not self._connection_reason()
             return not self._regen_reason(job.model)
         return not self._unavailable_reason()
 
@@ -1008,6 +1016,9 @@ class GalleryUpscaleManager:
                             else self._workflow_profile
                         )
                         workflow = workflow.model_copy(deep=True) if workflow else None
+                        frozen = process_job.parameters.get("workflow_snapshot")
+                        if frozen and process_job.operation == GALLERY_REGEN_OPERATION:
+                            workflow = WorkflowProfile.model_validate(frozen)
                         credentials = self._credentials.model_copy(deep=True)
                         output_root = self.output_root
                         txt2img_workflows = [item.model_copy(deep=True) for item in self._txt2img_workflows]

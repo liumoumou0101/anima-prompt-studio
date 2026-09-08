@@ -116,6 +116,58 @@ def intent() -> IntentDocument:
     )
 
 
+def faithful_intent(scene="a maid holding a camera, watercolor"):
+    return IntentDocument(source_text="女仆举起相机，水彩", source_language="zh", scene_plan_en=scene,
+        graph=ConstraintGraph(elements=[element("e_maid", "女仆", canonical="maid"),
+            element("e_scene", "未映射的画面关系", fact_type=IntentElementType.SCENE).model_copy(
+                update={"notes": ["local_partial_prose_evidence"]})]))
+
+
+def test_partial_index_matches_never_replace_the_scene(store):
+    profile = ModelProfileRegistry.built_in().get("anima_aesthetic_v1")
+    bundle = LiteralCandidateGenerator(store).generate(faithful_intent(), profile)
+    bundle = HybridLaneGenerator(store).add_hybrid(bundle, profile)
+    assert len(bundle.candidates) == 1
+    assert bundle.candidates[0].positive_prompt == "a maid holding a camera, watercolor"
+    assert "e_scene" in bundle.candidates[0].unresolved_element_ids
+    assert CandidateValidator(store).validate(bundle, profile).valid
+    broken = bundle.model_copy(deep=True)
+    broken.candidates[0].positive_prompt = "maid"
+    assert not CandidateValidator(store).validate(broken, profile).valid
+
+
+def test_scene_user_additions_and_suppression_are_effective(store):
+    profile = ModelProfileRegistry.built_in().get("anima_aesthetic_v1")
+    draft = faithful_intent("a maid holding a camera")
+    draft.graph.elements.append(element("e_hair", "双马尾", state=IntentState.USER_SELECTED))
+    draft.scene_suppressed_en = ["camera"]
+    bundle = LiteralCandidateGenerator(store).generate(draft, profile)
+    text = bundle.candidates[0].positive_prompt
+    assert "camera" not in text
+    assert text.endswith("twintails")
+    assert CandidateValidator(store).validate(bundle, profile).valid
+
+
+def test_style_negative_defaults_and_user_exclusions(store):
+    profile = ModelProfileRegistry.built_in().get("anima_aesthetic_v1")
+    draft = faithful_intent("maid, shallow depth of field, chromatic aberration")
+    bundle = LiteralCandidateGenerator(store).generate(draft, profile)
+    negative = bundle.candidates[0].negative_prompt
+    assert "blurry" not in negative
+    assert "chromatic aberration" not in negative
+    assert "worst quality" in negative
+    assert CandidateValidator(store).validate(bundle, profile).valid
+
+
+def test_user_score_tokens_are_advisory_not_internal_server_errors(store):
+    profile = ModelProfileRegistry.built_in().get("anima_aesthetic_v1")
+    bundle = LiteralCandidateGenerator(store).generate(faithful_intent("score_9, a maid holding a camera"), profile)
+    report = CandidateValidator(store).validate(bundle, profile)
+    assert report.valid
+    assert any(issue.code == "aesthetic_score_token" and issue.severity.value == "warning"
+               for issue in report.candidate_reports[0].issues)
+
+
 def test_builtin_profiles_are_packaged_and_variant_safe() -> None:
     registry = ModelProfileRegistry.built_in()
 

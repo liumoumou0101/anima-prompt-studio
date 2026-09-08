@@ -34,6 +34,23 @@ afterEach(() => {
   cleanup();
 });
 
+it.each(["unchecked", "stale"])("keeps a %s target visible and refreshes its status", async (availability) => {
+  const target = {remote_profile_id: "cloud", remote_display_name: "测试云显卡", workflow_profile_id: "base",
+    workflow_display_name: "基础工作流", workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_base_v1"],
+    host_fingerprint_ready: true, auth_type: "agent", availability, experimental: false, availability_errors: ["请重新检测"],
+    default_recipe_id: "baseline", generation_recipes: [{id: "baseline", display_name: "基线配方", parameters: {steps: 30, cfg: 4, sampler: "euler", scheduler: "normal"}}]};
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({items: [target]})));
+  render(<MemoryRouter><DirectPromptPage remoteEnabled /></MemoryRouter>);
+  fireEvent.change(screen.getByLabelText("模型配置"), {target: {value: "anima_base_v1"}});
+  await waitFor(() => expect(screen.getByLabelText("远程工作流")).toHaveValue("base"));
+  expect(screen.getByLabelText("云主机连接")).toBeEnabled();
+  expect(screen.getByLabelText("生成配方")).toBeEnabled();
+  fetchMock.mockImplementation(async () => new Response(JSON.stringify({items: [{...target, availability: "ready"}]})));
+  fireEvent.click(screen.getByRole("button", {name: "刷新工作流状态"}));
+  await waitFor(() => expect(screen.queryByRole("link", {name: "前往设置 → 管理工作流检测"})).not.toBeInTheDocument());
+  expect(screen.getByLabelText("远程工作流")).toHaveValue("base");
+});
+
 it("matches whole comma tokens and sends the Chinese gloss to the workbench", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(preview), {status: 200}));
 

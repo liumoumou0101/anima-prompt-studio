@@ -1,0 +1,195 @@
+{
+  "id": "v3_base_v1",
+  "display_name": "ANIMA Base v1.0 - V3 Baseline",
+  "api_workflow": {
+    "1": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "anima-base-v1.0.safetensors",
+        "weight_dtype": "default"
+      }
+    },
+    "2": {
+      "class_type": "ModelSamplingAuraFlow",
+      "inputs": {
+        "model": [
+          "1",
+          0
+        ],
+        "shift": 3
+      }
+    },
+    "3": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "qwen_3_06b_base.safetensors",
+        "type": "stable_diffusion",
+        "device": "default"
+      }
+    },
+    "4": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "clip": [
+          "3",
+          0
+        ],
+        "text": ""
+      }
+    },
+    "5": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "clip": [
+          "3",
+          0
+        ],
+        "text": ""
+      }
+    },
+    "6": {
+      "class_type": "EmptyLatentImage",
+      "inputs": {
+        "width": 896,
+        "height": 1152,
+        "batch_size": 1
+      }
+    },
+    "7": {
+      "class_type": "KSampler",
+      "inputs": {
+        "model": [
+          "2",
+          0
+        ],
+        "positive": [
+          "4",
+          0
+        ],
+        "negative": [
+          "5",
+          0
+        ],
+        "latent_image": [
+          "6",
+          0
+        ],
+        "seed": 0,
+        "steps": 35,
+        "cfg": 4.5,
+        "sampler_name": "er_sde",
+        "scheduler": "normal",
+        "denoise": 1
+      }
+    },
+    "8": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "qwen_image_vae.safetensors"
+      }
+    },
+    "9": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "7",
+          0
+        ],
+        "vae": [
+          "8",
+          0
+        ]
+      }
+    },
+    "10": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "images": [
+          "9",
+          0
+        ],
+        "filename_prefix": "v3_base_v1"
+      }
+    }
+  },
+  "bindings": {
+    "positive_prompt": {
+      "node_id": "4",
+      "input_name": "text"
+    },
+    "negative_prompt": {
+      "node_id": "5",
+      "input_name": "text"
+    },
+    "checkpoint": {
+      "node_id": "1",
+      "input_name": "unet_name"
+    },
+    "text_encoder": {
+      "node_id": "3",
+      "input_name": "clip_name"
+    },
+    "text_encoder_type": {
+      "node_id": "3",
+      "input_name": "type"
+    },
+    "vae": {
+      "node_id": "8",
+      "input_name": "vae_name"
+    },
+    "model_shift": {
+      "node_id": "2",
+      "input_name": "shift"
+    },
+    "seed": {
+      "node_id": "7",
+      "input_name": "seed"
+    },
+    "steps": {
+      "node_id": "7",
+      "input_name": "steps"
+    },
+    "cfg": {
+      "node_id": "7",
+      "input_name": "cfg"
+    },
+    "sampler": {
+      "node_id": "7",
+      "input_name": "sampler_name"
+    },
+    "scheduler": {
+      "node_id": "7",
+      "input_name": "scheduler"
+    },
+    "width": {
+      "node_id": "6",
+      "input_name": "width"
+    },
+    "height": {
+      "node_id": "6",
+      "input_name": "height"
+    },
+    "batch_size": {
+      "node_id": "6",
+      "input_name": "batch_size"
+    },
+    "filename_prefix": {
+      "node_id": "10",
+      "input_name": "filename_prefix"
+    }
+  },
+  "workflow_kind": "txt2img_basic",
+  "lora_slots": [],
+  "compatible_model_profiles": [
+    "anima_base_v1"
+  ],
+  "runtime_assets": {
+    "checkpoint": "anima-base-v1.0.safetensors",
+    "text_encoder": "qwen_3_06b_base.safetensors",
+    "text_encoder_type": "stable_diffusion",
+    "vae": "qwen_image_vae.safetensors",
+    "model_shift": 3
+  },
+  "source_path": "packaged://v3/v3_base_v1",
+  "notes": "V3 maintained baseline; recommended parameters are editable. Server capability validation and image-quality comparison required."
+}

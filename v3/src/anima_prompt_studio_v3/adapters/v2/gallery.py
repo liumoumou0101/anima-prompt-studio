@@ -10,7 +10,7 @@ from typing import Any
 import os
 import subprocess
 
-from anima_prompt_studio.repositories import SQLiteRepository
+from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 from anima_prompt_studio.services.gallery_assets import (
     IMAGE_SUFFIXES,
     TRASH_DIR_NAME,
@@ -30,7 +30,8 @@ from anima_prompt_studio.services.gallery_upscale import (
     GalleryUpscaleRenderer,
 )
 from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteCredentials
-from anima_prompt_studio.services.remote.credential_store import CredentialStore, CredentialStoreError
+from anima_prompt_studio_v3.remote.credential_store import CredentialStore, CredentialStoreError
+from .workflow_catalog import WorkflowCatalog, catalog
 
 
 class V2GalleryReadService:
@@ -675,7 +676,7 @@ def build_v2_gallery_service(
         profile_id = str(repository.get_setting("last_remote_profile_id", "") or "")
         profiles = repository.list_remote_profiles(enabled_only=True)
         remote_profile = next((item for item in profiles if item.id == profile_id), profiles[0] if profiles else None)
-        workflows = repository.list_workflow_profiles()
+        workflows = [p for p, _ in catalog(database)]
         upscale_workflow = next((
             item for item in workflows
             if GalleryUpscaleRenderer.supports(item)
@@ -684,7 +685,12 @@ def build_v2_gallery_service(
         txt2img_workflows = [item for item in workflows if item.workflow_kind == "txt2img_basic"]
     finally:
         repository.close()
-    manager = GalleryUpscaleManager(database, output_root)
+    workflow_manager = WorkflowCatalog(database)
+    def workflow_provider(remote):
+        return [workflow_manager.resolve(remote.id, item["workflow_id"])
+                for item in workflow_manager.report(remote.id)["items"]
+                if item["state"] == "ready" and not item["experimental"] and item["workflow_kind"] == "txt2img_basic"]
+    manager = GalleryUpscaleManager(database, output_root, workflow_provider=workflow_provider)
     credentials = RemoteCredentials()
     if remote_profile is not None and remote_profile.auth_type == RemoteAuthType.PASSWORD:
         try:

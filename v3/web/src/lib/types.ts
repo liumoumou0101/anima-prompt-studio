@@ -368,6 +368,12 @@ export interface CompositionPreset {
 }
 
 export interface SceneDraft {
+  translation_segments?: Array<{source: string; english: string; start: number; end: number; status: string}>;
+  translation_review?: {
+    missing_anchors: Array<{source: string; expected: string; type: string}>;
+    requires_review: boolean;
+    note: string;
+  };
   source_text: string;
   translated_text: string;
   scene_plan_enabled?: boolean;
@@ -558,6 +564,10 @@ export interface GenerationRunListResponse {
 }
 
 export interface GenerationTarget {
+  availability?: string;
+  availability_errors?: string[];
+  experimental?: boolean;
+  template_revision?: string;
   remote_profile_id: string;
   remote_display_name: string;
   remote_ssh_host?: string;

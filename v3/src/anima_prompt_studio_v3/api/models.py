@@ -93,6 +93,23 @@ class TranslationRequest(ApiModel):
     direction: Literal["zh_en", "en_zh"] = "zh_en"
 
 
+class PromptGenerateRequest(ApiModel):
+    source_text: str = Field(min_length=1, max_length=10_000)
+    excluded_text: str = Field(default="", max_length=10_000)
+    mode: Literal["faithful", "expand"] = "faithful"
+    rule_id: str | None = Field(default=None, min_length=1, max_length=200)
+    source_language: str = Field(default="mixed", pattern=r"^(zh|en|mixed)$")
+
+
+class LlmSettingsUpdateRequest(ApiModel):
+    service_id: str = Field(min_length=1, max_length=100)
+    model_name: str | None = Field(default=None, min_length=1, max_length=200)
+    api_key: SecretStr | None = Field(default=None, max_length=500)
+    base_url: str | None = Field(default=None, max_length=2000)
+    service_type: Literal["openai_compatible", "ollama"] = "openai_compatible"
+    clear_api_key: bool = False
+
+
 class DirectPromptPreviewRequest(ApiModel):
     positive_prompt: str = Field(min_length=1, max_length=20_000)
     negative_prompt: str = Field(default="", max_length=20_000)
@@ -145,10 +162,10 @@ class WorkbenchGenerationSettings(ApiModel):
     aspect: Literal["portrait", "landscape", "square", "custom", "model_default"] = "portrait"
     width: int | None = Field(default=896, ge=64, le=8192)
     height: int | None = Field(default=1152, ge=64, le=8192)
-    steps: int | None = Field(default=30, ge=1, le=200)
-    cfg: float | None = Field(default=4.0, ge=0, le=30)
-    sampler: str | None = Field(default="er_sde", min_length=1, max_length=100)
-    scheduler: str | None = Field(default="simple", min_length=1, max_length=100)
+    steps: int | None = Field(default=35, ge=1, le=200)
+    cfg: float | None = Field(default=4.5, ge=0, le=30)
+    sampler: str | None = Field(default="euler", min_length=1, max_length=100)
+    scheduler: str | None = Field(default="normal", min_length=1, max_length=100)
     seed: int = Field(default=-1, ge=-1)
     batch_size: int = Field(default=1, ge=1, le=100)
     remote_profile_id: str | None = Field(default=None, max_length=200)

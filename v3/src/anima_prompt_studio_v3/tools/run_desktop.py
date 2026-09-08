@@ -71,11 +71,8 @@ def run(
     reference_db = ensure_active_pack(manager, pack_source_root.resolve() if pack_source_root else None)
     selected_v2_database = v2_database.resolve() if v2_database and v2_database.is_file() else None
     if selected_v2_database is not None:
-        from ..adapters.v2 import ensure_packaged_workflow_profiles
-
-        imported_workflows = ensure_packaged_workflow_profiles(selected_v2_database)
-        if imported_workflows:
-            print(f"首次启动：已导入 {imported_workflows} 个内置验证工作流。", flush=True)
+        from ..runtime.packaged_workflows import migrate_packaged_workflow_ownership
+        migrate_packaged_workflow_ownership(selected_v2_database)
     with LocalApiServer(
         reference_db,
         frontend_dist=frontend_dist,
@@ -112,8 +109,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pack-source-root", type=Path, default=bundled_packs)
     parser.add_argument("--frontend-dist", type=Path, default=bundled_frontend)
     parser.add_argument("--workspace-db", type=Path, default=app_data / "v3" / "workspaces.db")
-    parser.add_argument("--v2-database", type=Path, default=app_data / "anima_prompt_studio.db")
-    parser.add_argument("--without-v2", action="store_true")
+    parser.add_argument("--runtime-database", "--v2-database", dest="v2_database",
+                        type=Path, default=app_data / "anima_prompt_studio.db")
+    parser.add_argument("--without-runtime", "--without-v2", dest="without_v2", action="store_true")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument(
         "--exit-after-startup",

@@ -4,6 +4,7 @@ import {ApiClientError, apiRequest} from "../lib/api";
 import {storeDirectImport} from "../lib/directPrompt";
 import {applyAspect, applyGenerationRecipe, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
 import {modelProfileChoices} from "../lib/modelProfiles";
+import {targetReady, defaultTarget, targetStatus} from "../lib/workflowTargets";
 import type {DirectPromptPreview, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, ModelProfileOption, WorkbenchGenerationSettings} from "../lib/types";
 import {ErrorState} from "../components/States";
 
@@ -100,9 +101,10 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
 
   useEffect(() => {
     if (!compatibleTargets.length) return;
-    const preferred = preferredRemoteId && compatibleTargets.find((item) => item.remote_profile_id === preferredRemoteId);
+    const preferred = preferredRemoteId && defaultTarget(compatibleTargets.filter((item) => item.remote_profile_id === preferredRemoteId));
     const current = compatibleTargets.find((item) => targetKey(item) === selectedTarget);
-    const next = current || preferred || compatibleTargets[0];
+    const next = current || preferred || defaultTarget(compatibleTargets);
+    if (!next) return;
     const key = targetKey(next);
     if (key !== selectedTarget || (!findGenerationRecipe(next, draft.generation_settings.preset_id) && draft.generation_settings.preset_id !== "custom")) {
       chooseGenerationTarget(next);
@@ -167,16 +169,16 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
     setNotice(null);
     setError(null);
     try {
-      let target = compatibleTargets.find((item) => targetKey(item) === selectedTarget) || compatibleTargets[0];
+      let target = compatibleTargets.find((item) => targetKey(item) === selectedTarget) || defaultTarget(compatibleTargets);
       if (!target) {
         const refreshed = await loadGenerationTargets();
         const compatible = refreshed.filter((item) => item.compatible_model_profiles.includes(draft.model_profile));
         target = compatible.find((item) => targetKey(item) === selectedTarget)
-          || compatible.find((item) => item.remote_profile_id === preferredRemoteId)
-          || compatible[0];
+          || defaultTarget(compatible.filter((item) => item.remote_profile_id === preferredRemoteId))
+          || defaultTarget(compatible);
       }
       if (!target) {
-        setNotice("同步完成，但当前模型仍没有可用的远程工作流。");
+        setNotice("没有检测就绪的基线工作流。请到设置 → 管理工作流检测服务器依赖和文件映射；实验工作流需显式选择。");
         return;
       }
       const targetMatchesSettings = settings.remote_profile_id === target.remote_profile_id
@@ -223,7 +225,7 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
   }
 
   function selectRemoteConnection(remoteId: string) {
-    const workflow = compatibleTargets.find((item) => item.remote_profile_id === remoteId);
+    const workflow = defaultTarget(compatibleTargets.filter((item) => item.remote_profile_id === remoteId));
     if (!workflow) return;
     chooseGenerationTarget(workflow);
   }
@@ -233,8 +235,8 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
   const capabilities = activeTarget?.parameter_capabilities;
 
   function changeModel(modelProfile: string) {
-    const target = generationTargets.find((item) => item.compatible_model_profiles.includes(modelProfile) && item.remote_profile_id === selectedRemoteId)
-      || generationTargets.find((item) => item.compatible_model_profiles.includes(modelProfile));
+    const target = defaultTarget(generationTargets.filter((item) => item.compatible_model_profiles.includes(modelProfile) && item.remote_profile_id === selectedRemoteId))
+      || defaultTarget(generationTargets.filter((item) => item.compatible_model_profiles.includes(modelProfile)));
     if (target) {
       setSelectedTarget(targetKey(target));
       editDraft({model_profile: modelProfile, generation_settings: applyGenerationRecipe(settings, target)});
@@ -316,12 +318,18 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
             </select>
             <label htmlFor="direct-workflow">工作流</label>
             <select id="direct-workflow" aria-label="远程工作流" value={selectedWorkflowId || ""} onChange={(event) => { const target = connectionWorkflows.find((item) => item.workflow_profile_id === event.target.value); if (target) chooseGenerationTarget(target); }} disabled={!connectionWorkflows.length}>
-              {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}</option>) : <option value="">{targetsBusy ? "正在同步兼容工作流…" : "当前模型无兼容工作流"}</option>}
+              {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}{targetStatus(target) ? ` · ${targetStatus(target)}` : ""}</option>) : <option value="">{targetsBusy ? "正在同步兼容工作流…" : "当前模型无兼容工作流"}</option>}
             </select>
             {activeTarget?.auth_type === "private_key" && <label className="passphrase-input"><span>私钥口令（可选）</span><input type="password" autoComplete="current-password" value={privateKeyPassphrase} onChange={(event) => setPrivateKeyPassphrase(event.target.value)} placeholder={activeTarget.private_key_passphrase_configured ? "已在本次运行中设置" : "私钥未加密可留空"} /></label>}
           </>}
+          {remoteEnabled && activeTarget && !targetReady(activeTarget) && <div className="workspace-notice" role="status">
+            工作流{targetStatus(activeTarget)}。点击生图会自动刷新未检测或过期的状态，通过后继续提交；缺少依赖或映射失效需先修复。
+            <p>{activeTarget.availability_errors?.join("；")}</p>
+            <a href="/settings">前往设置 → 管理工作流检测</a>
+            <button type="button" disabled={targetsBusy} onClick={() => void loadGenerationTargets().catch(caught => setNotice((caught as ApiClientError).message))}>刷新工作流状态</button>
+          </div>}
           <button className="button generate-button" type="submit" disabled={!draft.positive_prompt.trim() || previewBusy}>{previewBusy ? "正在匹配中英标签…" : "匹配并回译中文"}</button>
-          <button className="button" type="button" disabled={!draft.positive_prompt.trim() || generationBusy || !remoteEnabled} onClick={() => void submitDirect()}>{generationBusy ? "正在提交…" : "按原文生图"}</button>
+          <button className="button" type="button" disabled={!draft.positive_prompt.trim() || generationBusy || !remoteEnabled} onClick={() => void submitDirect()}>{generationBusy ? "正在检查依赖并提交…" : "按原文生图"}</button>
         </div>
       </form>
 

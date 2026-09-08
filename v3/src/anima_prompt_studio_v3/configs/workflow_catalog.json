@@ -1,0 +1,54 @@
+{
+  "schema": "anima-workflow-catalog/1",
+  "version": "1.1.0",
+  "source": "ANIMA Prompt Studio maintained ComfyUI integration templates",
+  "license": "GPL-3.0-only",
+  "scope": "Graph definitions only. Model weights and custom nodes are installed separately under their own licenses.",
+  "templates": {
+    "23_Turbo_v1.1": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "anima_turbo_v1_1"
+    },
+    "24_AnimaYume_v1.0_Final": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "animayume_v1_0_final"
+    },
+    "25_MiaoMiao_Harem_ANIMA_v1.6": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "miaomiao_harem_anima_v1_6"
+    },
+    "26_Turbo_v1.1": {
+      "version": "1.0.0",
+      "tier": "experimental",
+      "model": "anima_turbo_v1_1"
+    },
+    "27_AnimaYume": {
+      "version": "1.0.0",
+      "tier": "experimental",
+      "model": "animayume_v1_0_final"
+    },
+    "28_MiaoMiao": {
+      "version": "1.0.0",
+      "tier": "experimental",
+      "model": "miaomiao_harem_anima_v1_6"
+    },
+    "v3_base_v1": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "anima_base_v1"
+    },
+    "v3_aesthetic_v1_1": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "anima_aesthetic_v1"
+    },
+    "v3_aesthetic_v1_0": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "anima_aesthetic_v1"
+    }
+  }
+}

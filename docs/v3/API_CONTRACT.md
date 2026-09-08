@@ -1,5 +1,25 @@
 # V3 本地 API 契约
 
+## 工作流管理扩展（2026-09-06）
+
+下列路径相对 `/api/v3/workflows`，均须本地会话认证；服务器参数是已保存连接 ID。
+
+| 方法与路径 | 内容 |
+| --- | --- |
+| GET `/servers/{remote}` | checked_at/devices/items/inspection；项含版本、来源、级别、状态、错误与资产候选 |
+| POST `/servers/{remote}/inspect` | 可选临时 password/passphrase；后台检测，最多两个并发，同服务器去重 |
+| POST `/servers/{remote}/cancel` | 请求取消，底层有界超时退出 |
+| PUT `/servers/{remote}/{workflow}/mapping` | revision + mapping；空映射明确确认默认文件，失效版本拒绝 |
+| POST `/import` | 配置封装或受支持 API 图，返回新副本 ID |
+| GET `/export/{workflow}` | anima-user-workflow/1；清除 source_path，节点内容仍需用户审阅 |
+| PUT `/{workflow}/enabled` | enabled 布尔值 |
+| GET `/{workflow}/versions` | 本机存档版本 |
+| POST `/{workflow}/restore` | revision，恢复为独立副本 |
+| POST `/servers/{remote}/read-file` | path 和可选临时凭据；指定绝对 JSON 路径，最大 2 MB，仅预览 |
+| GET `/servers/{remote}/diagnostics` | 白名单 schema、checked_at、版本/来源/状态/实验标志 |
+
+目标查询增加 availability、availability_errors、experimental、template_revision。非 ready 不可入队，实验项不自动替补。旧 `test-connection?inspect_templates=true` 保留兼容只读接口，不保存缓存；正式 UI 使用新检测接口。导入验证错误 422，目标不存在 404，远端读取错误 502，响应沿用 error.code/message。
+
 状态：首版接口合同；V3-010～012 已实现 session、标签/推荐和工作台候选纵向切片
 
 基础路径：`/api/v3`

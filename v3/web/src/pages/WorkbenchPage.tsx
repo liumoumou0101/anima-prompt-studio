@@ -6,8 +6,10 @@ import {apiRequest, ApiClientError} from "../lib/api";
 import {consumeDirectImport} from "../lib/directPrompt";
 import {applyAspect, applyGenerationRecipe, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
 import {modelProfileChoices} from "../lib/modelProfiles";
+import {targetReady, defaultTarget, targetStatus} from "../lib/workflowTargets";
 import type {ArtistComparisonSubmission, ArtistRanking, ArtistSuggestion, CandidateLane, CandidateTag, CompositionChip, CompositionPreset, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, IntentParseResponse, ModelProfileOption, PromptCandidate, SceneDraft, SceneDraftItem, SceneRelation, TagSuggestion, TranslationResponse, WorkbenchGenerationSettings, WorkbenchResponse, WorkspaceDraft, WorkspaceListResponse, WorkspaceRecord} from "../lib/types";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
+import {LlmSettingsPanel} from "../components/LlmSettingsPanel";
 
 const artistRankingLabels: Record<ArtistRanking, string> = {
   tag_fit: "题材贴合",
@@ -25,7 +27,7 @@ type WorkbenchSectionId = "workbench-editor" | "workbench-translation" | "workbe
 type WorkbenchNavItem = {id: WorkbenchSectionId; label: string; meta: string; badge?: number; icon: ReactNode};
 
 const laneMeta: Record<CandidateLane, {index: string; label: string; detail: string}> = {
-  literal: {index: "L", label: "Literal", detail: "只保留可确定映射的输入"},
+  literal: {index: "L", label: "Literal", detail: "保留画面原意，标签作为识别证据"},
   conservative: {index: "C", label: "Conservative", detail: "增加少量高置信相关标签"},
   artist: {index: "A", label: "Artist", detail: "在保守候选上增加一位画师"},
   hybrid: {index: "H", label: "Hybrid", detail: "保留画面计划与明确关系"},
@@ -42,7 +44,8 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
     if (directImport) {
       return {
         ...base,
-        input_mode: "concepts",
+        input_mode: "natural",
+        natural_text: directImport.positive_text,
         positive_text: directImport.positive_text,
         excluded_text: directImport.excluded_text,
         selected_tags: [],
@@ -53,8 +56,8 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
     const currentTags = base.selected_tags || [];
     return {
       ...base,
-      input_mode: "concepts",
-      positive_text: mergeImportedTags(base.positive_text, importedTags),
+      input_mode: "natural",
+      natural_text: mergeImportedTags(base.natural_text || "", importedTags),
       selected_tags: Array.from(new Set([...currentTags, ...importedTags])),
     };
   });
@@ -97,6 +100,14 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
   const [selectedArtists, setSelectedArtists] = useState<string[]>([]);
   const [artistComparisonSeed, setArtistComparisonSeed] = useState(() => Math.floor(Math.random() * 2_000_000_000));
   const [artistComparisonBusy, setArtistComparisonBusy] = useState(false);
+  const [llmPrompt, setLlmPrompt] = useState<string | null>(null);
+  const [llmNegative, setLlmNegative] = useState("");
+  const [llmWarnings, setLlmWarnings] = useState<string[]>([]);
+  const [llmMode, setLlmMode] = useState<"faithful" | "expand">("faithful");
+  const [llmSource, setLlmSource] = useState("");
+  const [llmBusy, setLlmBusy] = useState(false);
+  const [llmRule, setLlmRule] = useState<string | null>(null);
+  const [llmError, setLlmError] = useState<string | null>(null);
   const idempotencyKeys = useRef(new Map<string, string>());
   const artistComparisonIdempotency = useRef<{selection: string; comparisonId: string; key: string} | null>(null);
   const artistRecommendAbort = useRef<AbortController | null>(null);
@@ -118,6 +129,8 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
   const profile = draft.model_profile;
   const inputMode = draft.input_mode || "concepts";
   const naturalText = draft.natural_text || "";
+  const llmInputKey = JSON.stringify([naturalText, excludedText, llmMode]);
+  const llmStale = llmSource !== llmInputKey;
   const selectedTags = draft.selected_tags || [];
   const suppressedTags = draft.suppressed_tags || [];
   const generationSettings = draft.generation_settings || defaultGenerationSettings();
@@ -186,14 +199,13 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
       : [];
     if (!persisted && preferredTargets.length && current?.remote_profile_id !== preferredRemoteId) {
       const preferred = preferredTargets.find((target) => target.workflow_profile_id === selectedWorkflowId)
-        || preferredTargets.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name))
-        || preferredTargets[0];
-      chooseGenerationTarget(preferred, false);
+        || defaultTarget(preferredTargets);
+      if (preferred) chooseGenerationTarget(preferred, false);
       return;
     }
     if (!current) {
       const ready = compatibleTargets.filter((target) => target.host_fingerprint_ready);
-      const fallback = ready.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name)) || ready[0] || compatibleTargets[0];
+      const fallback = defaultTarget(ready) || defaultTarget(compatibleTargets);
       if (fallback) chooseGenerationTarget(fallback, false);
       else setSelectedTarget("");
       return;
@@ -204,8 +216,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
   function selectRemoteConnection(remoteProfileId: string) {
     const options = compatibleTargets.filter((target) => target.remote_profile_id === remoteProfileId);
     const preferred = options.find((target) => target.workflow_profile_id === selectedWorkflowId)
-      || options.find((target) => /aesthetic[_\s-]*v?1\.1/i.test(target.workflow_display_name))
-      || options[0];
+      || defaultTarget(options);
     setPreferredRemoteId(remoteProfileId);
     try { localStorage.setItem(PREFERRED_REMOTE_KEY, remoteProfileId); } catch { /* Best-effort preference. */ }
     if (preferred) chooseGenerationTarget(preferred);
@@ -306,10 +317,10 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
   }
 
   function changeModelProfile(modelProfile: string) {
-    const nextTarget = generationTargets.find((target) => (
+    const nextTarget = defaultTarget(generationTargets.filter((target) => (
       target.compatible_model_profiles.includes(modelProfile)
       && target.remote_profile_id === selectedRemoteId
-    )) || generationTargets.find((target) => target.compatible_model_profiles.includes(modelProfile));
+    ))) || defaultTarget(generationTargets.filter((target) => target.compatible_model_profiles.includes(modelProfile)));
     const nextSettings = nextTarget ? applyGenerationRecipe(generationSettings, nextTarget) : generationSettings;
     if (nextTarget) setSelectedTarget(targetKey(nextTarget));
     editDraft({model_profile: modelProfile, generation_settings: nextSettings});
@@ -475,6 +486,37 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
     } finally {
       setLoading(false);
     }
+  }
+
+  async function generateLlmPrompt() {
+    if (!naturalText.trim()) return;
+    setLlmBusy(true);
+    setLlmError(null);
+    try {
+      const payload = await apiRequest<{positive: string; negative: string; warnings: string[]; rule_id: string; engine: string}>("/api/v3/workbench/prompt", {
+        method: "POST",
+        body: JSON.stringify({source_text: naturalText, excluded_text: excludedText, mode: llmMode}),
+      });
+      setLlmPrompt(payload.positive);
+      setLlmNegative(payload.negative);
+      setLlmWarnings(payload.warnings || []);
+      setLlmSource(llmInputKey);
+      setLlmRule(payload.rule_id);
+    } catch (caught) {
+      setLlmError((caught as ApiClientError).message);
+      setLlmPrompt(null);
+      setLlmRule(null);
+    } finally {
+      setLlmBusy(false);
+    }
+  }
+
+  async function copyLlmPrompt() {
+    if (!llmPrompt) return;
+    await navigator.clipboard.writeText(llmPrompt);
+    const key = "llm:positive";
+    setCopied(key);
+    window.setTimeout(() => setCopied((current) => current === key ? null : current), 1500);
   }
 
   async function toggleTagSuggestion(tag: string) {
@@ -791,7 +833,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
     if (!result || !artistComparisonBase) return;
     const target = compatibleTargets.find((item) => targetKey(item) === selectedTarget);
     if (!target) {
-      setGenerationNotice("当前模型没有可用的远程工作流。");
+      setGenerationNotice("当前模型没有就绪工作流，请到设置 → 管理工作流检测服务器并配置文件映射。");
       return;
     }
     if (!selectedArtists.length) {
@@ -853,7 +895,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
     if (!result) return;
     const target = compatibleTargets.find((item) => targetKey(item) === selectedTarget);
     if (!target) {
-      setGenerationNotice("当前模型没有可用的远程工作流。");
+      setGenerationNotice("当前模型没有就绪工作流，请到设置 → 管理工作流检测服务器并配置文件映射。");
       return;
     }
     setGenerationBusy(candidate.id);
@@ -895,6 +937,46 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
     }
   }
 
+  async function submitLlmPrompt() {
+    if (!llmPrompt?.trim() || llmStale || llmBusy) return;
+    const target = compatibleTargets.find((item) => targetKey(item) === selectedTarget);
+    if (!target) {
+      setGenerationNotice("当前模型没有就绪工作流，请到设置 → 管理工作流检测服务器并配置文件映射。");
+      return;
+    }
+    setGenerationBusy("llm");
+    setGenerationNotice(null);
+    const idempotencyKey = `web-${workspace?.id || "draft"}-${workspace?.revision || 0}-llm-${crypto.randomUUID()}`;
+    try {
+      if (target.auth_type === "private_key" && privateKeyPassphrase) {
+        await apiRequest<{configured: boolean}>("/api/v3/generation-credentials/private-key-passphrase", {
+          method: "POST",
+          body: JSON.stringify({remote_profile_id: target.remote_profile_id, passphrase: privateKeyPassphrase}),
+        });
+        setPrivateKeyPassphrase("");
+        setGenerationTargets((items) => items.map((item) => item.remote_profile_id === target.remote_profile_id ? {...item, private_key_passphrase_configured: true} : item));
+      }
+      await apiRequest<GenerationRunRecord>("/api/v3/direct-prompt/runs", {
+        method: "POST",
+        headers: {"Idempotency-Key": idempotencyKey},
+        body: JSON.stringify({
+          positive_prompt: llmPrompt,
+          negative_prompt: llmNegative,
+          model_profile: profile,
+          project_name: workspaceTitle,
+          settings: resolvedGenerationSettings(generationSettings),
+          remote_profile_id: target.remote_profile_id,
+          workflow_profile_id: target.workflow_profile_id,
+        }),
+      });
+      setGenerationNotice("已按 LLM 生成的提示词提交到远程队列。进度可在“生成”页查看。");
+    } catch (caught) {
+      setGenerationNotice((caught as ApiClientError).message);
+    } finally {
+      setGenerationBusy(null);
+    }
+  }
+
   async function previewTranslation() {
     if (!translationSource.trim()) return;
     setTranslationBusy(true);
@@ -915,7 +997,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
 
   const visibleArtistSuggestions = artistComparisonBase ? artistSuggestions : (result?.artist_suggestions || []);
   const reviewIssueCount = result?.scene_draft
-    ? result.scene_draft.unresolved.length + result.scene_draft.risk_notes.length + (result.scene_draft.ambiguous || []).length + (result.scene_draft.ambiguous_exclusions || []).length
+    ? result.scene_draft.unresolved.length + result.scene_draft.risk_notes.length + (result.scene_draft.ambiguous || []).length + (result.scene_draft.ambiguous_exclusions || []).length + (result.scene_draft.translation_review?.missing_anchors.length || 0)
     : 0;
   const workbenchNavItems: WorkbenchNavItem[] = [
     {id: "workbench-editor", label: "输入与生成", meta: `${profiles.find((item) => item.id === profile)?.label || "模型"} · ${aspectLabels[generationSettings.aspect]}`, icon: <NotePencil aria-hidden="true" weight="regular" />},
@@ -930,8 +1012,8 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
   return (
     <section className="page workbench-page">
       <header className="page-header workbench-header">
-        <div><span className="eyebrow">PROMPT WORKBENCH</span><h1>候选工作台</h1><p>先忠实映射输入，再人工删改标签和英文画面计划；推荐和画师都是可比较、可移除的增量。</p></div>
-        <div className="header-stat"><strong>{result?.candidates.length || "—"}</strong><span>validated lanes</span></div>
+        <div><span className="eyebrow">LLM PROMPT WORKBENCH</span><h1>LLM 工作台</h1><p>中文描述转换为英文提示词；先核对正负词与排除范围，再使用所选工作流生图。</p></div>
+        <div className="header-stat"><strong>实验版</strong><span>review before generation</span></div>
       </header>
 
       <div className="workspace-toolbar">
@@ -959,18 +1041,15 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
       <div className="workbench-layout">
         <WorkbenchOutline items={workbenchNavItems} activeSection={activeSection} onJump={jumpToWorkbenchSection} />
         <div className="workbench-flow">
+          <LlmSettingsPanel />
           <WorkbenchDisclosure id="workbench-editor" title="输入与生成" summary="描述画面、选择工作流并确认生成参数" open={openSections["workbench-editor"]} onToggle={() => toggleWorkbenchSection("workbench-editor")}>
-            <div className="input-mode-tabs" role="tablist" aria-label="输入方式">
-              <button type="button" role="tab" aria-selected={inputMode === "concepts"} onClick={() => switchInputMode("concepts")}>结构化概念</button>
-              <button type="button" role="tab" aria-selected={inputMode === "natural"} disabled={!naturalLanguageEnabled} title={naturalLanguageEnabled ? "本地翻译、词典与数据包索引；不调用 AI API" : "请先连接 V2 本地翻译资源"} onClick={() => switchInputMode("natural")}>自然语言描述</button>
-            </div>
-            <form className="workbench-composer" onSubmit={generate}>
+            <form className="workbench-composer" onSubmit={(event) => event.preventDefault()}>
         <div className="composer-input-grid">
           <div className="composer-main">
             {inputMode === "natural" ? <>
               <label htmlFor="natural-description">描述你想生成的画面</label>
               <textarea id="natural-description" value={naturalText} onChange={(event) => editDraft({natural_text: event.target.value})} placeholder="可以粘贴小说片段或完整画面描述。系统只抽取当前画面可见事实。" rows={7} />
-              <div className="concept-summary"><span>{naturalText.trim().length} 字</span><span>本地翻译与词典索引 · V3 负责映射、推荐与校验</span></div>
+              <div className="concept-summary"><span>{naturalText.trim().length} 字</span><span>LLM 英文转换 · 先审阅正负提示词，再提交生图</span></div>
             </> : <>
               <label htmlFor="positive-concepts">希望画面中出现</label>
               <textarea id="positive-concepts" value={positiveText} onChange={(event) => editDraft({positive_text: event.target.value})} placeholder="每行或用逗号分隔，例如：女仆、双马尾、咖啡厅\n在词前加 ! 可锁定" rows={5} />
@@ -985,7 +1064,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
             </> : <>
               <label htmlFor="natural-exclusions">明确排除（可选）</label>
               <textarea id="natural-exclusions" value={excludedText} onChange={(event) => editDraft({excluded_text: event.target.value})} placeholder="例如：文字、水印、金发" rows={3} />
-              <p className="natural-mode-hint">描述里的“不要文字和水印”也会自动识别。角色、作品和过宽的整类标签仍需点选确认。</p>
+              <p className="natural-mode-hint">排除项与描述一起交给 LLM。局部排除不会直接当作全局负面词；请在生成后核对结果。</p>
             </>}
           </aside>
         </div>
@@ -1015,7 +1094,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
             <div className="generation-field">
               <label htmlFor="generation-preset">生成配方</label>
               <select id="generation-preset" value={activeGenerationRecipe?.id || "custom"} onChange={(event) => selectGenerationRecipe(event.target.value)} disabled={!activeTarget?.generation_recipes?.length}>
-                {generationSettings.preset_id === "custom" && <option value="custom">自定义参数</option>}
+                {(generationSettings.preset_id === "custom" || !activeTarget?.generation_recipes?.length) && <option value="custom">{activeTarget ? "自定义参数" : "请先选择工作流"}</option>}
                 {(activeTarget?.generation_recipes || []).map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.display_name}{recipe.evidence === "experimental" ? " · 实验" : ""}</option>)}
               </select>
             </div>
@@ -1029,11 +1108,17 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
               <div className="generation-field generation-field--workflow">
                 <label htmlFor="generation-workflow">工作流</label>
                 <select id="generation-workflow" aria-label="远程工作流" value={selectedWorkflowId || ""} onChange={(event) => { const target = connectionWorkflows.find((item) => item.workflow_profile_id === event.target.value); if (target) chooseGenerationTarget(target); }} disabled={!connectionWorkflows.length}>
-                  {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}</option>) : <option value="">当前模型无兼容工作流</option>}
+                  {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}{targetStatus(target) ? ` · ${targetStatus(target)}` : ""}</option>) : <option value="">当前模型无兼容工作流</option>}
                 </select>
               </div>
             </>}
           </div>
+          {remoteEnabled && activeTarget && !targetReady(activeTarget) && <div className="workspace-notice" role="status">
+            工作流{targetStatus(activeTarget)}。点击生图会自动刷新未检测或过期的状态，通过后继续提交；缺少依赖或映射失效需先修复。
+            <p>{activeTarget.availability_errors?.join("；")}</p>
+            <a href="/settings">前往设置 → 管理工作流检测</a>
+            <button type="button" onClick={() => void apiRequest<GenerationTargetListResponse>("/api/v3/generation-targets").then(payload => setGenerationTargets(payload.items)).catch(caught => setGenerationNotice((caught as ApiClientError).message))}>刷新工作流状态</button>
+          </div>}
           <div className="generation-recipe-note">
             <span>配方说明</span>
             <p>{activeGenerationRecipe?.notes || (generationSettings.preset_id === "custom" ? "参数已偏离配方，提交时仍会按当前工作流能力校验。" : "选择工作流后加载对应的 V3 生成配方。")}</p>
@@ -1085,11 +1170,32 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
         </section>
 
         <footer className="composer-actions">
+          <label>提示词处理方式<select aria-label="提示词处理方式" value={llmMode} onChange={(event) => setLlmMode(event.target.value as "faithful" | "expand")}>
+            <option value="faithful">忠实英文转换（默认）</option><option value="expand">适度扩写（允许补充细节）</option>
+          </select></label>
           {suppressedTags.length > 0 && <div className="suppressed-summary"><span>当前工作台已移除 {suppressedTags.length} 个标签</span><button type="button" disabled={loading} onClick={() => void clearSuppressedTags()}>恢复全部</button></div>}
-          <button className="button generate-button" type="submit" disabled={(inputMode === "natural" ? !naturalText.trim() : !positiveItems.length) || loading}>{loading ? (inputMode === "natural" ? "正在本地编译并验证…" : "正在验证…") : (inputMode === "natural" ? "编译并生成候选" : "生成候选")}</button>
+          <button className="button generate-button" type="button" disabled={!naturalText.trim() || llmBusy || loading} onClick={() => void generateLlmPrompt()}>{llmBusy ? "LLM 生成中…" : "生成提示词（LLM 小助手内核）"}</button>
         </footer>
             </form>
           </WorkbenchDisclosure>
+
+          {(llmPrompt !== null || llmError) && <section className="llm-prompt-result" aria-label="LLM 生成提示词">
+            <div className="llm-prompt-header"><strong>LLM 生成提示词</strong><span>{llmRule || "默认规则"} · 提示词小助手内核</span></div>
+            {llmError && <p className="workspace-notice workspace-notice--error" role="alert">{llmError}</p>}
+            {llmPrompt !== null && <>
+              <label>最终正向提示词<textarea aria-label="最终正向提示词" rows={7} value={llmPrompt} onChange={(event) => setLlmPrompt(event.target.value)} /></label>
+              <label>最终负向提示词<textarea aria-label="最终负向提示词" rows={3} value={llmNegative} onChange={(event) => setLlmNegative(event.target.value)} placeholder="为空即不使用负面提示词，不会自动补默认词" /></label>
+              <button type="button" onClick={() => void copyLlmPrompt()}>{copied === "llm:positive" ? "已复制" : "复制正向提示词"}</button>
+              {llmWarnings.map((warning, index) => <p key={index} role="status">待核对：{warning}</p>)}
+              {llmStale && <p role="alert">输入、排除项或处理方式已改变，请重新生成提示词后再提交。</p>}
+            </>}
+            {generationNotice && <p className="workspace-notice workspace-notice--error" role="alert">{generationNotice}</p>}
+            {llmPrompt && <div className="llm-prompt-actions">
+              <button type="button" className="button generate-button" disabled={!llmPrompt.trim() || llmStale || !remoteEnabled || !activeTarget?.host_fingerprint_ready || generationBusy !== null || llmBusy} onClick={() => void submitLlmPrompt()}>{generationBusy === "llm" ? "正在提交…" : "用此提示词远程生图"}</button>
+              <small>{activeTarget ? `目标：${activeTarget.workflow_display_name}${activeTarget.host_fingerprint_ready ? "" : " · 指纹未确认"}` : "当前模型无兼容工作流"}</small>
+            </div>}
+            <p className="llm-prompt-note">将按上方当前正负提示词原文提交（仅去除首尾空白），不再经过词典编译或补默认负面词。请人工核对主体、数量、空间关系和排除范围。工作流与高级参数使用“生成设置”中的当前选择。</p>
+          </section>}
 
           {localTranslationEnabled && <WorkbenchDisclosure id="workbench-translation" title="本地翻译" summary={translation ? `${translation.engine} · 已生成英译结果` : "独立辅助工具，不参与 V3 候选编译"} open={openSections["workbench-translation"]} onToggle={() => toggleWorkbenchSection("workbench-translation")}>
             <section className="translation-preview" aria-label="本地翻译预览">
@@ -1123,6 +1229,17 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
                   </div>
                   {generationNotice && <div className="workspace-notice workspace-notice--error" role="alert">{generationNotice}</div>}
                   <div className="candidate-grid">
+                    {result.scene_draft?.translation_review && <div className="workspace-notice" role="status">
+                      <strong>画面保真检查</strong>
+                      <p>{result.scene_draft.translation_review.note}</p>
+                      {result.scene_draft.translation_review.requires_review && <p>译文有缺失锚点或未翻译内容，请先核对画面计划。</p>}
+                      {result.scene_draft.translation_review.missing_anchors.length > 0 && <ul>
+                        {result.scene_draft.translation_review.missing_anchors.map((item, index) => <li key={`${item.source}-${index}`}>译文待核对：{item.source} → {item.expected}</li>)}
+                      </ul>}
+                      {!!result.scene_draft.translation_segments?.length && <details><summary>逐句查看原文与译文</summary>
+                        {result.scene_draft.translation_segments.map((segment, index) => <p key={index}>{segment.source}<br />{segment.english}{segment.status !== "protected" && <small> · 机器翻译，需核对关系与语义</small>}</p>)}
+                      </details>}
+                    </div>}
                     {result.candidates.map((candidate) => (
                       <CandidateCard key={candidate.id} candidate={candidate} copied={copied} onCopy={copyPrompt} onGenerate={remoteEnabled ? submitGeneration : undefined} generationBusy={generationBusy === candidate.id} generationDisabled={!activeTarget?.host_fingerprint_ready || generationBusy !== null} onRemoveTag={removeCandidateTag} onUseArtistComparisonBase={useArtistComparisonBase} isArtistComparisonBase={artistComparisonBase?.id === candidate.id} chineseLabels={chineseLabels} proseZh={result.scene_draft?.back_translation?.text || ""} negativeZh={result.scene_draft?.back_translation?.negative_text || ""} />
                     ))}
@@ -1148,7 +1265,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
                 </WorkbenchDisclosure>
               </>
             ) : (
-              <EmptyState title="从忠实基准开始" detail="输入画面概念后，工作台会并排生成可追踪的候选。自动推荐不会静默加入角色或版权标签。" />
+              <EmptyState title="从忠实英文转换开始" detail="配置 LLM 服务，输入画面描述和排除项，点击生成提示词。结果需要人工审阅，不会自动提交云显卡。" />
             )}
           </div>
         </div>
@@ -1625,7 +1742,7 @@ function CandidateCard({candidate, copied, onCopy, onGenerate, generationBusy = 
         <span>{automatic.length ? `${automatic.length} 个自动推荐` : "无自动扩展"}</span>
         {candidate.unresolved_element_ids.length > 0 && <span className="unresolved-count">{candidate.unresolved_element_ids.length} 项未解析</span>}
         <button type="button" className="candidate-comparison-base" disabled={generationBusy} onClick={() => void onUseArtistComparisonBase(candidate)}>{isArtistComparisonBase ? "当前对照基准" : "设为画师对照基准"}</button>
-        {onGenerate && <button type="button" className="candidate-generate" disabled={generationDisabled} onClick={() => void onGenerate(candidate)}>{generationBusy ? "正在提交…" : "远程生图"}</button>}
+        {onGenerate && <button type="button" className="candidate-generate" disabled={generationDisabled} onClick={() => void onGenerate(candidate)}>{generationBusy ? "正在检查依赖并提交…" : "远程生图"}</button>}
       </footer>
       {candidate.warnings.length > 0 && <details className="candidate-warnings"><summary>{candidate.warnings.length} 条说明</summary>{candidate.warnings.map((warning) => <p key={`${warning.code}-${warning.message}`}>{warning.message}</p>)}</details>}
     </article>
@@ -1657,7 +1774,7 @@ function normalizeDraft(draft: Partial<WorkspaceDraft> | undefined, naturalLangu
     positive_text: draft?.positive_text || "",
     excluded_text: draft?.excluded_text || "",
     model_profile: modelProfile,
-    input_mode: draft?.input_mode || (naturalLanguageEnabled ? "natural" : "concepts"),
+    input_mode: "natural",
     natural_text: draft?.natural_text || "",
     selected_tags: draft?.selected_tags || [],
     suppressed_tags: draft?.suppressed_tags || [],
