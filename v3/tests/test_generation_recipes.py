@@ -85,6 +85,7 @@ def test_turbo_uses_standard_recipe_as_default_instead_of_fastest_preview() -> N
     ))
 
     assert contract["default_recipe_id"] == "turbo_standard"
+    assert contract["stages"][0]["steps"] == 10
 
 
 @pytest.mark.parametrize(("model", "default_recipe", "sampler", "scheduler"), [
@@ -114,3 +115,13 @@ def test_hires_contract_exposes_both_effective_stages() -> None:
         {"id": "base", "display_name": "基础生成", "steps": 34, "cfg": 4.5, "sampler": "er_sde", "scheduler": "simple"},
         {"id": "refiner", "display_name": "精修阶段", "steps": 18, "cfg": 4.5, "sampler": "er_sde", "scheduler": "simple", "denoise": 0.35, "upscale_factor": 1.5},
     ]
+
+
+@pytest.mark.parametrize("patch", ["AnimaNormalizedAttentionGuidance", "AnimaLayerReplayPatcher"])
+def test_community_model_patches_do_not_claim_author_verified_recipes(patch: str) -> None:
+    target = workflow(model="animayume_v1_0_final")
+    target.api_workflow["901"] = {"class_type": patch, "inputs": {}}
+    contract = build_workflow_recipe_contract(target)
+    assert all(item["evidence"] == "experimental" for item in contract["generation_recipes"])
+    assert contract["generation_recipes"][0]["display_name"] == "社区增强对照"
+    assert contract["generation_recipes"][0]["parameters"]["cfg"] == 5.5

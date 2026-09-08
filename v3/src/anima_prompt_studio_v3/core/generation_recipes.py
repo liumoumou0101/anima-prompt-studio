@@ -211,7 +211,7 @@ def build_workflow_recipe_contract(workflow: WorkflowProfile) -> dict[str, objec
             "sampler": ParameterCapability(mode="editable", value=template.sampler, options=["er_sde", "euler", "euler_ancestral", "dpmpp_2m_sde_gpu"], reason="采样器代表风格取向，不作为质量等级。"),
             "scheduler": ParameterCapability(mode="fixed", value=template.scheduler, reason="沿用当前已保存工作流的调度器。"),
         }
-        stages = [{"id": "base", "display_name": "Turbo 生成", **template.model_dump(mode="json")}]
+        stages = [{"id": "base", "display_name": "Turbo 生成", **turbo(10).model_dump(mode="json")}]
     else:
         default_recipe_id = "stable_baseline"
         stable = template
@@ -229,6 +229,22 @@ def build_workflow_recipe_contract(workflow: WorkflowProfile) -> dict[str, objec
             "scheduler": ParameterCapability(mode="fixed", value=template.scheduler, reason="沿用当前已保存工作流的调度器。"),
         }
         stages = [{"id": "base", "display_name": "单阶段生成", **template.model_dump(mode="json")}]
+
+    # A model author's sampler recommendation is not evidence for additional
+    # community model patches. Inspect nodes rather than relying on filenames.
+    community_patches = sorted({
+        node.get("class_type", "")
+        for node in workflow.api_workflow.values()
+        if node.get("class_type") in {
+            "AnimaNormalizedAttentionGuidance", "AnimaLayerReplayPatcher",
+        }
+    })
+    if community_patches:
+        recipes = [item.model_copy(update={
+            "display_name": item.display_name.replace("作者参数基线", "社区增强对照").replace("稳定基线", "社区增强对照"),
+            "evidence": "experimental",
+            "notes": "此工作流额外启用 NAG / Layer Replay 社区处理，整套效果未经模型作者背书；建议先用无增强的基础工作流。" + item.notes,
+        }) for item in recipes]
 
     return {
         "default_recipe_id": default_recipe_id,
