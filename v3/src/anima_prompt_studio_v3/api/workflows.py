@@ -3,7 +3,7 @@ from fastapi import Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from anima_prompt_studio.domain.execution_models import RemoteCredentials
-from ..adapters.v2.workflow_catalog import WorkflowCatalog, InspectionJobs
+from ..runtime.workflow_catalog import WorkflowCatalog, InspectionJobs
 from .models import RemoteConnectionTestRequest
 
 

@@ -1,4 +1,4 @@
-from anima_prompt_studio.services.remote.comfy_client import ComfyUIClient
+from anima_prompt_studio_v3.remote.comfy_client import ComfyUIClient
 from anima_prompt_studio_v3.adapters.v2.packaged_workflows import packaged_workflow_profiles
 from anima_prompt_studio_v3.adapters.v2.workflow_inspection import inspect_workflows
 

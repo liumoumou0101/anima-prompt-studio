@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from anima_prompt_studio.repositories import SQLiteRepository
+from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
 from anima_prompt_studio_v3.adapters.v2 import V2GalleryReadService, build_v2_gallery_service
 from anima_prompt_studio_v3.adapters.v2 import gallery as gallery_adapter

@@ -10,7 +10,7 @@ from typing import Any
 import os
 import subprocess
 
-from anima_prompt_studio.repositories import SQLiteRepository
+from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 from anima_prompt_studio.services.gallery_assets import (
     IMAGE_SUFFIXES,
     TRASH_DIR_NAME,
@@ -30,7 +30,7 @@ from anima_prompt_studio.services.gallery_upscale import (
     GalleryUpscaleRenderer,
 )
 from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteCredentials
-from anima_prompt_studio.services.remote.credential_store import CredentialStore, CredentialStoreError
+from anima_prompt_studio_v3.remote.credential_store import CredentialStore, CredentialStoreError
 from .workflow_catalog import WorkflowCatalog, catalog
 
 

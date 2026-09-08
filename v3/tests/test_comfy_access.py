@@ -4,8 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
-from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
-from anima_prompt_studio.services.remote.credential_store import CredentialStore, MemoryCredentialBackend
+from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
+from anima_prompt_studio_v3.remote.credential_store import CredentialStore, MemoryCredentialBackend
 from anima_prompt_studio_v3.adapters.v2.comfy_access import COMFY_ACCESS_PORT, ManagedComfyAccess
 
 

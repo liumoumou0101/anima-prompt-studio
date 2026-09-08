@@ -24,6 +24,7 @@ anima-v3-api = "anima_prompt_studio_v3.tools.run_api:main"
 anima-v3-desktop = "anima_prompt_studio_v3.tools.run_desktop:main"
 
 [project.optional-dependencies]
+remote = ["paramiko>=3.4,<5", "requests>=2.32,<3", "websocket-client>=1.8,<2"]
 data = [
   "pandas>=2.2,<4",
   "pyarrow>=17,<24",

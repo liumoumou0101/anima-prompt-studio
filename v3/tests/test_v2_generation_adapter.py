@@ -16,9 +16,9 @@ from anima_prompt_studio.domain.execution_models import (
     WorkflowBinding,
     WorkflowProfile,
 )
-from anima_prompt_studio.services.remote.execution_coordinator import RemoteExecutionCoordinator
-from anima_prompt_studio.services.remote.result_organizer import ResultOrganizer
-from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+from anima_prompt_studio_v3.remote.execution_coordinator import RemoteExecutionCoordinator
+from anima_prompt_studio_v3.remote.result_organizer import ResultOrganizer
+from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
 from anima_prompt_studio_v3.adapters.v2 import (
     BRIDGE_SCHEMA,
@@ -273,7 +273,7 @@ def test_completion_callback_does_not_publish_before_artifacts():
         finished = run.model_copy(update={"state": GenerationRunState.COMPLETED})
         queue._record_update(finished)
         assert queue.get(run.id).state == GenerationRunState.DRAFT
-        from anima_prompt_studio.services.remote.execution_coordinator import ExecutionResult
+        from anima_prompt_studio_v3.remote.execution_coordinator import ExecutionResult
         queue._record_result(ExecutionResult(run=finished, artifacts=[]))
         assert queue.get(run.id).state == GenerationRunState.COMPLETED
     finally:

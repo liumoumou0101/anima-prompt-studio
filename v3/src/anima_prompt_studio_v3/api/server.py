@@ -39,14 +39,13 @@ class LocalApiServer:
             try:
                 from ..adapters.v2 import (
                     build_v2_gallery_service,
-                    build_v2_generation_queue,
                     build_v2_intent_parser,
                     build_v2_local_translation_adapter,
-                    ManagedComfyAccess,
                 )
+                from ..runtime import build_generation_queue, ManagedComfyAccess
             except ModuleNotFoundError as exc:
                 raise RuntimeError("当前安装不包含 V2 兼容运行时。") from exc
-            self._owned_generation_queue = build_v2_generation_queue(v2_database)
+            self._owned_generation_queue = build_generation_queue(v2_database)
             generation_queue = self._owned_generation_queue
             intent_parser = build_v2_intent_parser(v2_database)
             gallery_service = build_v2_gallery_service(v2_database)

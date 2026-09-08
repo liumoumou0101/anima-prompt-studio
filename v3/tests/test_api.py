@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from anima_prompt_studio.domain.execution_models import GenerationRun, GenerationRunState
-from anima_prompt_studio.repositories import SQLiteRepository
+from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
 from anima_prompt_studio_v3.adapters.v2 import (
     V2GalleryReadService,
@@ -433,7 +433,7 @@ def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
-    from anima_prompt_studio.services.remote import comfy_client, ssh_tunnel
+    from anima_prompt_studio_v3.remote import comfy_client, ssh_tunnel
 
     v2_database = tmp_path / "v2.db"
     repository = SQLiteRepository(v2_database)
@@ -511,7 +511,7 @@ def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
     assert inspected.status_code == 200
     report = inspected.json()["workflow_inspection"]
     assert report["remote_profile_id"] == "v3-ready"
-    assert len(report["items"]) == 6
+    assert len(report["items"]) == 9
     assert all(item["state"] == "missing_nodes" for item in report["items"])
     assert events[-1] == "close"
 
@@ -531,13 +531,13 @@ def test_workflow_management_requires_session_and_imports_copies(reference_db, t
     headers = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
     report = client.get(path, headers=headers)
     assert report.status_code == 200
-    assert len(report.json()["items"]) == 6
+    assert len(report.json()["items"]) == 9
     assert all(i["state"] == "unchecked" for i in report.json()["items"])
     exported = client.get("/api/v3/workflows/export/23_Turbo_v1.1", headers=headers)
     imported = client.post("/api/v3/workflows/import", json=exported.json(), headers=headers)
     assert imported.status_code == 200
     assert imported.json()["id"].startswith("user:")
-    assert len(catalog(database)) == 7
+    assert len(catalog(database)) == 10
     disabled = client.put("/api/v3/workflows/23_Turbo_v1.1/enabled", json={"enabled": False}, headers=headers)
     assert disabled.status_code == 200
     diagnostics = client.get(path + "/diagnostics", headers=headers).text
@@ -646,10 +646,11 @@ def test_local_api_server_owns_comfy_access_lifecycle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import anima_prompt_studio_v3.adapters.v2 as adapters
+    import anima_prompt_studio_v3.runtime as runtime
 
     events: list[str] = []
     v2_database = tmp_path / "v2.db"
-    from anima_prompt_studio.repositories import SQLiteRepository
+    from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
     SQLiteRepository(v2_database).close()
 
     class FakeQueue:
@@ -673,11 +674,11 @@ def test_local_api_server_owns_comfy_access_lifecycle(
         def status(self):
             return {"state": "stopped", "ready": False, "local_url": "http://127.0.0.1:18188"}
 
-    monkeypatch.setattr(adapters, "build_v2_generation_queue", lambda _database: FakeQueue())
+    monkeypatch.setattr(runtime, "build_generation_queue", lambda _database: FakeQueue())
     monkeypatch.setattr(adapters, "build_v2_gallery_service", lambda _database: FakeGallery())
     monkeypatch.setattr(adapters, "build_v2_intent_parser", lambda _database: object())
     monkeypatch.setattr(adapters, "build_v2_local_translation_adapter", lambda: object())
-    monkeypatch.setattr(adapters, "ManagedComfyAccess", FakeComfyAccess)
+    monkeypatch.setattr(runtime, "ManagedComfyAccess", FakeComfyAccess)
 
     with LocalApiServer(reference_db, v2_database=v2_database):
         assert "comfy-start" in events
@@ -1782,10 +1783,10 @@ def test_workspace_crud_persists_separately_and_rejects_stale_revision(
         "aspect": "portrait",
         "width": 896,
         "height": 1152,
-        "steps": 30,
-        "cfg": 4.0,
-        "sampler": "er_sde",
-        "scheduler": "simple",
+        "steps": 35,
+        "cfg": 4.5,
+        "sampler": "euler",
+        "scheduler": "normal",
         "seed": -1,
         "batch_size": 1,
         "remote_profile_id": None,

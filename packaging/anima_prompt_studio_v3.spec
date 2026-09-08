@@ -33,6 +33,9 @@ hiddenimports = sorted(
     set(
         collect_submodules("anima_prompt_studio.services.remote")
         + collect_submodules("anima_prompt_studio_v3.adapters.v2")
+        + collect_submodules("anima_prompt_studio_v3.runtime")
+        + collect_submodules("anima_prompt_studio_v3.remote")
+        + collect_submodules("anima_prompt_studio_v3.storage")
     )
 )
 

@@ -30,9 +30,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Mutable workspace state database (default: .local/state/workspaces.db).",
     )
     parser.add_argument(
-        "--v2-database",
+        "--runtime-database", "--v2-database",
+        dest="v2_database",
         type=Path,
-        help="Optional existing V2 database; enables remote generation with its profiles and workflows.",
+        help="Runtime database for remote generation; existing V2 schema is supported.",
     )
     args = parser.parse_args(argv)
     try:
@@ -43,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         frontend_dist = args.frontend_dist.resolve() if args.frontend_dist is not None else None
         if args.v2_database is not None:
-            from ..adapters.v2.packaged_workflows import migrate_packaged_workflow_ownership
+            from ..runtime.packaged_workflows import migrate_packaged_workflow_ownership
             migrate_packaged_workflow_ownership(args.v2_database.resolve())
         with LocalApiServer(
             reference_db,

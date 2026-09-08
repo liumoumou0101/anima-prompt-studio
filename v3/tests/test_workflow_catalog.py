@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from anima_prompt_studio.domain.execution_models import RemoteProfile
-from anima_prompt_studio.repositories import SQLiteRepository
+from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 from anima_prompt_studio_v3.adapters.v2.workflow_catalog import WorkflowCatalog, catalog, fingerprint
 from anima_prompt_studio_v3.adapters.v2.packaged_workflows import packaged_workflow_profiles, migrate_packaged_workflow_ownership
 
@@ -34,7 +34,7 @@ def capabilities(manager, remote_id, replacement=None):
 
 
 def test_empty_database_uses_resources_without_seeding(manager):
-    assert len(catalog(manager.database)) == 6
+    assert len(catalog(manager.database)) == 9
     repo = SQLiteRepository(manager.database)
     assert repo.list_workflow_profiles() == []
     repo.close()
@@ -211,7 +211,7 @@ def test_archived_version_restores_as_independent_user_copy(manager):
     assert len(versions) == 1
     restored = manager.restore_version("23_Turbo_v1.1", versions[0]["revision"])
     assert restored["id"].startswith("user:")
-    assert len(catalog(manager.database)) == 7
+    assert len(catalog(manager.database)) == 10
 
 
 def test_simple_api_import_and_invalid_graph(manager):

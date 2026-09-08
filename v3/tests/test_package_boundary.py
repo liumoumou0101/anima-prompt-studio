@@ -12,7 +12,7 @@ def test_v3_package_has_independent_version() -> None:
 
 
 def test_v2_adapter_imports_without_loading_v2_ui() -> None:
-    assert CandidateToV2PromptJobAdapter.__module__.endswith("adapters.v2.generation")
+    assert CandidateToV2PromptJobAdapter.__module__.endswith("runtime.generation")
     assert "anima_prompt_studio.ui" not in inspect.getsource(generation_adapter)
 
 

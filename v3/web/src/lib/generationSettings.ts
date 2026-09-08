@@ -14,10 +14,10 @@ export function defaultGenerationSettings(): WorkbenchGenerationSettings {
     aspect: "portrait",
     width: 896,
     height: 1152,
-    steps: 30,
-    cfg: 4,
-    sampler: "er_sde",
-    scheduler: "simple",
+    steps: 35,
+    cfg: 4.5,
+    sampler: "euler",
+    scheduler: "normal",
     seed: -1,
     batch_size: 1,
     remote_profile_id: null,
@@ -32,9 +32,12 @@ export function findGenerationRecipe(target: GenerationTarget | undefined, recip
 export function applyGenerationRecipe(
   settings: WorkbenchGenerationSettings,
   target: GenerationTarget,
-  recipeId = target.default_recipe_id || target.generation_recipes?.[0]?.id || "custom",
+  recipeId?: string,
 ): WorkbenchGenerationSettings {
-  const recipe = findGenerationRecipe(target, recipeId) || target.generation_recipes?.[0];
+  if (recipeId === undefined && (settings.preset_id === "custom" || (!!settings.workflow_profile_id && !findGenerationRecipe(target, settings.preset_id)))) {
+    return {...settings, preset_id: "custom", remote_profile_id: target.remote_profile_id, workflow_profile_id: target.workflow_profile_id};
+  }
+  const recipe = findGenerationRecipe(target, recipeId ?? target.default_recipe_id ?? "") || target.generation_recipes?.[0];
   return {
     ...settings,
     preset_id: recipe?.id || "custom",

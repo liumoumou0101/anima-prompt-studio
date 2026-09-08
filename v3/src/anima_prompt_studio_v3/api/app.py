@@ -15,24 +15,23 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
 try:
-    from ..adapters.v2 import (
+    from ..runtime import (
         BRIDGE_SCHEMA,
-        CandidateToV2PromptJobAdapter,
+        CandidateToPromptJobAdapter,
         GenerationQueueError,
         GenerationQueueFullError,
         GenerationRunActionError,
         GenerationRunNotFoundError,
-        GalleryUpscaleError,
-        IntentParseError,
-        IntentParserUnavailableError,
-        V2GenerationSettings,
+        GenerationSettings,
     )
+    from ..adapters.v2.gallery import GalleryUpscaleError
+    from ..adapters.v2.natural_language import IntentParseError, IntentParserUnavailableError
 except ModuleNotFoundError as exc:
     if exc.name != "anima_prompt_studio" and not (exc.name or "").startswith("anima_prompt_studio."):
         raise
     BRIDGE_SCHEMA = "v3-v2-generation-bridge/1"
-    CandidateToV2PromptJobAdapter = None  # type: ignore[assignment,misc]
-    V2GenerationSettings = None  # type: ignore[assignment,misc]
+    CandidateToPromptJobAdapter = None  # type: ignore[assignment,misc]
+    GenerationSettings = None  # type: ignore[assignment,misc]
     GenerationQueueError = RuntimeError  # type: ignore[assignment,misc]
     GenerationQueueFullError = RuntimeError  # type: ignore[assignment,misc]
     GenerationRunActionError = RuntimeError  # type: ignore[assignment,misc]
@@ -161,7 +160,7 @@ ARTIST_RANKING_SETTING = "v3_artist_ranking"
 def _artist_ranking_from_database(database: Path | None) -> str:
     if database is None or not Path(database).is_file():
         return ARTIST_RANKING_TAG_FIT
-    from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+    from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
     repository = SQLiteRepository(database)
     try:
@@ -229,7 +228,7 @@ def create_api_runtime(
     app.state.translation_service = translation_service
     app.state.comfy_access = comfy_access
     profiles = ModelProfileRegistry.built_in()
-    generation_bridge = CandidateToV2PromptJobAdapter() if CandidateToV2PromptJobAdapter is not None else None
+    generation_bridge = CandidateToPromptJobAdapter() if CandidateToPromptJobAdapter is not None else None
 
     @app.middleware("http")
     async def local_request_guard(request: Request, call_next):
@@ -937,7 +936,7 @@ def create_api_runtime(
         queue = app.state.generation_queue
         if queue is None:
             raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
-        if generation_bridge is None or V2GenerationSettings is None:
+        if generation_bridge is None or GenerationSettings is None:
             raise ApiError(503, "v2_runtime_missing", "当前安装不包含 V2 兼容运行时。")
         if not idempotency_key or not idempotency_key.strip():
             raise ApiError(422, "invalid_request", "生成任务必须提供 Idempotency-Key。")
@@ -947,7 +946,7 @@ def create_api_runtime(
                 negative_prompt=payload.negative_prompt,
                 model_profile_id=payload.model_profile,
                 project_name=payload.project_name,
-                settings=V2GenerationSettings(**payload.settings.model_dump()),
+                settings=GenerationSettings(**payload.settings.model_dump()),
             )
             run = queue.submit(
                 prepared,
@@ -1034,7 +1033,7 @@ def create_api_runtime(
 
     @app.post(f"{API_PREFIX}/generation-requests/preview", dependencies=[Depends(require_session)])
     def preview_generation_request(payload: GenerationBridgePreviewRequest) -> dict[str, object]:
-        if generation_bridge is None or V2GenerationSettings is None:
+        if generation_bridge is None or GenerationSettings is None:
             raise ApiError(
                 503,
                 "v2_runtime_missing",
@@ -1045,7 +1044,7 @@ def create_api_runtime(
                 payload.candidate,
                 payload.intent,
                 project_name=payload.project_name,
-                settings=V2GenerationSettings(**payload.settings.model_dump()),
+                settings=GenerationSettings(**payload.settings.model_dump()),
                 workspace_id=payload.workspace_id,
                 workspace_revision=payload.workspace_revision,
             )
@@ -1087,7 +1086,7 @@ def create_api_runtime(
         queue = app.state.generation_queue
         if queue is None:
             raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
-        if generation_bridge is None or V2GenerationSettings is None:
+        if generation_bridge is None or GenerationSettings is None:
             raise ApiError(503, "v2_runtime_missing", "当前安装不包含 V2 兼容运行时。")
         if not idempotency_key or not idempotency_key.strip():
             raise ApiError(422, "invalid_request", "生成任务必须提供 Idempotency-Key。")
@@ -1096,7 +1095,7 @@ def create_api_runtime(
                 payload.candidate,
                 payload.intent,
                 project_name=payload.project_name,
-                settings=V2GenerationSettings(**payload.settings.model_dump()),
+                settings=GenerationSettings(**payload.settings.model_dump()),
                 workspace_id=payload.workspace_id,
                 workspace_revision=payload.workspace_revision,
             )
@@ -1133,7 +1132,7 @@ def create_api_runtime(
         queue = app.state.generation_queue
         if queue is None:
             raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
-        if generation_bridge is None or V2GenerationSettings is None:
+        if generation_bridge is None or GenerationSettings is None:
             raise ApiError(503, "v2_runtime_missing", "当前安装不包含 V2 兼容运行时。")
         if not idempotency_key or not idempotency_key.strip():
             raise ApiError(422, "invalid_request", "画师对照任务必须提供 Idempotency-Key。")
@@ -1166,7 +1165,7 @@ def create_api_runtime(
         project_name = f"{payload.project_name} · 画师对照 {payload.comparison_id[-8:]}"
         submitted: list[dict[str, object]] = []
         failed: list[dict[str, str]] = []
-        settings = V2GenerationSettings(**payload.settings.model_dump())
+        settings = GenerationSettings(**payload.settings.model_dump())
 
         for position, name in enumerate(payload.artist_names, start=1):
             recommendation = recommended[name]
@@ -1274,7 +1273,7 @@ def create_api_runtime(
         preferred_remote_profile_id = ""
         database = app.state.v2_database
         if database is not None:
-            from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+            from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
             repository = SQLiteRepository(database)
             try:
                 preferred_remote_profile_id = str(repository.get_setting("last_remote_profile_id", "") or "")
@@ -1293,7 +1292,7 @@ def create_api_runtime(
         payload: PreferredRemoteProfileRequest,
         database: Path = Depends(require_v2_settings_database),
     ) -> dict[str, object]:
-        from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+        from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
         repository = SQLiteRepository(database)
         try:
@@ -1317,7 +1316,7 @@ def create_api_runtime(
         payload: ArtistRankingSettingsRequest,
         database: Path = Depends(require_v2_settings_database),
     ) -> dict[str, object]:
-        from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+        from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
         repository = SQLiteRepository(database)
         try:
@@ -1331,8 +1330,8 @@ def create_api_runtime(
         database: Path = Depends(require_v2_settings_database),
     ) -> dict[str, object]:
         """Expose V2 connection metadata without ever exposing a secret."""
-        from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
-        from anima_prompt_studio.services.remote.credential_store import CredentialStore, CredentialStoreError
+        from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
+        from anima_prompt_studio_v3.remote.credential_store import CredentialStore, CredentialStoreError
 
         repository = SQLiteRepository(database)
         try:
@@ -1392,7 +1391,7 @@ def create_api_runtime(
     ) -> dict[str, object]:
         profile = _get_v2_remote_profile(database, profile_id)
         try:
-            from anima_prompt_studio.services.remote.ssh_tunnel import SshTunnel
+            from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
             fingerprint = SshTunnel(profile).probe_fingerprint()
         except (OSError, RuntimeError) as exc:
             raise ApiError(502, "ssh_host_key_probe_failed", f"无法读取 SSH 主机指纹：{exc}", retryable=True) from exc
@@ -1409,14 +1408,14 @@ def create_api_runtime(
     ) -> dict[str, object]:
         profile = _get_v2_remote_profile(database, profile_id)
         try:
-            from anima_prompt_studio.services.remote.ssh_tunnel import SshTunnel
+            from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
             actual = SshTunnel(profile).probe_fingerprint()
         except (OSError, RuntimeError) as exc:
             raise ApiError(502, "ssh_host_key_probe_failed", f"无法读取 SSH 主机指纹：{exc}", retryable=True) from exc
         if actual != payload.fingerprint:
             raise ApiError(409, "ssh_host_key_changed", "SSH 主机指纹在确认前发生变化，请重新检测。")
-        from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
-        from anima_prompt_studio.services.remote.credential_store import CredentialStore
+        from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
+        from anima_prompt_studio_v3.remote.credential_store import CredentialStore
         repository = SQLiteRepository(database)
         try:
             repository.save_remote_profile(profile.model_copy(update={"known_host_fingerprint": actual}))
@@ -1436,9 +1435,9 @@ def create_api_runtime(
     ) -> dict[str, object]:
         """Validate SSH authentication, the tunnel and the remote ComfyUI API."""
         from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteCredentials
-        from anima_prompt_studio.services.remote.comfy_client import ComfyUIClient
-        from anima_prompt_studio.services.remote.credential_store import CredentialStore
-        from anima_prompt_studio.services.remote.ssh_tunnel import SshTunnel
+        from anima_prompt_studio_v3.remote.comfy_client import ComfyUIClient
+        from anima_prompt_studio_v3.remote.credential_store import CredentialStore
+        from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
 
         profile = _get_v2_remote_profile(database, profile_id)
         if not profile.known_host_fingerprint.strip():
@@ -1459,8 +1458,8 @@ def create_api_runtime(
             report = client.validate_environment()
             inspection = None
             if inspect_templates:
-                from ..adapters.v2.packaged_workflows import packaged_workflow_profiles
-                from ..adapters.v2.workflow_inspection import inspect_workflows
+                from ..runtime.packaged_workflows import packaged_workflow_profiles
+                from ..runtime.workflow_inspection import inspect_workflows
                 inspection = inspect_workflows(client, packaged_workflow_profiles())
                 inspection["remote_profile_id"] = profile.id
         except Exception as exc:
@@ -1839,7 +1838,7 @@ def _remote_profile_settings_response(profile, credentials) -> dict[str, object]
 
 
 def _get_v2_remote_profile(database: Path, profile_id: str):
-    from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+    from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
     repository = SQLiteRepository(database)
     try:
@@ -1857,8 +1856,8 @@ def _save_remote_profile_settings(database: Path, payload: RemoteProfileSettings
     port, user, authentication or key changes would weaken host-key verification.
     """
     from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
-    from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
-    from anima_prompt_studio.services.remote.credential_store import CredentialStore, CredentialStoreError
+    from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
+    from anima_prompt_studio_v3.remote.credential_store import CredentialStore, CredentialStoreError
 
     repository = SQLiteRepository(database)
     credentials = CredentialStore()

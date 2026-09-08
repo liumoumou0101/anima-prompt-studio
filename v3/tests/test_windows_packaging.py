@@ -14,6 +14,8 @@ def test_v3_pyinstaller_spec_bundles_runtime_web_and_data_pack() -> None:
     assert '"anima_prompt_studio_v3/web/dist"' in spec
     assert 'f"data-packs/{PACK_SOURCE.name}"' in spec
     assert 'name="AnimaPromptStudioV3"' in spec
+    for package in ("runtime", "remote", "storage"):
+        assert f'collect_submodules("anima_prompt_studio_v3.{package}")' in spec
     assert "console=True" in spec
     assert '"icuuc.dll", "icudt78.dll"' in spec
 
