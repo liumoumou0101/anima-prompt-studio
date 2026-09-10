@@ -18,6 +18,8 @@ def test_v3_pyinstaller_spec_bundles_runtime_web_and_data_pack() -> None:
         assert f'collect_submodules("anima_prompt_studio_v3.{package}")' in spec
     assert "console=True" in spec
     assert '"icuuc.dll", "icudt78.dll"' in spec
+    assert 'OfficialPack.validate(EXAMPLE_SOURCE)' in spec
+    assert 'anima_prompt_studio_v3/example_packs/{EXAMPLE_SOURCE.name}' in spec
 
 
 def test_v3_installer_has_distinct_identity_and_double_click_executable() -> None:
@@ -45,6 +47,8 @@ def test_v3_build_script_checks_cleanup_scope_and_accepts_release_version() -> N
     assert "--exit-after-startup" in script
     assert "Upgrade smoke changed the active data-pack pointer" in script
     assert "Upgrade smoke changed the installed reference database" in script
+    assert "--install-bundled-examples" in script
+    assert "Upgrade smoke changed the active example-pack pointer" in script
 
 
 def test_v3_release_workflow_pins_data_pack_and_smokes_installer() -> None:

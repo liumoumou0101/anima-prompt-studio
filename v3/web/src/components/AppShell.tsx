@@ -1,13 +1,14 @@
 import {NavLink, Outlet} from "react-router-dom";
+import {ChatCircleDots, GearSix, Hash, Images, ImageSquare, PaintBrush, TextAlignLeft} from "@phosphor-icons/react";
 import type {BootstrapResponse} from "../lib/types";
 
 const nav = [
-  {to: "/workbench", glyph: "✦", label: "工作台", enabled: true},
-  {to: "/direct", glyph: "↦", label: "英文直出", enabled: true},
-  {to: "/tags", glyph: "#", label: "标签", enabled: true},
-  {to: "/artists", glyph: "@", label: "画师", enabled: true},
-  {to: "/generate", glyph: "◈", label: "生成", enabled: true},
-  {to: "/gallery", glyph: "▦", label: "画廊", enabled: true},
+  {to: "/workbench", icon: ChatCircleDots, label: "工作台", enabled: true},
+  {to: "/direct", icon: TextAlignLeft, label: "英文直出", enabled: true},
+  {to: "/tags", icon: Hash, label: "标签", enabled: true},
+  {to: "/artists", icon: PaintBrush, label: "画师", enabled: true},
+  {to: "/generate", icon: ImageSquare, label: "生成", enabled: true},
+  {to: "/gallery", icon: Images, label: "画廊", enabled: true},
 ];
 
 export function AppShell({bootstrap}: {bootstrap: BootstrapResponse}) {
@@ -20,17 +21,17 @@ export function AppShell({bootstrap}: {bootstrap: BootstrapResponse}) {
         </div>
         <nav className="primary-nav" aria-label="主导航">
           {nav.map((item) => item.enabled ? (
-            <NavLink key={item.to} to={item.to} className={({isActive}) => `nav-item${isActive ? " is-active" : ""}`}>
-              <span className="nav-glyph">{item.glyph}</span><span>{item.label}</span>
+            <NavLink key={item.to} to={item.to} aria-label={item.label} title={item.label} className={({isActive}) => `nav-item${isActive ? " is-active" : ""}`}>
+              <span className="nav-glyph" aria-hidden="true"><item.icon size={19} /></span><span>{item.label}</span>
             </NavLink>
           ) : (
             <span key={item.to} className="nav-item is-disabled" title="后续阶段开放">
-              <span className="nav-glyph">{item.glyph}</span><span>{item.label}</span><i>soon</i>
+              <span className="nav-glyph" aria-hidden="true"><item.icon size={19} /></span><span>{item.label}</span><i>soon</i>
             </span>
           ))}
         </nav>
         <NavLink to="/settings" className={({isActive}) => `nav-item nav-item--settings${isActive ? " is-active" : ""}`} aria-label="设置">
-          <span className="nav-glyph">⚙</span><span>设置</span>
+          <span className="nav-glyph" aria-hidden="true"><GearSix size={19} /></span><span>设置</span>
         </NavLink>
         <div className="sidebar-status">
           <span className={`status-dot${bootstrap.data_pack.ready ? " is-ready" : ""}`} />

@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useRef, useState} from "react";
 import type {FormEvent, ReactNode} from "react";
 import {CaretDown, Images, ListChecks, MagicWand, NotePencil, Translate, UsersThree} from "@phosphor-icons/react";
-import {useSearchParams} from "react-router-dom";
+import {Link, useSearchParams} from "react-router-dom";
 import {apiRequest, ApiClientError} from "../lib/api";
 import {consumeDirectImport} from "../lib/directPrompt";
 import {applyAspect, applyGenerationRecipe, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
@@ -1013,7 +1013,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
     <section className="page workbench-page">
       <header className="page-header workbench-header">
         <div><span className="eyebrow">LLM PROMPT WORKBENCH</span><h1>LLM 工作台</h1><p>中文描述转换为英文提示词；先核对正负词与排除范围，再使用所选工作流生图。</p></div>
-        <div className="header-stat"><strong>实验版</strong><span>review before generation</span></div>
+        <Link to="/workbench/conversation" className="workbench-conversation-link">试用会话创作 <span aria-hidden="true">→</span></Link>
       </header>
 
       <div className="workspace-toolbar">
@@ -1038,10 +1038,10 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
         </select>
       </label>
 
-      <div className="workbench-layout">
-        <WorkbenchOutline items={workbenchNavItems} activeSection={activeSection} onJump={jumpToWorkbenchSection} />
+      <div className={`workbench-layout${workbenchNavItems.length === 1 ? " is-single" : ""}`}>
+        {workbenchNavItems.length > 1 && <WorkbenchOutline items={workbenchNavItems} activeSection={activeSection} onJump={jumpToWorkbenchSection} />}
         <div className="workbench-flow">
-          <LlmSettingsPanel />
+          <LlmSettingsPanel defaultOpen={false} />
           <WorkbenchDisclosure id="workbench-editor" title="输入与生成" summary="描述画面、选择工作流并确认生成参数" open={openSections["workbench-editor"]} onToggle={() => toggleWorkbenchSection("workbench-editor")}>
             <form className="workbench-composer" onSubmit={(event) => event.preventDefault()}>
         <div className="composer-input-grid">
@@ -1124,7 +1124,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
             <p>{activeGenerationRecipe?.notes || (generationSettings.preset_id === "custom" ? "参数已偏离配方，提交时仍会按当前工作流能力校验。" : "选择工作流后加载对应的 V3 生成配方。")}</p>
             {activeTarget?.workflow_notes && <small>{activeTarget.workflow_notes}</small>}
           </div>
-          <details className="generation-advanced" open>
+          <details className="generation-advanced">
             <summary><span>高级参数</span><small>尺寸、Steps、CFG、采样器与随机种子</small></summary>
             <div className="generation-advanced-grid">
               <div className="generation-field">

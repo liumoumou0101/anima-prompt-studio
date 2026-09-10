@@ -26,6 +26,11 @@ beforeEach(() => {
     if (body) writes.push({url, method: init?.method || "GET", body, key: new Headers(init?.headers).get("Idempotency-Key")});
     let response: unknown = {items: []};
     if (url.startsWith("/api/v3/workspaces?")) response = {items: [workspace]};
+    else if (url === "/api/v3/workspaces" && init?.method === "POST") {
+      workspace = {...workspace, id: "workspace_new", revision: 1, title: body.title,
+        draft: {...workspace.draft, ...body.draft, requirements: null, compiled: null, compile_state: "missing", conversation_events: []}};
+      response = workspace;
+    }
     else if (url.endsWith("/generation-targets")) response = {items: [target]};
     else if (url.includes("/workbench/availability")) response = {availability: "ready"};
     else if (url.endsWith("/direct-prompt/runs")) {
@@ -45,7 +50,8 @@ beforeEach(() => {
           return new Response(JSON.stringify({error: {code: "workspace_revision_conflict", message: "已有更新"}}), {status: 409});
         }
         workspace = {...workspace, revision: workspace.revision + 1, draft: {...workspace.draft,
-          ...body.draft, requirements: {...body.draft.requirements_edit, contract: "anima-requirements/1", revision: 2}, compile_state: "stale"}};
+          ...body.draft, generation_settings: Object.fromEntries(Object.entries(body.draft.generation_settings).sort(([a], [b]) => a.localeCompare(b))),
+          requirements: {...body.draft.requirements_edit, contract: "anima-requirements/1", revision: 2}, compile_state: "stale"}};
       }
       response = workspace;
     }
@@ -77,6 +83,7 @@ it("rewrites without generating, then explicitly submits the current token and e
 
 it("marks requirement edits unsaved and preserves them on revision conflict", async () => {
   await mount();
+  fireEvent.click(screen.getByRole("tab", {name: "画面要求"}));
   fireEvent.change(screen.getByLabelText("主体要求"), {target: {value: "本地的狐狸"}});
   expect(screen.getByRole("button", {name: "生成图片"})).toBeDisabled();
   failure = "conflict";
@@ -84,6 +91,57 @@ it("marks requirement edits unsaved and preserves them on revision conflict", as
   await screen.findByText("服务端已有更新，你未提交的输入仍在这里。");
   expect(screen.getByLabelText("主体要求")).toHaveValue("本地的狐狸");
   expect(screen.getByRole("button", {name: "生成图片"})).toBeDisabled();
+});
+
+it("opens older workspaces with absent generation settings without a false unsaved warning", async () => {
+  workspace.draft.generation_settings = undefined;
+  render(<MemoryRouter><ConversationWorkbenchPage /></MemoryRouter>);
+  await screen.findByText("已编译");
+  expect(screen.getByRole("button", {name: "保存要求与设置"})).toBeDisabled();
+  expect(screen.queryByText("要求尚未保存")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", {name: "生成设置"}));
+  fireEvent.change(screen.getByLabelText("宽度"), {target: {value: "1024"}});
+  expect(screen.getByRole("button", {name: "保存要求与设置"})).toBeEnabled();
+});
+
+it("keeps edited prompts across keyboard tab navigation and copies the current text without submitting", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", {...navigator, clipboard: {writeText}});
+  try {
+    await mount();
+    fireEvent.change(screen.getByLabelText("正向提示词"), {target: {value: "edited coffee scene"}});
+    fireEvent.keyDown(screen.getByRole("tab", {name: "提示词"}), {key: "ArrowRight"});
+    expect(screen.getByRole("tab", {name: "画面要求"})).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", {name: "画面要求"})).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("tab", {name: "画面要求"}), {key: "Home"});
+    expect(screen.getByLabelText("正向提示词")).toHaveValue("edited coffee scene");
+    fireEvent.click(screen.getByRole("button", {name: "复制正向提示词"}));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("edited coffee scene"));
+    expect(writes).toHaveLength(0);
+  } finally {vi.unstubAllGlobals();}
+});
+
+it("carries a starting idea into a new local draft without an LLM or generation call", async () => {
+  localStorage.removeItem("anima-conversation-active");
+  render(<MemoryRouter><ConversationWorkbenchPage /></MemoryRouter>);
+  fireEvent.change(screen.getByLabelText("创作想法"), {target: {value: "双手捧花的魔女"}});
+  fireEvent.click(screen.getByRole("button", {name: "创建会话"}));
+  await waitFor(() => expect(screen.getByLabelText("描述你想画的内容")).toHaveValue("双手捧花的魔女"));
+  expect(writes).toHaveLength(1);
+  expect(writes[0].url).toBe("/api/v3/workspaces");
+  expect(JSON.parse(localStorage.getItem("anima-conversation-draft:workspace_new")!).delta).toBe("双手捧花的魔女");
+});
+
+it("saves custom sampling parameters without silently changing the selected image aspect", async () => {
+  await mount();
+  fireEvent.click(screen.getByRole("tab", {name: "生成设置"}));
+  fireEvent.change(screen.getByLabelText("采样器"), {target: {value: "er_sde"}});
+  fireEvent.change(screen.getByLabelText("CFG"), {target: {value: "5.5"}});
+  fireEvent.click(screen.getByRole("button", {name: "保存要求与设置"}));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].body.draft).toMatchObject({generation_settings: {sampler: "er_sde", cfg: 5.5, preset_id: "custom", aspect: "portrait"}});
+  await waitFor(() => expect(screen.getByRole("button", {name: "保存要求与设置"})).toBeDisabled());
+  expect(screen.getByText("需要重新编译")).toBeInTheDocument();
 });
 
 it("retains the exact idempotency key and payload after a lost acceptance response", async () => {

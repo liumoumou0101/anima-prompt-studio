@@ -48,6 +48,67 @@ def test_settings_custom_model_masking_restart_and_key_retention(llm_client):
     assert manager.get_llm_config()["api_key"] == ""
 
 
+def test_refresh_models_preserves_selection_options_and_uses_saved_key(llm_client, monkeypatch):
+    client, manager = llm_client
+    client.put("/api/v3/llm/settings", json=settings())
+    config = manager.load_config()
+    svc = next(s for s in config['model_services'] if s['id'] == 'custom')
+    svc['llm_models'][0]['custom_option'] = 'preserved'
+    manager.save_config(config)
+    observed = []
+    async def get(self, url, **kwargs):
+        observed.append((url, kwargs))
+        return httpx.Response(200, json={'data': [{'id': 'qwen-new'}, {'id': 'kimi-new'}, {'id': 'qwen-new'}]}, request=httpx.Request('GET', url))
+    monkeypatch.setattr(httpx.AsyncClient, 'get', get)
+    response = client.post('/api/v3/llm/services/custom/models/refresh', json={})
+    assert response.json() == {'models': ['kimi-new', 'qwen-new'], 'count': 2}
+    assert observed[0][0] == 'http://127.0.0.1:9876/v1/models'
+    assert observed[0][1]['headers']['Authorization'] == 'Bearer test-secret-12345'
+    assert manager.get_llm_config()['model'] == 'test-model'
+    saved = next(s for s in manager.load_config()['model_services'] if s['id'] == 'custom')
+    assert next(m for m in saved['llm_models'] if m['name'] == 'test-model')['custom_option'] == 'preserved'
+    assert 'test-secret' not in response.text
+
+
+def test_failed_model_refresh_keeps_config_and_hides_upstream_error(llm_client, monkeypatch):
+    client, manager = llm_client
+    client.put('/api/v3/llm/settings', json=settings())
+    before = manager.load_config()
+    async def get(self, url, **kwargs):
+        return httpx.Response(401, text='secret upstream body', request=httpx.Request('GET', url))
+    monkeypatch.setattr(httpx.AsyncClient, 'get', get)
+    response = client.post('/api/v3/llm/services/custom/models/refresh', json={})
+    assert response.status_code == 502
+    assert 'secret upstream' not in response.text
+    assert manager.load_config() == before
+
+
+def test_model_refresh_rejects_changed_service_while_fetching(llm_client, monkeypatch):
+    client, manager = llm_client
+    client.put('/api/v3/llm/settings', json=settings())
+    async def get(self, url, **kwargs):
+        config = manager.load_config()
+        next(s for s in config['model_services'] if s['id'] == 'custom')['base_url'] = 'https://new.example/v1'
+        manager.save_config(config)
+        return httpx.Response(200, json={'data': [{'id': 'late-model'}]}, request=httpx.Request('GET', url))
+    monkeypatch.setattr(httpx.AsyncClient, 'get', get)
+    assert client.post('/api/v3/llm/services/custom/models/refresh', json={}).status_code == 422
+    service = next(s for s in manager.load_config()['model_services'] if s['id'] == 'custom')
+    assert service['base_url'] == 'https://new.example/v1'
+    assert not any(m['name'] == 'late-model' for m in service['llm_models'])
+
+
+def test_ollama_model_discovery(llm_client, monkeypatch):
+    client, _ = llm_client
+    client.put('/api/v3/llm/settings', json=settings(service_type='ollama', base_url='http://127.0.0.1:11434', api_key=None))
+    async def get(self, url, **kwargs):
+        assert url == 'http://127.0.0.1:11434/api/tags'
+        assert kwargs['headers'] == {}
+        return httpx.Response(200, json={'models': [{'name': 'local:latest'}]}, request=httpx.Request('GET', url))
+    monkeypatch.setattr(httpx.AsyncClient, 'get', get)
+    assert client.post('/api/v3/llm/services/custom/models/refresh', json={}).json()['models'] == ['local:latest']
+
+
 @pytest.mark.parametrize("url", ["file:///tmp/api", "https://key:secret@example.com", "https://example.com?key=secret", "http://localhost:invalid"])
 def test_invalid_url_does_not_save(llm_client, url):
     client, manager = llm_client

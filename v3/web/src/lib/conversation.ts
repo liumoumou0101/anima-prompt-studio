@@ -1,4 +1,5 @@
 import type {WorkbenchGenerationSettings, WorkspaceRecord} from "./types";
+import {defaultGenerationSettings} from "./generationSettings";
 
 export type LayerName = "subject" | "style" | "lighting" | "composition" | "exclusions";
 export type Mode = "faithful" | "expand";
@@ -47,8 +48,12 @@ export function cleanRequirements(value: RequirementsEdit): RequirementsEdit {
   clean.loras.forEach(item => {item.trigger_words = item.trigger_words.map(word => word.trim()).filter(Boolean);});
   return clean;
 }
+function comparable(value: unknown): string {
+  return JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right))) : item);
+}
 export function hasUnsavedInputs(record: ConversationRecord, local: LocalConversation): boolean {
   return record.draft.model_profile !== local.model || record.draft.mode !== local.mode
-    || JSON.stringify(editableRequirements(record)) !== JSON.stringify(cleanRequirements(local.requirements))
-    || JSON.stringify(record.draft.generation_settings) !== JSON.stringify(local.settings);
+    || comparable(editableRequirements(record)) !== comparable(cleanRequirements(local.requirements))
+    || comparable(record.draft.generation_settings || defaultGenerationSettings()) !== comparable(local.settings);
 }

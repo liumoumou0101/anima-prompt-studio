@@ -1,5 +1,5 @@
 {
-  "version": "v3-static-v1",
+  "version": "v3-static-v1.1",
   "cases": [
     {
       "id": "alias_chinese_exclusion",
@@ -57,7 +57,7 @@
       "expectations": {
         "required_tags": ["maid", "twintails"],
         "excluded_tags": ["blonde_hair"],
-        "required_lanes": ["literal", "conservative", "artist"]
+        "required_lanes": ["literal", "artist"]
       }
     },
     {

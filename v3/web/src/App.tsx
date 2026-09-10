@@ -81,9 +81,9 @@ export default function App() {
         <Route element={<AppShell bootstrap={bootstrap} />}>
           <Route index element={<Navigate to="/workbench" replace />} />
           <Route path="workbench" element={bootstrap.features.conversational_workbench
-            ? <ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />
+            ? <ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} showClassic={false} />
             : <WorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} naturalLanguageEnabled={Boolean(bootstrap.features.local_translation)} localTranslationEnabled={Boolean(bootstrap.features.local_translation)} />} />
-          <Route path="workbench/conversation" element={<ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
+          <Route path="workbench/conversation" element={<ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} showClassic={!bootstrap.features.conversational_workbench} />} />
           <Route path="direct" element={<DirectPromptPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="tags" element={<TagSearchPage />} />
           <Route path="tags/groups/:groupName" element={<TagGroupPage />} />

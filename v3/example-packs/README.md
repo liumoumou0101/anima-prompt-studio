@@ -1,6 +1,6 @@
 # 官方参考样例包
 
-首包：`cma-styles-20260910-v1`，三张精选开放馆藏图片。已完成图片查看、分层描述、许可与哈希记录、安装/读取/缩略图和 style pin 验证；真实模型质量尚未验收。
+首包：`cma-styles-20260910-v1`，三张精选开放馆藏图片。已完成图片查看、分层描述、许可与哈希记录、安装/读取/缩略图和 style pin 验证；真实成图已评测并保留模型能力限制，详情见文末。
 
 | 条目 | 用途 | 画面特征 |
 | --- | --- | --- |
@@ -18,4 +18,18 @@
 python -m anima_prompt_studio_v3.tools.install_example_pack v3/example-packs/cma-styles-20260910-v1 --destination <工作台数据库同级的 official-examples 目录>
 ```
 
-此包作为独立源码资源交付，尚未捆绑到 wheel/Windows 安装器，也不会在应用启动时自动激活。保持版本目录不可变；修订内容时另建新 pack_id。两项新功能发布 flags 仍关闭，正式发布还需要完成质量验收及发行包集成。
+此包进入 wheel 和 Windows 打包资源，图片、NOTICE、SOURCES、LICENSES 与清单原始字节一同保存；普通启动不自动替换用户已激活的版本。安装程序自带的样例无需源码目录或网络：
+
+```text
+anima-v3-example-pack --bundled --destination <工作台数据库同级的 official-examples 目录>
+```
+
+Windows 便携版/安装版也可使用：
+
+```text
+AnimaPromptStudioV3.exe --install-bundled-examples
+```
+
+该命令安装到默认工作台目录后退出；自定义工作台使用 `--workspace-db <路径>`。不需要启动前端、LLM 或 GPU。重复安装同版本保留个人备注；安装仍执行完整图片及哈希校验。保持版本目录不可变，修订内容时另建新 pack_id。两项新功能发布 flags 仍关闭。
+
+实际成图已完成：木刻等复杂动作有遗漏，记录为能力边界，见 `docs/v3/audits/2026-09-09-conversational-workbench/IMAGE_COMPARISON_20260910.md`；样例适合提取媒介风格，不承诺完整复刻原画。

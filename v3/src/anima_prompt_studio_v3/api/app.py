@@ -907,6 +907,17 @@ def create_api_runtime(
         except RuntimeError as exc:
             raise ApiError(502, "llm_connection_failed", str(exc), retryable=True) from exc
 
+    @app.post(f"{API_PREFIX}/llm/services/{{service_id}}/models/refresh", dependencies=[Depends(require_session)])
+    async def refresh_llm_models(service_id: str) -> dict[str, object]:
+        from ..prompt_assistant.config_manager import config_manager
+        from .llm_workbench import refresh_models
+        try:
+            return await refresh_models(config_manager, service_id)
+        except ValueError as exc:
+            raise ApiError(422, "llm_config_invalid", str(exc)) from exc
+        except RuntimeError as exc:
+            raise ApiError(502, "llm_models_failed", str(exc), retryable=True) from exc
+
     @app.post(f"{API_PREFIX}/intent/parse", dependencies=[Depends(require_session)])
     def parse_intent(payload: IntentParseRequest) -> dict[str, object]:
         parser = app.state.intent_parser

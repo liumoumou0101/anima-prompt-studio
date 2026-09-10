@@ -10,7 +10,7 @@ dist/
 *.db
 *.log
 /reports/
-/.local/conversation-acceptance/
+/.local/
 /release/
 web_gallery/node_modules/
 /*.zip

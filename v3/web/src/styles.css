@@ -395,6 +395,18 @@ body::before {
 .preview-placeholder p { margin: 5px 0 0; color: #6d7483; font-size: 10px; }
 
 .workbench-header { align-items: flex-end; }
+.page.workbench-page { max-width: 1480px; padding: 32px clamp(20px, 3vw, 48px) 48px; }
+.workbench-header h1 { font: 600 30px/1.3 Inter, "Segoe UI", "Microsoft YaHei UI", sans-serif; letter-spacing: -.03em; }
+.workbench-header p { font-size: 13px; line-height: 1.7; }
+.workbench-conversation-link { flex-shrink: 0; display: inline-flex; align-items: center; gap: 14px; border: 1px solid #49415e; border-radius: 8px; color: var(--accent-bright); background: #211e30; padding: 11px 16px; font-size: 13px; }
+.workbench-conversation-link:hover { border-color: var(--accent); background: #2b2540; }
+.workbench-conversation-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.workbench-layout.is-single { grid-template-columns: minmax(0, 1fr); }
+.workbench-page .workspace-toolbar { border-radius: 10px; overflow: hidden; }
+.workbench-page .workbench-section { border-radius: 10px; overflow: hidden; }
+.workbench-page .workbench-section-header button { min-height: 52px; }
+.workbench-page .composer-main > label, .workbench-page .composer-exclusions > label { font-size: 13px; }
+.workbench-page .composer-main > textarea, .workbench-page .composer-exclusions > textarea { border-radius: 8px; font-size: 14px; line-height: 1.8; }
 .workbench-mobile-jump { display: none; }
 .workbench-layout { min-width: 0; display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 18px; }
 .workbench-flow { min-width: 0; display: grid; gap: 12px; }

@@ -66,7 +66,13 @@ export function ReferenceLibrary({record, disabled, onPin, onUnpin}: {
           const example = await apiRequest<Example>("/api/v3/reference-examples", {method: "POST", body: form});
           choose(example); await load();
         })}>保存参考图</button></div>
-      {page && !page.official_pack.ready && <p className="conversation-muted">官方参考包尚未安装，可使用自己的收藏。</p>}
+      {page && !page.official_pack.ready && <div className="conversation-actions">
+        <p className="conversation-muted">可安装内置的木刻、炭笔与水彩样例，也可以上传自己的参考图。</p>
+        <button onClick={() => void act(async () => {
+          await apiRequest("/api/v3/reference-examples/install-bundled", {method: "POST", body: JSON.stringify({})});
+          await load(); setMessage("内置样例已就绪，可以选择参考并复制风格要求。");
+        })}>安装内置样例</button>
+      </div>}
       <div className="reference-cards">{page?.items.map(example => <button key={example.id} disabled={requirementsDirty} aria-pressed={selected?.id === example.id} onClick={() => choose(example)}>
         <img src={`/api/v3/reference-examples/${example.id}/thumbnail`} alt={example.title} loading="lazy" />
         <span>{example.title}</span><small>{example.requirements_valid ? "已有要求" : "待分析或编辑"}</small></button>)}</div>
@@ -84,17 +90,18 @@ export function ReferenceLibrary({record, disabled, onPin, onUnpin}: {
           const copied = await apiRequest<Example>(`/api/v3/reference-examples/${selected.id}/copy`, {method: "POST", body: JSON.stringify({source_version: selected.source_version})});
           choose(copied); await load();
         })}>复制为我的参考</button> : <>
-        <p>有原始提示词时，可先从文字提取要求，无需视觉模型。请在外部提示词中明确区分正向与负向内容。</p>
+        <p>优先从原始提示词提取要求，也可以直接手动编辑。请在外部提示词中明确区分正向与负向内容。</p>
         {notesDirty && <p>请先保存标题与笔记，再开始分析。</p>}
         <button disabled={requirementsDirty || notesDirty || !selected.notes.external_prompt.trim()} onClick={() => void act(async () => {
           const saved = await apiRequest<Example & {warnings: string[]}>(`/api/v3/reference-examples/${selected.id}/ingest`, {
             method: "POST", body: JSON.stringify({revision: selected.revision, source: "prompt"})});
           choose(saved); await load(); setMessage(saved.warnings.join("；") || "提示词已提取，请核对要求。");
         })}>从提示词提取要求（不发送图片）</button>
-        <details><summary>可选：读图分析</summary>
+        <details><summary>辅助：读图建议</summary>
+        <p>读图结果仅供参考，可能误判动作、材质或风格。分析会更新未锁定的参考要求，请核对和修正后再钉选。</p>
         <label><input type="checkbox" checked={sendNotes} onChange={event => setSendNotes(event.target.checked)} />分析时发送已保存的外部提示词</label>
         <button disabled={requirementsDirty || notesDirty} onClick={() => void act(async () => {const saved = await apiRequest<Example & {warnings: string[]}>(`/api/v3/reference-examples/${selected.id}/ingest`, {
-          method: "POST", body: JSON.stringify({revision: selected.revision, use_external_prompt_notes: sendNotes})}); choose(saved); await load(); setMessage(saved.warnings.join("；") || "分析完成，请检查要求后钉选。");})}>分析图片（调用当前视觉模型）</button></details></>}
+          method: "POST", body: JSON.stringify({revision: selected.revision, use_external_prompt_notes: sendNotes})}); choose(saved); await load(); setMessage(["读图建议已生成，仅供参考，请核对和修正后再钉选。", ...saved.warnings].join("；"));})}>分析图片（调用当前视觉模型）</button></details></>}
         {selected.analysis_source && <p>{selected.analysis_source === "prompt" ? "上次分析来源：提示词文字，未核对图片。" : "上次分析来源：图片。"}</p>}
         {selected.requirements && <dl>{(Object.keys(layerLabels) as LayerName[]).map(name => <div key={name}><dt>{layerLabels[name]}</dt><dd>{name === "exclusions"
           ? selected.requirements!.layers.exclusions.global.join("、") || "无全局排除"

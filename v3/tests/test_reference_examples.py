@@ -14,6 +14,48 @@ def picture(fmt="PNG"):
     return output.getvalue()
 
 
+def test_bundled_install_is_explicit_and_preserves_notes(conversation_client, monkeypatch):
+    client, calls = conversation_client
+    endpoint = "/api/v3/reference-examples/install-bundled"
+    assert not client.get("/api/v3/reference-examples").json()["official_pack"]["ready"]
+    assert client.post(endpoint, json={"source": "C:/arbitrary"}).status_code == 422
+    response = client.post(endpoint, json={})
+    assert response.status_code == 200, response.text
+    assert response.json()["count"] == 3
+    page = client.get("/api/v3/reference-examples").json()
+    assert len(page["items"]) == 3
+    item = page["items"][0]
+    path = "/api/v3/reference-examples/" + item["id"]
+    assert client.get(path + "/thumbnail").status_code == 200
+    assert client.patch(path + "/notes", json={"override_revision": 0,
+        "notes": {"user_notes": "我的配方"}}).status_code == 200
+    # An already active pack is left intact, even if shipped files are unavailable.
+    from anima_prompt_studio_v3.storage import bundled_examples
+    def unavailable():
+        raise FileNotFoundError("private path")
+    monkeypatch.setattr(bundled_examples, "bundled_example_source", unavailable)
+    assert client.post(endpoint, json={}).json() == response.json()
+    assert client.get(path).json()["notes"]["user_notes"] == "我的配方"
+    assert calls == []
+
+
+def test_bundled_install_errors_are_safe_and_require_session(conversation_client, monkeypatch):
+    client, _ = conversation_client
+    from anima_prompt_studio_v3.storage import bundled_examples
+    endpoint = "/api/v3/reference-examples/install-bundled"
+    def unavailable():
+        raise FileNotFoundError("private path")
+    monkeypatch.setattr(bundled_examples, "bundled_example_source", unavailable)
+    response = client.post(endpoint, json={})
+    assert response.status_code == 422
+    assert "bundled_examples_missing" in response.text
+    assert "private path" not in response.text
+    assert not client.get("/api/v3/reference-examples").json()["official_pack"]["ready"]
+    client.headers.pop("X-Anima-Session")
+    client.cookies.clear()
+    assert client.post(endpoint, json={}).status_code in (401, 403)
+
+
 def upload(client, metadata=None, data=None, mime="image/png"):
     return client.post("/api/v3/reference-examples", files={"file": ("../../outside.png", data or picture(), mime)},
                        data={"title": "雨后街道", "metadata": json.dumps(metadata or {})})

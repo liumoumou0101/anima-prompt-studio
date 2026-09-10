@@ -453,3 +453,16 @@ def test_static_benchmark_hard_gates_pass_fixture(store: ReferenceDataStore) -> 
     assert report.protected_category_leak_count == 0
     assert report.validation_error_count == 0
     assert len(report.cases) == 4
+
+
+def test_static_benchmark_allows_no_eligible_cooccurrence(store: ReferenceDataStore, monkeypatch) -> None:
+    # No eligible suggestions is a valid result; never force unrelated additions
+    # merely to create a conservative lane. Artist recommendations are independent.
+    monkeypatch.setattr(store, "related_tags", lambda *args, **kwargs: [])
+    suite = StaticBenchmarkSuite.load(BENCHMARKS / "static_v1.json")
+    report = StaticBenchmarkRunner(store).run(suite)
+    assert report.passed
+    assert report.required_retention == 1.0
+    assert report.excluded_leak_count == 0
+    assert report.protected_category_leak_count == 0
+    assert all("conservative" not in case.lanes for case in report.cases)

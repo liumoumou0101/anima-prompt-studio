@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from threading import Lock
 from typing import Literal
 
 from fastapi import Depends, Query, Request, Response
@@ -21,6 +22,10 @@ from ..storage.reference_examples import (
 
 class ExampleDelete(ContractModel):
     revision: int = Field(ge=1)
+
+
+class InstallBundledExamples(ContractModel):
+    pass
 
 
 class OfficialNotes(ContractModel):
@@ -56,6 +61,22 @@ def register_reference_routes(app, workspace_db, require_session):
     ingest_service = IngestService(store)
     dependencies = [Depends(require_session)]
     prefix = "/api/v3/reference-examples"
+    install_lock = Lock()
+
+    @app.post(prefix + "/install-bundled", dependencies=dependencies)
+    def install_bundled(payload: InstallBundledExamples):
+        from ..storage.bundled_examples import bundled_example_source
+
+        with install_lock:
+            current = store.official.current()
+            if current is not None:
+                return {"ready": True, "id": current[1].pack_id, "count": len(current[2])}
+            try:
+                return store.official.install(bundled_example_source())
+            except FileNotFoundError:
+                fail("bundled_examples_missing", "当前安装缺少内置样例文件，请使用完整安装包后重试。")
+            except (OSError, ValueError):
+                fail("bundled_examples_install_failed", "内置样例安装失败，请检查安装文件完整性与目录写入权限。")
 
     @app.get(prefix, dependencies=dependencies)
     def list_examples(q: str = Query(default="", max_length=200),

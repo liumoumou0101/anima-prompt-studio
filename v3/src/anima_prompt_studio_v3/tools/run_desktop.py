@@ -113,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
                         type=Path, default=app_data / "anima_prompt_studio.db")
     parser.add_argument("--without-runtime", "--without-v2", dest="without_v2", action="store_true")
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--install-bundled-examples", action="store_true",
+                        help="安装内置参考样例到所选工作台目录后退出，不启动浏览器或生图服务")
     parser.add_argument(
         "--exit-after-startup",
         action="store_true",
@@ -120,6 +122,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
+        if args.install_bundled_examples:
+            from ..storage.bundled_examples import install_bundled_examples
+            try:
+                result = install_bundled_examples(args.workspace_db.resolve().parent / "official-examples")
+            except ValueError as exc:
+                raise DataContractError("内置参考包校验失败，原激活指针未被替换。") from exc
+            print(f"已启用 {result['id']}，{result['count']} 个官方参考。", flush=True)
+            return 0
         if args.frontend_dist is None:
             raise DataContractError("未指定 V3 Web 构建目录，且当前运行包没有内置网页。")
         wait_event = None

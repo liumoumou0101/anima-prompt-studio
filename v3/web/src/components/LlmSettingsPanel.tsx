@@ -1,4 +1,4 @@
-import {useEffect, useState} from "react";
+import {useEffect, useId, useState} from "react";
 import {apiRequest} from "../lib/api";
 
 type LlmService = {
@@ -9,7 +9,8 @@ type LlmService = {
 };
 type LlmSettingsResponse = {services: LlmService[]; current: {service: string; model: string}};
 
-export function LlmSettingsPanel() {
+export function LlmSettingsPanel({defaultOpen = true}: {defaultOpen?: boolean}) {
+  const modelListId = useId();
   const [settings, setSettings] = useState<LlmSettingsResponse | null>(null);
   const [error, setError] = useState("");
   const [serviceId, setServiceId] = useState("");
@@ -22,6 +23,8 @@ export function LlmSettingsPanel() {
   const [notice, setNotice] = useState("");
   const [supportsVision, setSupportsVision] = useState(false);
   const [ingestThinking, setIngestThinking] = useState(false);
+  const [modelSearch, setModelSearch] = useState("");
+  const [discovered, setDiscovered] = useState<string[] | null>(null);
 
   useEffect(() => {
     apiRequest<LlmSettingsResponse>("/api/v3/llm/settings").then((payload) => {
@@ -49,7 +52,23 @@ export function LlmSettingsPanel() {
     setClearKey(false);
     setNotice("");
     setError("");
+    setModelSearch("");
+    setDiscovered(null);
   }
+
+  async function refreshModels() {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const result = await apiRequest<{models: string[]; count: number}>(`/api/v3/llm/services/${encodeURIComponent(serviceId)}/models/refresh`, {method: "POST", body: "{}"});
+      setDiscovered(result.models);
+      setSettings(await apiRequest<LlmSettingsResponse>("/api/v3/llm/settings"));
+      setNotice(`已获取 ${result.count} 个模型，当前模型未切换。选择后请保存配置。`);
+    } catch (caught) {setError((caught as Error).message);}
+    finally {setBusy(false);}
+  }
+  const endpointDirty = !selectedService || baseUrl.trim().replace(/\/$/, "") !== selectedService.base_url.replace(/\/$/, "") || Boolean(apiKey) || clearKey;
+  const modelOptions = (discovered || selectedService?.llm_models.map(m => m.name) || [])
+    .filter(name => name.toLowerCase().includes(modelSearch.trim().toLowerCase()));
 
   async function save(test: boolean) {
     setBusy(true);
@@ -73,7 +92,7 @@ export function LlmSettingsPanel() {
     finally { setBusy(false); }
   }
 
-  return <details className="llm-settings" open>
+  return <details className="llm-settings" open={defaultOpen}>
     <summary>LLM 服务配置（API Key / 模型）</summary>
     {!settings ? <p>{error || "正在读取 LLM 配置…"}</p> : <>
       <fieldset disabled={busy} className="llm-settings-grid">
@@ -85,9 +104,17 @@ export function LlmSettingsPanel() {
           <option value="openai_compatible">OpenAI 兼容</option><option value="ollama">Ollama</option>
         </select></label>}
         <label>API 地址（Base URL）<input type="url" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://你的服务地址/v1" /></label>
-        <label>模型名称<input list="llm-model-options" value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="填写服务商实际支持的模型 ID" />
-          <datalist id="llm-model-options">{selectedService?.llm_models.map((m) => <option key={m.name} value={m.name}>{m.display_name}</option>)}</datalist>
-        </label>
+        <label>模型名称<input list={modelListId} value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="填写服务商实际支持的模型 ID" /></label>
+        <datalist id={modelListId}>{selectedService?.llm_models.map((m) => <option key={m.name} value={m.name}>{m.display_name}</option>)}</datalist>
+        <div>
+          <label>搜索可选模型<input value={modelSearch} onChange={e => setModelSearch(e.target.value)} placeholder="输入名称筛选，例如 qwen、kimi" /></label>
+          <label>快速选择模型<select value={modelOptions.includes(modelName) ? modelName : ""} onChange={e => {if (e.target.value) setModelName(e.target.value);}}>
+            <option value="">{modelOptions.length ? `选择模型（${modelOptions.length} 个）` : "没有匹配模型，可手动填写"}</option>
+            {modelOptions.map(name => <option key={name} value={name}>{name}</option>)}
+          </select></label>
+          <button className="button" type="button" disabled={endpointDirty} onClick={() => void refreshModels()}>刷新模型列表</button>
+          {endpointDirty && <p className="llm-settings-note">请先保存地址和 Key，再刷新模型列表。</p>}
+        </div>
         <label>API Key<input type="password" disabled={clearKey} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={selectedService?.api_key_exists ? "已保存（留空不修改）" : "粘贴 API Key；本地服务可留空"} autoComplete="new-password" /></label>
         <label className="llm-key-clear"><input type="checkbox" checked={clearKey} onChange={(e) => {setClearKey(e.target.checked); setApiKey("");}} />清除已保存的 Key</label>
         <div className="llm-settings-actions">
@@ -97,7 +124,7 @@ export function LlmSettingsPanel() {
           <button className="button button--primary" type="button" disabled={!baseUrl.trim() || !modelName.trim()} onClick={() => void save(true)}>{busy ? "正在处理…" : "保存并测试连接"}</button>
         </div>
       </fieldset>
-      <p className="llm-settings-note">连接测试会向所填服务发送一次短文本，可能产生少量费用。模型列表仅供参考，以服务商实际权限为准。Key 明文保存在本机，请勿分享配置文件。更换地址需重新输入或清除 Key。</p>
+      <p className="llm-settings-note">刷新模型列表只读取服务商目录，不调用生成接口。选择模型后点击保存配置才会生效。连接测试会发送一次短文本，可能产生少量费用；目录中的模型以套餐实际权限为准。Key 明文保存在本机，请勿分享配置文件。更换地址需重新输入或清除 Key。</p>
       {notice && <p role="status">{notice}</p>}
       {error && <p role="alert">{error}</p>}
     </>}

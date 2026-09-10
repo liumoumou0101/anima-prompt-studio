@@ -132,3 +132,46 @@ async def test_connection() -> dict[str, object]:
     if not result.get("success") or not (result.get("data") or {}).get("expanded", "").strip():
         raise RuntimeError("连接测试失败，请检查 API 地址、Key、模型权限及网络。")
     return {"ok": True, "message": "模型已成功返回内容；连接可用，不代表生图效果已验证。"}
+
+
+async def refresh_models(manager, service_id: str) -> dict[str, object]:
+    """Fetch only the saved endpoint; never forward saved credentials to edited URLs."""
+    import httpx
+
+    service = next((s for s in manager.load_config().get("model_services", []) if s.get("id") == service_id), None)
+    if not service or service.get("type") not in ("openai_compatible", "ollama"):
+        raise ValueError("请先保存服务商配置，再刷新模型列表。")
+    base = service.get("base_url", "").rstrip("/")
+    parsed = urlsplit(base)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("请先保存有效的 API 地址。")
+    key = service.get("api_key") or ""
+    ollama = service["type"] == "ollama"
+    endpoint = base + ("/api/tags" if ollama else "/models")
+    headers = {"Authorization": "Bearer " + key} if key else {}
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+            response = await client.get(endpoint, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        rows = data.get("models" if ollama else "data")
+        if not isinstance(rows, list):
+            raise ValueError("Invalid catalog")
+        names = sorted({row.get("name" if ollama else "id", "").strip() for row in rows
+                        if isinstance(row, dict) and isinstance(row.get("name" if ollama else "id"), str)})
+        names = [name for name in names if name and len(name) <= 200][:2000]
+        if not names:
+            raise ValueError("Empty catalog")
+    except (httpx.HTTPError, ValueError, TypeError):
+        raise RuntimeError("无法获取模型列表，请检查地址、Key 和套餐权限；也可手动填写模型 ID。") from None
+    config = manager.load_config()
+    current = next((s for s in config.get("model_services", []) if s.get("id") == service_id), None)
+    if not current or any(current.get(k) != service.get(k) for k in ("base_url", "api_key", "type")):
+        raise ValueError("服务配置已变化，请重新刷新模型列表。")
+    existing = {m["name"]: m for m in current.get("llm_models", []) if m.get("name")}
+    # Retain custom/current models and all per-model options; discovery is not selection.
+    current["llm_models"] = [existing.get(name, {"name": name, "display_name": name, "is_default": False})
+                             for name in sorted(set(names) | set(existing))]
+    if not manager.save_config(config):
+        raise RuntimeError("模型列表已获取，但无法保存到本地。")
+    return {"models": names, "count": len(names)}

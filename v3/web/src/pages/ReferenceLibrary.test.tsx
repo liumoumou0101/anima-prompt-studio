@@ -38,6 +38,31 @@ it("shows overwrite preview and pins only on explicit action", async () => {
   await waitFor(() => expect(onPin).toHaveBeenCalledWith(example, "style"));
 });
 
+it("installs bundled examples only on click and refreshes without losing edits", async () => {
+  await open();
+  fireEvent.change(screen.getByLabelText("我的笔记"), {target: {value: "未保存的笔记"}});
+  expect(requests.some(item => item.url.endsWith("/install-bundled"))).toBe(false);
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    requests.push({url: String(input), init});
+    return new Response(JSON.stringify(init?.method === "POST" ? {ready: true, count: 3} : {
+      items: [example], next_cursor: null, official_pack: {ready: true}}));
+  });
+  fireEvent.click(screen.getByRole("button", {name: "安装内置样例"}));
+  await screen.findByText("内置样例已就绪，可以选择参考并复制风格要求。");
+  expect(screen.queryByRole("button", {name: "安装内置样例"})).toBeNull();
+  expect(screen.getByLabelText("我的笔记")).toHaveValue("未保存的笔记");
+  expect(requests.filter(item => item.url.endsWith("/install-bundled"))).toHaveLength(1);
+});
+
+it("keeps install retry available after a failure", async () => {
+  await open();
+  vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({error: {
+    code: "bundled_examples_missing", message: "当前安装缺少内置样例文件"}}), {status: 422}));
+  fireEvent.click(screen.getByRole("button", {name: "安装内置样例"}));
+  await screen.findByRole("status");
+  expect(screen.getByRole("button", {name: "安装内置样例"})).toBeEnabled();
+});
+
 it("blocks pin while the workspace contains unsent edits", async () => {
   const onPin = await open(true);
   expect((screen.getByRole("button", {name: "复制并钉选"}) as HTMLButtonElement).disabled).toBe(true);
@@ -46,11 +71,11 @@ it("blocks pin while the workspace contains unsent edits", async () => {
 
 it("does not send external notes by default and accepts a 204 delete", async () => {
   await open();
-  fireEvent.click(screen.getByText("可选：读图分析"));
+  fireEvent.click(screen.getByText("辅助：读图建议"));
   fireEvent.click(screen.getByRole("button", {name: /分析图片/}));
   await waitFor(() => expect(requests.some(item => item.url.endsWith("/ingest"))).toBe(true));
   expect(JSON.parse(String(requests.find(item => item.url.endsWith("/ingest"))!.init!.body))).toEqual({revision: 2, use_external_prompt_notes: false});
-  await screen.findByText("分析完成，请检查要求后钉选。");
+  await screen.findByText("读图建议已生成，仅供参考，请核对和修正后再钉选。");
   fireEvent.click(screen.getByLabelText("移除此收藏"));
   fireEvent.click(screen.getByRole("button", {name: "确认移除收藏"}));
   await waitFor(() => expect(requests.some(item => item.init?.method === "DELETE")).toBe(true));

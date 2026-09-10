@@ -1,5 +1,9 @@
 # V3 本地 API 契约
 
+## LLM 模型目录刷新（2026-09-10）
+
+`POST /api/v3/llm/services/{service_id}/models/refresh` 沿用会话与 Origin 校验，仅使用已保存服务端点与 Key，返回 `{models: string[], count: number}`。OpenAI 兼容服务 GET `/models`，Ollama GET `/api/tags`，超时 20 秒且不跟随重定向；不生成文本、不改变当前模型或思考配置。目录合并保留已有模型参数与自定义 ID。请求期间地址/Key/协议变化返回 422 `llm_config_invalid`，读取或保存失败返回 502 `llm_models_failed`，不泄漏上游错误正文。列表不保证当前套餐对每个模型都有生成权限。
+
 ## 工作流管理扩展（2026-09-06）
 
 下列路径相对 `/api/v3/workflows`，均须本地会话认证；服务器参数是已保存连接 ID。
@@ -439,6 +443,7 @@ LoraSelectionDto 为 logical_id/file_name/weight/trigger_words，extra=forbid。
 | GET/PATCH/DELETE | `/reference-examples/{id}` | PATCH/DELETE 必须 revision；PATCH 允许 title/notes/requirements_edit/声明兼容性；不能伪造 run 身份 |
 | PATCH | `/reference-examples/{off_id}/notes` | override_revision（首次 0）+ notes |
 | POST | `/reference-examples/{off_id}/copy` | source_version；复制为新 ex_ ID |
+| POST | `/reference-examples/install-bundled` | 严格空对象 `{}`；显式安装内置包，返回 `{id,ready,count}`；已有有效激活包时原样返回，不替换 |
 | POST | `/reference-examples/from-gallery` | 受 gallery 根目录授权的 path，服务端复制 |
 | POST | `/reference-examples/from-run` | run_id/path，须属于该 run 的 artifacts |
 | GET | `/reference-examples/{id}/content`、`/thumbnail` | 已登记媒体；无绝对路径；cookie 限参考媒体前缀或用 session header |
@@ -461,6 +466,8 @@ availability 为 ready/missing_lora/lora_unmapped/incompatible_model/incompatibl
 GET/PUT /workflows/servers/{remote}/{workflow}/lora-bindings 为 logical_id/resource_digest 到 slot_key/remote_file_name 的显式绑定；PUT 必须 mapping_revision/workflow_revision/remote_fingerprint 与完整 bindings，[] 清空。实际枚举/槽位校验后 CAS，冲突 409 mapping_revision_conflict；resource_digest 由后端按声明文件/source/trigger 计算，避免同名 logical_id 混用。不能只保存原节点 mapping 后让编译器写回旧文件名。
 
 官方包 anima-v3-examples/1，SHA 校验后 current.json 原子切换；列表返回 official_pack={id,ready,count}，缺包 ready=false，仍提供用户收藏。换包不删除用户备注或改变已钉草稿资源。
+
+`install-bundled` 沿用会话与 Origin 校验，不接收路径、不联网、不调用模型。进程内串行安装，源仅为随发行携带的内置包；个人笔记不变。内置文件缺失返回 422 `bundled_examples_missing`，文件校验或写入失败返回 422 `bundled_examples_install_failed`；错误不回显文件路径，失败后可显式重试。
 
 ### 9.5 产物投影、flags 与错误
 

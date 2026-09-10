@@ -1,0 +1,2 @@
+# Example pack manifests hash exact file bytes; preserve them on every platform.
+v3/example-packs/** -text
