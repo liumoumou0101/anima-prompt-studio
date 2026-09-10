@@ -116,6 +116,11 @@ from .models import (
 )
 from .security import SessionInvalidError, SessionManager
 from .workspace_store import WorkspaceNotFoundError, WorkspaceRevisionConflictError, WorkspaceStore
+from ..runtime.submissions import SubmissionService, payload_digest
+from ..storage.generation_submissions import IdempotencyConflict
+from ..core.lora_resolution import ResourceUnavailable, MappingConflict
+from ..core.requirements import WorkbenchError
+from .conversation import ConversationService, TurnRequest, WorkspaceCommand
 
 
 API_PREFIX = "/api/v3"
@@ -221,8 +226,14 @@ def create_api_runtime(
     app.state.frontend_dist = frontend_dist
     app.state.sessions = sessions
     app.state.workspace_store = WorkspaceStore(workspace_db) if workspace_db is not None else None
+    app.state.conversation_service = ConversationService(app.state.workspace_store) if workspace_db is not None else None
     app.state.v2_database = v2_database.resolve() if v2_database is not None else None
     app.state.generation_queue = generation_queue
+    app.state.submission_service = None
+    if app.state.workspace_store is not None and hasattr(generation_queue, "accept_durable"):
+        app.state.submission_service = SubmissionService(app.state.workspace_store, generation_queue,
+                                                        lambda run: _generation_run_response(run, generation_queue))
+        app.router.add_event_handler("shutdown", app.state.submission_service.close)
     app.state.intent_parser = intent_parser
     app.state.gallery_service = gallery_service
     app.state.translation_service = translation_service
@@ -238,7 +249,9 @@ def create_api_runtime(
             return _error_response(request, 400, "invalid_request", "Host 不在本地服务允许列表中。")
         if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path.startswith(API_PREFIX):
             content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-            if content_type != "application/json":
+            is_reference_upload = (request.method == "POST" and request.url.path == f"{API_PREFIX}/reference-examples")
+            expected_content_type = "multipart/form-data" if is_reference_upload else "application/json"
+            if content_type != expected_content_type:
                 return _error_response(request, 415, "invalid_request", "写请求必须使用 application/json。")
             content_length = request.headers.get("content-length")
             if content_length:
@@ -246,7 +259,7 @@ def create_api_runtime(
                     parsed_length = int(content_length)
                     if parsed_length < 0:
                         return _error_response(request, 400, "invalid_request", "Content-Length 无效。")
-                    if parsed_length > MAX_JSON_BODY:
+                    if parsed_length > (21 * 1024 * 1024 if is_reference_upload else MAX_JSON_BODY):
                         return _error_response(request, 413, "invalid_request", "请求体超过允许大小。")
                 except ValueError:
                     return _error_response(request, 400, "invalid_request", "Content-Length 无效。")
@@ -267,6 +280,35 @@ def create_api_runtime(
             details=exc.details,
             retryable=exc.retryable,
         )
+
+    @app.exception_handler(WorkbenchError)
+    async def workbench_error_handler(request: Request, exc: WorkbenchError) -> JSONResponse:
+        status = {"rate_limited": 429, "llm_generation_failed": 502,
+                  "workspace_contract_unsupported": 409, "reference_preset_not_found": 404,
+                  "example_revision_conflict": 409, "reference_version_conflict": 409,
+                  "ingest_superseded": 409}.get(exc.code, 422)
+        return _error_response(request, status, exc.code, str(exc))
+
+    @app.exception_handler(IdempotencyConflict)
+    async def idempotency_error_handler(request: Request, exc: IdempotencyConflict) -> JSONResponse:
+        return _error_response(request, 409, "idempotency_conflict", str(exc))
+
+    @app.exception_handler(ResourceUnavailable)
+    async def resource_error_handler(request: Request, exc: ResourceUnavailable) -> JSONResponse:
+        return _error_response(request, 422, exc.code, str(exc), details=exc.details)
+
+    @app.exception_handler(MappingConflict)
+    async def mapping_error_handler(request: Request, exc: MappingConflict) -> JSONResponse:
+        return _error_response(request, 409, "mapping_revision_conflict", str(exc))
+
+    @app.exception_handler(WorkspaceNotFoundError)
+    async def workspace_missing_handler(request: Request, exc: WorkspaceNotFoundError) -> JSONResponse:
+        return _error_response(request, 404, "workspace_not_found", "工作台不存在。")
+
+    @app.exception_handler(WorkspaceRevisionConflictError)
+    async def workspace_conflict_handler(request: Request, exc: WorkspaceRevisionConflictError) -> JSONResponse:
+        return _error_response(request, 409, "workspace_revision_conflict", "工作台已在另一处更新。",
+                               details={"current_revision": exc.current_revision})
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -309,6 +351,10 @@ def create_api_runtime(
         except DataContractError as exc:
             raise ApiError(503, "data_pack_incompatible", "参考数据包不兼容。") from exc
         return reference_db
+
+    if workspace_db is not None:
+        from .reference_examples import register_reference_routes
+        register_reference_routes(app, workspace_db, require_session)
 
     def require_workspace_store() -> WorkspaceStore:
         store = app.state.workspace_store
@@ -418,6 +464,8 @@ def create_api_runtime(
                 "cooccurrence": ready,
                 "artist_recommendation": ready,
                 "workspace_persistence": app.state.workspace_store is not None,
+                "conversational_workbench": False,
+                "reference_gallery": False,
                 "online_preview": False,
                 "remote_generation": app.state.generation_queue is not None,
                 "v2_generation_bridge": generation_bridge is not None,
@@ -812,6 +860,8 @@ def create_api_runtime(
                 "base_url": svc.get("base_url") or "",
                 "api_key_masked": "***" if api_key else "",
                 "api_key_exists": bool(api_key),
+                "supports_vision": bool(svc.get("supports_vision", False)),
+                "ingest_enable_thinking": bool(svc.get("ingest_enable_thinking", False)),
                 "llm_models": [
                     {
                         "name": m.get("name", ""),
@@ -941,19 +991,32 @@ def create_api_runtime(
         if not idempotency_key or not idempotency_key.strip():
             raise ApiError(422, "invalid_request", "生成任务必须提供 Idempotency-Key。")
         try:
-            prepared = generation_bridge.prepare_direct(
+            prepare = lambda: generation_bridge.prepare_direct(
                 positive_prompt=payload.positive_prompt,
                 negative_prompt=payload.negative_prompt,
                 model_profile_id=payload.model_profile,
                 project_name=payload.project_name,
                 settings=GenerationSettings(**payload.settings.model_dump()),
             )
+            if app.state.submission_service is not None:
+                return app.state.submission_service.submit(payload, idempotency_key, "direct", prepare)
+            if payload.submission_kind != "legacy" or payload.lora_selection or payload.workflow_snapshot_run_id:
+                raise ApiError(503, "submission_store_missing", "持久化提交服务尚未配置。")
+            request_hash = payload_digest(payload, "direct")
+            if hasattr(queue, "existing_request"):
+                existing = queue.existing_request(idempotency_key, request_hash)
+                if existing is not None:
+                    return _generation_run_response(existing, queue)
+            prepared = prepare()
             run = queue.submit(
                 prepared,
                 remote_profile_id=payload.remote_profile_id,
                 workflow_profile_id=payload.workflow_profile_id,
                 idempotency_key=idempotency_key,
+                **({"payload_hash": request_hash} if hasattr(queue, "existing_request") else {}),
             )
+        except (IdempotencyConflict, ResourceUnavailable, MappingConflict, WorkbenchError, WorkspaceRevisionConflictError, WorkspaceNotFoundError):
+            raise
         except GenerationQueueFullError as exc:
             raise ApiError(429, "rate_limited", str(exc), retryable=True) from exc
         except KeyError as exc:
@@ -1091,7 +1154,7 @@ def create_api_runtime(
         if not idempotency_key or not idempotency_key.strip():
             raise ApiError(422, "invalid_request", "生成任务必须提供 Idempotency-Key。")
         try:
-            prepared = generation_bridge.prepare(
+            prepare = lambda: generation_bridge.prepare(
                 payload.candidate,
                 payload.intent,
                 project_name=payload.project_name,
@@ -1099,12 +1162,25 @@ def create_api_runtime(
                 workspace_id=payload.workspace_id,
                 workspace_revision=payload.workspace_revision,
             )
+            if app.state.submission_service is not None:
+                return app.state.submission_service.submit(payload, idempotency_key, "candidate", prepare)
+            if payload.submission_kind != "legacy" or payload.lora_selection or payload.workflow_snapshot_run_id:
+                raise ApiError(503, "submission_store_missing", "持久化提交服务尚未配置。")
+            request_hash = payload_digest(payload, "candidate")
+            if hasattr(queue, "existing_request"):
+                existing = queue.existing_request(idempotency_key, request_hash)
+                if existing is not None:
+                    return _generation_run_response(existing, queue)
+            prepared = prepare()
             run = queue.submit(
                 prepared,
                 remote_profile_id=payload.remote_profile_id,
                 workflow_profile_id=payload.workflow_profile_id,
                 idempotency_key=idempotency_key,
+                **({"payload_hash": request_hash} if hasattr(queue, "existing_request") else {}),
             )
+        except (IdempotencyConflict, ResourceUnavailable, MappingConflict, WorkbenchError, WorkspaceRevisionConflictError, WorkspaceNotFoundError):
+            raise
         except GenerationQueueFullError as exc:
             raise ApiError(429, "rate_limited", str(exc), retryable=True) from exc
         except KeyError as exc:
@@ -1703,6 +1779,107 @@ def create_api_runtime(
         except (GalleryUpscaleError, ValueError) as exc:
             raise ApiError(409, "gallery_process_action_invalid", str(exc)) from exc
 
+    @app.post(f"{API_PREFIX}/workbench/turns", dependencies=[Depends(require_session)])
+    async def conversation_turn(payload: TurnRequest, request: Request,
+                                store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
+        from ..prompt_assistant.services.completion import CompletionError
+
+        try:
+            return await app.state.conversation_service.turn(payload, request.is_disconnected)
+        except TimeoutError:
+            raise ApiError(502, "llm_generation_failed", "LLM 请求超时，草稿未修改。",
+                           details={"reason": "llm_timeout"}, retryable=True) from None
+        except CompletionError as exc:
+            message = ("上游实际模型不支持关闭思考，请更换文字模型；草稿未修改。"
+                       if exc.reason == "thinking_disable_unsupported" else "LLM 请求失败，草稿未修改。")
+            raise ApiError(502, "llm_generation_failed", message,
+                           details=exc.safe_details, retryable=exc.upstream_status not in {400, 401, 403, 404, 422}) from None
+
+    @app.post(f"{API_PREFIX}/workbench/reset", dependencies=[Depends(require_session)])
+    def reset_conversation(payload: WorkspaceCommand,
+                           store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
+        return app.state.conversation_service.reset(payload)
+
+    @app.get(f"{API_PREFIX}/workspaces/{{workspace_id}}/runs", dependencies=[Depends(require_session)])
+    def workspace_runs(workspace_id: str, limit: int = Query(default=20, ge=1, le=100),
+                       cursor: int = Query(default=0, ge=0), store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
+        store.get(workspace_id)
+        submissions = app.state.submission_service
+        if submissions is None:
+            return {"items": [], "next_cursor": None}
+        runs = [submissions.queue.get(run_id) for run_id in submissions.store.workspace_run_ids(workspace_id)]
+        terminal = {"completed", "failed", "canceled", "remote_missing"}
+        runs.sort(key=lambda run: (run.state.value in terminal, -run.created_at.timestamp()))
+        page = runs[cursor:cursor + limit]
+        return {"items": [_generation_run_response(run, submissions.queue) for run in page],
+                "next_cursor": cursor + limit if cursor + limit < len(runs) else None}
+
+    @app.get(f"{API_PREFIX}/generation-runs/{{run_id}}/artifacts", dependencies=[Depends(require_session)])
+    def generation_artifacts(run_id: str) -> dict:
+        from urllib.parse import quote
+        queue, gallery = app.state.generation_queue, app.state.gallery_service
+        if queue is None:
+            raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
+        try:
+            artifacts = queue.artifacts(run_id)
+        except GenerationRunNotFoundError as exc:
+            raise ApiError(404, "generation_run_not_found", "生成任务不存在。") from exc
+        items = []
+        for artifact in artifacts:
+            relative = None
+            if gallery is not None:
+                try:
+                    relative = Path(artifact.local_path).resolve().relative_to(gallery.output_root).as_posix()
+                except ValueError:
+                    pass
+            available = relative is not None and gallery.resolve_content(relative) is not None
+            items.append({"id": artifact.id, "path": relative, "removed": not available,
+                "content_url": f"{API_PREFIX}/gallery/assets/content?path={quote(relative, safe='')}" if available else None,
+                "thumbnail_url": f"{API_PREFIX}/gallery/assets/thumbnail?path={quote(relative, safe='')}&size=640" if available else None})
+        return {"items": items}
+
+    @app.get(f"{API_PREFIX}/workbench/availability", dependencies=[Depends(require_session)])
+    def workbench_availability(workspace_id: str, revision: int, remote_profile_id: str,
+                               workflow_profile_id: str, workflow_snapshot_run_id: str | None = None,
+                               store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
+        from ..core.requirements import RequirementLora
+        workspace = store.get(workspace_id)
+        if workspace["revision"] != revision:
+            raise WorkspaceRevisionConflictError(workspace["revision"])
+        queue = app.state.generation_queue
+        if queue is None or not hasattr(queue, "plan") or generation_bridge is None:
+            raise ApiError(503, "remote_not_configured", "资源解析服务尚未配置。")
+        draft = workspace["draft"]
+        frozen = None
+        if workflow_snapshot_run_id:
+            try:
+                frozen = queue.get(workflow_snapshot_run_id).request_json.get("workflow_snapshot")
+            except GenerationRunNotFoundError:
+                pass
+            if not frozen:
+                raise WorkbenchError("workflow_snapshot_missing", "原任务没有可用工作流快照。")
+        prepared = generation_bridge.prepare_direct(positive_prompt=(draft.get("compiled") or {}).get("positive") or "preview",
+            model_profile_id=draft["model_profile"], settings=GenerationSettings(**{
+                key: value for key, value in (draft.get("generation_settings") or {}).items()
+                if key in GenerationSettings.model_fields}))
+        try:
+            _, _, resolution = queue.plan(prepared, remote_profile_id, workflow_profile_id,
+                [RequirementLora.model_validate(r) for r in (draft.get("requirements") or {}).get("loras", [])], frozen)
+        except ResourceUnavailable as exc:
+            resolution = {**exc.details, "message": str(exc)}
+        except KeyError:
+            resolution = {"availability": "unknown", "message": "连接或工作流不存在。"}
+        except GenerationQueueError:
+            resolution = {"availability": "unknown", "message": "资源解析服务尚未就绪。"}
+        current = store.get(workspace_id)
+        if current["revision"] != revision:
+            raise WorkspaceRevisionConflictError(current["revision"])
+        from ..core.lora_resolution import resource_digest
+        return {"workspace_id": workspace_id, "revision": revision, **resolution,
+                "resource_requirements": [{"logical_id": item["logical_id"], "file_name": item["file_name"],
+                    "resource_digest": resource_digest(RequirementLora.model_validate(item))}
+                    for item in (draft.get("requirements") or {}).get("loras", [])]}
+
     @app.post(f"{API_PREFIX}/workspaces", dependencies=[Depends(require_session)], status_code=201)
     def create_workspace(
         payload: WorkspaceCreateRequest,
@@ -1710,7 +1887,7 @@ def create_api_runtime(
     ) -> dict[str, object]:
         return store.create(
             payload.title,
-            payload.draft.model_dump(mode="json"),
+            payload.draft.persistence_payload(),
             payload.candidate_snapshot.model_dump(mode="json") if payload.candidate_snapshot else None,
         )
 
@@ -1735,7 +1912,7 @@ def create_api_runtime(
                 workspace_id,
                 expected_revision=payload.revision,
                 title=payload.title,
-                draft=payload.draft.model_dump(mode="json"),
+                draft=payload.draft.persistence_payload(),
                 candidate_snapshot=(
                     payload.candidate_snapshot.model_dump(mode="json")
                     if payload.candidate_snapshot else None
@@ -1797,6 +1974,10 @@ def _generation_run_response(run, queue) -> dict[str, object]:
         artifact_count = len(queue.artifacts(run.id))
     except GenerationRunNotFoundError:
         artifact_count = 0
+    try:
+        actions = queue.available_actions(run.id)
+    except GenerationRunNotFoundError:
+        actions = ["cancel_queued"] if run.request_json.get("submission_id") else []
     prompt_job = run.request_json.get("prompt_job", {}) if isinstance(run.request_json, dict) else {}
     integration = prompt_job.get("integration_metadata", {}) if isinstance(prompt_job, dict) else {}
     comparison = integration.get("artist_comparison") if isinstance(integration, dict) else None
@@ -1812,7 +1993,7 @@ def _generation_run_response(run, queue) -> dict[str, object]:
         "updated_at": run.updated_at.isoformat(),
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,
         "artifact_count": artifact_count,
-        "available_actions": queue.available_actions(run.id),
+        "available_actions": actions,
         "error": {
             "code": run.error_code,
             "message": run.error_message,

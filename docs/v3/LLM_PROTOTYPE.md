@@ -1,5 +1,7 @@
 # LLM 工作台可行性原型
 
+2026-09-10：后续会话工作台设计见 [CONVERSATIONAL_WORKBENCH.md](CONVERSATIONAL_WORKBENCH.md) 与 ADR-025。该设计尚待实现；旧 `/workbench/prompt` 及本文原型协议保留，参考钉选与多轮编辑另走新端点。下文描述原型现状，不表示新增能力已上线。
+
 本实验仅在 `H:\soft\提示词工具2` 实现。它验证“LLM 忠实英文转换”路线，不宣称已证明真实模型的画质提升。
 
 ## 启动与配置

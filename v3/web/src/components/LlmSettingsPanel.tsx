@@ -4,6 +4,7 @@ import {apiRequest} from "../lib/api";
 type LlmService = {
   id: string; name: string; type: string; base_url: string;
   api_key_masked: string; api_key_exists: boolean;
+  supports_vision?: boolean; ingest_enable_thinking?: boolean;
   llm_models: {name: string; display_name: string; is_default: boolean}[];
 };
 type LlmSettingsResponse = {services: LlmService[]; current: {service: string; model: string}};
@@ -19,6 +20,8 @@ export function LlmSettingsPanel() {
   const [clearKey, setClearKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [supportsVision, setSupportsVision] = useState(false);
+  const [ingestThinking, setIngestThinking] = useState(false);
 
   useEffect(() => {
     apiRequest<LlmSettingsResponse>("/api/v3/llm/settings").then((payload) => {
@@ -28,6 +31,8 @@ export function LlmSettingsPanel() {
       const service = payload.services.find((s) => s.id === payload.current.service);
       setBaseUrl(service?.base_url || "");
       setServiceType(service?.type || "openai_compatible");
+      setSupportsVision(Boolean(service?.supports_vision));
+      setIngestThinking(Boolean(service?.ingest_enable_thinking));
     }).catch((caught: Error) => setError(caught.message));
   }, []);
 
@@ -38,6 +43,8 @@ export function LlmSettingsPanel() {
     setModelName(service?.llm_models.find((m) => m.is_default)?.name || service?.llm_models[0]?.name || "");
     setBaseUrl(service?.base_url || "");
     setServiceType(service?.type || "openai_compatible");
+    setSupportsVision(Boolean(service?.supports_vision));
+    setIngestThinking(Boolean(service?.ingest_enable_thinking));
     setApiKey("");
     setClearKey(false);
     setNotice("");
@@ -52,6 +59,7 @@ export function LlmSettingsPanel() {
       await apiRequest("/api/v3/llm/settings", {method: "PUT", body: JSON.stringify({
         service_id: serviceId, service_type: serviceType, model_name: modelName.trim(),
         base_url: baseUrl.trim(), api_key: apiKey || null, clear_api_key: clearKey,
+        supports_vision: supportsVision, ingest_enable_thinking: ingestThinking,
       })});
       setApiKey("");
       setClearKey(false);
@@ -83,6 +91,8 @@ export function LlmSettingsPanel() {
         <label>API Key<input type="password" disabled={clearKey} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={selectedService?.api_key_exists ? "已保存（留空不修改）" : "粘贴 API Key；本地服务可留空"} autoComplete="new-password" /></label>
         <label className="llm-key-clear"><input type="checkbox" checked={clearKey} onChange={(e) => {setClearKey(e.target.checked); setApiKey("");}} />清除已保存的 Key</label>
         <div className="llm-settings-actions">
+          <label><input type="checkbox" checked={supportsVision} onChange={e => setSupportsVision(e.target.checked)} />当前模型支持图像理解</label>
+          <label><input type="checkbox" checked={ingestThinking} onChange={e => setIngestThinking(e.target.checked)} />分析参考图时启用思考（可能更慢）</label>
           <button className="button" type="button" disabled={!baseUrl.trim() || !modelName.trim()} onClick={() => void save(false)}>保存配置</button>
           <button className="button button--primary" type="button" disabled={!baseUrl.trim() || !modelName.trim()} onClick={() => void save(true)}>{busy ? "正在处理…" : "保存并测试连接"}</button>
         </div>

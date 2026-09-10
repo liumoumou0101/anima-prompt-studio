@@ -1,0 +1,56 @@
+{
+  "contract": "anima-v3-examples/1",
+  "pack_id": "cma-styles-20260910-v1",
+  "generated_at": "2026-09-10T05:00:21.449628+00:00",
+  "counts": {
+    "examples": 3,
+    "files": 9
+  },
+  "files": [
+    {
+      "path": "catalog.json",
+      "size": 4058,
+      "sha256": "1c7f79a2c2f289746e472d311ef3bd678f245ca7abf88fb717f14738f2cb4960"
+    },
+    {
+      "path": "LICENSES/CC0-1.0.txt",
+      "size": 6555,
+      "sha256": "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673"
+    },
+    {
+      "path": "media/off_cma_144688/original.webp",
+      "size": 816220,
+      "sha256": "6a4a7f5a528ecc7a3f2cf6b50c67a21a3d53866dfe27fa836498220e58ddc1a6"
+    },
+    {
+      "path": "media/off_cma_159769/original.webp",
+      "size": 328776,
+      "sha256": "a34aa8ee23e6fa0a523d6027a920c9da5099198ee2569a5324b3aa4402305984"
+    },
+    {
+      "path": "media/off_cma_166868/original.webp",
+      "size": 625968,
+      "sha256": "96aa87737c7465b577cb796d9ce08b4a8fe724aea9043fb148ea3bea30948071"
+    },
+    {
+      "path": "NOTICE.txt",
+      "size": 1388,
+      "sha256": "f64f3242d311f36f311a00fbe0f53e294409e4c938d5ae862c0513a1624e586a"
+    },
+    {
+      "path": "SOURCES/off_cma_144688.json",
+      "size": 1361,
+      "sha256": "ac5dd8b9275b98328c08ee4f352316eca9e82a23dc0e355af40384e44659211b"
+    },
+    {
+      "path": "SOURCES/off_cma_159769.json",
+      "size": 1230,
+      "sha256": "f7afb44f872426e998cbd4e2e3dc7186e44c608f9606697ee8e49c5ff2662e0c"
+    },
+    {
+      "path": "SOURCES/off_cma_166868.json",
+      "size": 1231,
+      "sha256": "2c995a029fd4ff880779329408c4931c0c58254059766b53aaf8ab9b9e04c08b"
+    }
+  ]
+}

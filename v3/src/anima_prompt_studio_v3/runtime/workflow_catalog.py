@@ -54,9 +54,9 @@ def fingerprint(profile):
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
 
-def catalog(database):
+def catalog(database, *, repository=None):
     official = {p.id: p for p in packaged_workflow_profiles()}
-    repo = SQLiteRepository(database)
+    repo = repository if repository is not None else SQLiteRepository(database)
     try:
         result = []
         for p in repo.list_workflow_profiles():
@@ -88,7 +88,8 @@ def catalog(database):
             result.append((p, "official"))
         return sorted(result, key=lambda pair: (is_experimental(pair[0]), pair[1] != "official", pair[0].display_name))
     finally:
-        repo.close()
+        if repository is None:
+            repo.close()
 
 
 def is_experimental(profile):

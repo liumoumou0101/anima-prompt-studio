@@ -22,6 +22,16 @@ class LLMService(OpenAICompatibleService):
     大语言模型服务
     支持提示词扩写和文本翻译
     """
+
+    @staticmethod
+    async def complete(*, messages, images=None, disable_thinking=True, timeout_s=120.0, task="rewrite"):
+        from ..config_manager import config_manager
+        from .completion import complete
+
+        config = LLMService._get_config()
+        service = config_manager.get_service(config.get("provider", "")) or {}
+        return await complete(config, service, messages=messages, images=images,
+                              disable_thinking=disable_thinking, timeout_s=timeout_s, task=task)
     
     @staticmethod
     def _get_config() -> Dict[str, Any]:

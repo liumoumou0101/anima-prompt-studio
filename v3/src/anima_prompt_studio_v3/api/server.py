@@ -123,6 +123,9 @@ class LocalApiServer:
             raise
 
     def stop(self, *, timeout: float = 10.0) -> None:
+        submissions = getattr(self.runtime.app.state, "submission_service", None)
+        if submissions is not None:
+            submissions.close()
         workflow_jobs = getattr(self.runtime.app.state, "workflow_jobs", None)
         if workflow_jobs is not None:
             workflow_jobs.close()

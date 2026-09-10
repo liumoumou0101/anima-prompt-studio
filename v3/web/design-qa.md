@@ -1,5 +1,21 @@
 # Workbench UI design QA
 
+## Conversational workbench — 2026-09-10
+
+- Fourth batch: official cards support notes/copy; reference requirements can be manually edited; mapping uses server-provided resource digests, slots, filenames, and CAS revisions. Selected frontend suite: 23 passed. The legacy direct-prompt test now selects its fixture's compatible model and waits for workflow details before submitting.
+- `/qa/reference.html` is a separate offline fixture for the requirements editor and mapping panel; all writes are rejected. Inspected expanded editor and selected slot/file at the default desktop viewport and 390 × 844; content width 375 px at 390 px, no horizontal overflow. Fixed checkbox/text alignment. Native browser selection verified that saving stays disabled until a file is selected. Browser and development server were closed afterward.
+
+- Reference library added: byte upload, title/notes, explicit vision analysis, overwrite and LoRA preview, pin/unpin, soft removal, and collection from run results. Four additional tests cover explicit pin, blocking unsent workspace edits, opt-in external notes, multipart headers, and 204 deletion.
+- Expanded reference upload area checked at the default desktop viewport and 390 × 844; no horizontal overflow (document width 375 px). Temporary browser viewport and Vite server were restored/stopped after inspection. This visual check covered the empty library/upload area; populated detail behavior is covered by interaction tests, not a screenshot sign-off.
+- LLM configuration is accessible from the conversation page and exposes vision support and ingest thinking settings. Production build and the 19 selected conversation/reference/legacy rewrite/direct tests pass; older unrelated WorkbenchPage failures are still excluded.
+
+- New opt-in route: `/workbench/conversation`; the default workbench remains behind the disabled feature flag.
+- Offline fixture: run Vite and open `/qa/conversation.html`. It intercepts all requests locally and rejects every write; it never calls a model or generates images. The fixture is not a production build entry.
+- Inspected the normal desktop viewport and a 390 × 844 viewport using the in-app browser. The two-column layout stacks on narrow screens; measured document width was 375 px within the 390 px viewport, without horizontal overflow. Restored the viewport after inspection.
+- Verified readable receipts, separate rewrite and generate actions, persistent prompt editors, collapsed requirements/resources/settings, and visible locked-layer and readiness labels.
+- Five automated interaction tests cover explicit-only generation, current-token submission, revision conflicts, lost response retries, tentative mode failure, and local draft restoration (some tests cover multiple behaviors).
+- Build verification uses a fresh output directory or `--emptyOutDir false` because clearing an existing output directory currently terminates the Windows native process. Initial CSS suspicion was disproved by the same failure on the unchanged baseline; the page uses the normal CSS import.
+
 ## Visual truth and captured state
 
 - Original long-page reference: `C:\Users\10937\AppData\Local\Temp\codex-clipboard-9778ecf2-98b5-4830-833a-e60be2d39a51.png`

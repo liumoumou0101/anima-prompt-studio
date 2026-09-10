@@ -154,9 +154,30 @@ class V3WorkflowCompiler:
                 f"当前任务选择了 {len(job.lora_selection)} 个 LoRA，但工作流只有 "
                 f"{len(workflow_profile.lora_slots)} 个 LoRA 插槽。"
             )
+        resolved = job.integration_metadata.get("resolved_lora_bindings")
+        by_slot = None
+        if resolved is not None:
+            by_slot = {item["slot_key"]: item for item in resolved}
+            slots = {f"{slot.node_id}.{slot.name_input}" for slot in workflow_profile.lora_slots}
+            selections = {item.logical_id: item for item in job.lora_selection}
+            if (len(by_slot) != len(resolved) or not set(by_slot).issubset(slots)
+                    or len(selections) != len(job.lora_selection)
+                    or len(resolved) != len(selections)
+                    or {item["logical_id"] for item in resolved} != set(selections)):
+                raise WorkflowRenderError("已解析的 LoRA 绑定与任务或工作流不一致。")
+            for item in resolved:
+                selection = selections[item["logical_id"]]
+                if selection.file_name != item["remote_file_name"] or selection.weight != item["weight"]:
+                    raise WorkflowRenderError("LoRA 绑定后的文件名或权重被改变。")
         for index, slot in enumerate(workflow_profile.lora_slots):
             node_inputs = workflow[slot.node_id]["inputs"]
-            if index < len(job.lora_selection):
+            if by_slot is not None:
+                binding = by_slot.get(f"{slot.node_id}.{slot.name_input}")
+                if binding is not None:
+                    node_inputs[slot.name_input] = binding["remote_file_name"]
+                node_inputs[slot.model_strength_input] = binding["weight"] if binding else 0.0
+                node_inputs[slot.clip_strength_input] = binding["weight"] if binding else 0.0
+            elif index < len(job.lora_selection):
                 selection = job.lora_selection[index]
                 lora_name = selection.file_name or selection.logical_id
                 node_inputs[slot.name_input] = remote_profile.model_aliases.get(lora_name, lora_name)
@@ -232,4 +253,3 @@ class V3WorkflowCompiler:
                 ):
                     snapshot[output_name] = value
         return snapshot
-

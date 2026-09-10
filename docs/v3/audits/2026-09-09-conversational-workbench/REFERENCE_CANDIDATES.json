@@ -1,0 +1,74 @@
+[
+  {
+    "institution": "Art Institute of Chicago",
+    "artwork": {
+      "id": 267857,
+      "title": "Cliff on a Seashore",
+      "date_display": "c. 1600",
+      "medium_display": "Chiaroscuro woodcut from three blocks printed in green on ivory laid paper",
+      "credit_line": "Charles Hack and the Hearn Family Trust Collection, purchased with funds provided by the Harry B. and Bessie K. Braude Memorial, Amanda S. Johnson and Marion J. Livingston, anonymous, and Suzanne Searle Dixon endowment funds",
+      "is_public_domain": true,
+      "artist_title": "Hendrick Goltzius",
+      "image_id": "bca7c6e1-63b1-4c93-385c-1d213d7fdb08"
+    },
+    "api_url": "https://api.artic.edu/api/v1/artworks/267857",
+    "artwork_url": "https://www.artic.edu/artworks/267857",
+    "image_url": "https://www.artic.edu/iiif/2/bca7c6e1-63b1-4c93-385c-1d213d7fdb08/full/843,/0/default.jpg",
+    "license_links": [
+      "https://creativecommons.org/publicdomain/zero/1.0/",
+      "https://www.artic.edu/terms"
+    ],
+    "checked_on": "2026-09-10",
+    "image_download_status": 403,
+    "visual_review": "pending",
+    "selected_for_release": false
+  },
+  {
+    "institution": "Art Institute of Chicago",
+    "artwork": {
+      "id": 94578,
+      "title": "Woman in Profile, Turned Right",
+      "date_display": "1898/99",
+      "medium_display": "Charcoal on cream wove paper",
+      "credit_line": "Purchased with funds provided by The Donnelley Family",
+      "is_public_domain": true,
+      "artist_title": "Paula Modersohn-Becker",
+      "image_id": "57ea3022-afc6-3ba3-3b0b-2aac8efcb75c"
+    },
+    "api_url": "https://api.artic.edu/api/v1/artworks/94578",
+    "artwork_url": "https://www.artic.edu/artworks/94578",
+    "image_url": "https://www.artic.edu/iiif/2/57ea3022-afc6-3ba3-3b0b-2aac8efcb75c/full/843,/0/default.jpg",
+    "license_links": [
+      "https://creativecommons.org/publicdomain/zero/1.0/",
+      "https://www.artic.edu/terms"
+    ],
+    "checked_on": "2026-09-10",
+    "image_download_status": 403,
+    "visual_review": "pending",
+    "selected_for_release": false
+  },
+  {
+    "institution": "Art Institute of Chicago",
+    "artwork": {
+      "id": 114533,
+      "title": "Family of Deer under a Tree",
+      "date_display": "1790-1844",
+      "medium_display": "Watercolor with graphite on cream wove paper",
+      "credit_line": "The Leonora Hall Gurley Memorial Collection",
+      "is_public_domain": true,
+      "artist_title": "Robert Hills",
+      "image_id": "5feb322a-741e-2ad5-15ec-7be3791b93e4"
+    },
+    "api_url": "https://api.artic.edu/api/v1/artworks/114533",
+    "artwork_url": "https://www.artic.edu/artworks/114533",
+    "image_url": "https://www.artic.edu/iiif/2/5feb322a-741e-2ad5-15ec-7be3791b93e4/full/843,/0/default.jpg",
+    "license_links": [
+      "https://creativecommons.org/publicdomain/zero/1.0/",
+      "https://www.artic.edu/terms"
+    ],
+    "checked_on": "2026-09-10",
+    "image_download_status": 403,
+    "visual_review": "pending",
+    "selected_for_release": false
+  }
+]

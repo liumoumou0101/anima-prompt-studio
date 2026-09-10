@@ -154,9 +154,11 @@ it("submits the original English prompt without compiling", async () => {
 
   render(<MemoryRouter><DirectPromptPage remoteEnabled /></MemoryRouter>);
   fireEvent.change(screen.getByLabelText("正向提示词（英文，原样发送）"), {target: {value: "1girl, finger to lips, clean delicate lineart"}});
+  // This test verifies prompt passthrough, using the model declared by its target fixture.
+  fireEvent.change(screen.getByLabelText("模型配置"), {target: {value: "anima_aesthetic_v1"}});
   expect(await screen.findByRole("option", {name: "测试云主机"})).toBeInTheDocument();
   await waitFor(() => expect(screen.getByLabelText("云主机连接")).toHaveValue("remote-1"));
-  expect(screen.getByText("实验工作流说明")).toBeInTheDocument();
+  expect(await screen.findByText("实验工作流说明")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: "按原文生图"}));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));

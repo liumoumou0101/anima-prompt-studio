@@ -14,11 +14,15 @@ dependencies = [
   "pydantic>=2.7,<3",
   "uvicorn>=0.35,<1",
   "httpx>=0.27,<1",
+  "python-multipart>=0.0.20,<1",
+  "Pillow>=10.4,<13",
 ]
 
 [project.scripts]
 anima-v3-build-data = "anima_prompt_studio_v3.tools.build_reference_data:main"
+anima-v3-build-example-pack = "anima_prompt_studio_v3.tools.build_example_pack:main"
 anima-v3-data-pack = "anima_prompt_studio_v3.tools.manage_data_pack:main"
+anima-v3-example-pack = "anima_prompt_studio_v3.tools.install_example_pack:main"
 anima-v3-benchmark = "anima_prompt_studio_v3.tools.run_static_benchmark:main"
 anima-v3-api = "anima_prompt_studio_v3.tools.run_api:main"
 anima-v3-desktop = "anima_prompt_studio_v3.tools.run_desktop:main"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from copy import deepcopy
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,13 +27,15 @@ from anima_prompt_studio_v3.remote.result_organizer import ResultOrganizer
 from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 from anima_prompt_studio_v3.remote.credential_store import CredentialStore
 from anima_prompt_studio_v3.runtime.workflow_compatibility import infer_workflow_model_profiles
-from anima_prompt_studio.domain.models import PromptJob
+from anima_prompt_studio.domain.models import PromptJob, LoRASelection
 
 from .generation import PreparedGeneration
 from ..core.generation_recipes import build_workflow_recipe_contract, validate_job_recipe
 from ..core.workflow_compiler import V3WorkflowCompiler
 from .workflow_catalog import WorkflowCatalog, catalog
 from .packaged_workflows import workflow_revision
+from .lora_catalog import LoraCatalog
+from ..core.requirements import RequirementLora, digest
 
 
 class GenerationQueueError(RuntimeError):
@@ -133,6 +136,8 @@ class GenerationQueueService:
         target_lister: GenerationTargetLister | None = None,
         passphrase_vault: EphemeralPassphraseVault | None = None,
         recovery_resolver: Callable[[GenerationRun], GenerationTarget] | None = None,
+        plan_resolver=None,
+        durable_run_loader=None,
     ) -> None:
         if max_pending < 1:
             raise ValueError("max_pending 必须至少为 1。")
@@ -140,6 +145,10 @@ class GenerationQueueService:
         self._target_lister = target_lister
         self._passphrase_vault = passphrase_vault
         self._recovery_resolver = recovery_resolver
+        self._plan_resolver = plan_resolver
+        self._durable_run_loader = durable_run_loader
+        self._reserved: set[str] = set()
+        self.on_durable_cancel = None
         self._coordinator_factory = coordinator_factory or self._default_coordinator
         self._on_run_saved = on_run_saved
         self._on_artifact_saved = on_artifact_saved
@@ -185,17 +194,19 @@ class GenerationQueueService:
         remote_profile_id: str,
         workflow_profile_id: str,
         idempotency_key: str,
+        payload_hash: str | None = None,
     ) -> GenerationRun:
         if not idempotency_key.strip():
             raise ValueError("缺少 Idempotency-Key。")
         with self._condition:
             existing_id = self._idempotency.get(idempotency_key)
             if existing_id is not None:
+                self._check_payload(self._runs[existing_id], payload_hash)
                 return self._runs[existing_id].model_copy(deep=True)
             if self._stopping:
                 raise GenerationQueueError("生成队列正在停止。")
             capacity = self._max_pending if self._active_run_id is not None else self._max_pending + 1
-            if len(self._pending) >= capacity:
+            if len(self._pending) + len(self._reserved) >= capacity:
                 raise GenerationQueueFullError(f"文生图等待队列已达到 {self._max_pending} 项。")
 
         target = self._target_resolver(remote_profile_id, workflow_profile_id)
@@ -214,7 +225,7 @@ class GenerationQueueService:
             status_message="等待本地生成队列",
             request_json={
                 "prompt_job": job.model_dump(mode="json"),
-                "local_queue": {"idempotency_key": idempotency_key},
+                "local_queue": {"idempotency_key": idempotency_key, "payload_hash": payload_hash},
                 "workflow_snapshot": target_snapshot.workflow_profile.model_dump(mode="json"),
                 "workflow_revision": workflow_revision(target_snapshot.workflow_profile),
             },
@@ -228,9 +239,12 @@ class GenerationQueueService:
             # A second submission may have completed target resolution concurrently.
             existing_id = self._idempotency.get(idempotency_key)
             if existing_id is not None:
+                self._check_payload(self._runs[existing_id], payload_hash)
                 return self._runs[existing_id].model_copy(deep=True)
+            if self._stopping:
+                raise GenerationQueueError("生成队列正在停止。")
             capacity = self._max_pending if self._active_run_id is not None else self._max_pending + 1
-            if len(self._pending) >= capacity:
+            if len(self._pending) + len(self._reserved) >= capacity:
                 raise GenerationQueueFullError(f"文生图等待队列已达到 {self._max_pending} 项。")
             self._runs[run.id] = run
             self._artifacts[run.id] = []
@@ -242,6 +256,108 @@ class GenerationQueueService:
             self._save_run(run)
             self._condition.notify()
             return run.model_copy(deep=True)
+
+    @staticmethod
+    def _check_payload(run, payload_hash):
+        from ..storage.generation_submissions import IdempotencyConflict
+        old_hash = run.request_json.get("local_queue", {}).get("payload_hash")
+        if payload_hash is not None and old_hash is not None and old_hash != payload_hash:
+            raise IdempotencyConflict("同一幂等键不能用于不同请求。")
+
+    def plan(self, prepared, remote_id, workflow_id, resources, frozen=None):
+        if self._plan_resolver is None:
+            raise GenerationQueueError("当前队列尚未配置资源快照解析器。")
+        return self._plan_resolver(deepcopy(prepared), remote_id, workflow_id, deepcopy(resources), deepcopy(frozen))
+
+    def existing_request(self, key, payload_hash=None):
+        with self._condition:
+            run_id = self._idempotency.get(key)
+            if run_id is None:
+                return None
+            run = self._runs[run_id]
+            self._check_payload(run, payload_hash)
+            return run.model_copy(deep=True)
+
+    def is_reserved(self, run_id):
+        with self._condition:
+            return run_id in self._reserved
+
+    def reserved_ids(self):
+        with self._condition:
+            return list(self._reserved)
+
+    def accept_durable(self, key, payload_hash, builder):
+        from ..storage.generation_submissions import IdempotencyConflict
+        with self._condition:
+            if key in self._idempotency:
+                raise IdempotencyConflict("该幂等键已有任务，请查询原提交。")
+            if self._stopping:
+                raise GenerationQueueError("生成队列正在停止。")
+            capacity = self._max_pending if self._active_run_id else self._max_pending + 1
+            if len(self._pending) + len(self._reserved) >= capacity:
+                raise GenerationQueueFullError("生成队列已满，未接受新任务。")
+            entry = builder()  # Short workspace transaction; no network IO.
+            self._register_durable(entry)
+            return entry
+
+    def _register_durable(self, entry):
+        run_id = entry["run_id"]
+        if run_id not in self._runs:
+            existing = self._durable_run_loader(run_id) if self._durable_run_loader else None
+            run = existing or GenerationRun.model_validate(entry["snapshot"]["run"])
+            if existing is None and entry["dispatch_state"] == "enqueued":
+                run.error_code = "generation_execution_uncertain"
+                run.update_state(GenerationRunState.FAILED, "执行记录缺失，请确认远端状态。", 0)
+            self._runs[run_id] = run
+        run = self._runs[run_id]
+        self._idempotency[entry["idempotency_key"]] = run_id
+        self._artifacts.setdefault(run_id, [])
+        if entry["dispatch_state"] == "canceled":
+            run.update_state(GenerationRunState.CANCELED, "已取消", 0)
+        elif entry["dispatch_state"] == "failed" and run.state == GenerationRunState.DRAFT:
+            run.error_code = entry["error_code"]
+            run.update_state(GenerationRunState.FAILED, "已接受的任务执行准备失败。", 0)
+        if run.state == GenerationRunState.DRAFT and not run.request_json.get("dispatch_started") and not run.remote_prompt_id:
+            self._reserved.add(run_id)
+        elif run.state not in {GenerationRunState.COMPLETED, GenerationRunState.CANCELED, GenerationRunState.FAILED} and not run.remote_prompt_id:
+            run.error_code = "generation_execution_uncertain"
+            run.update_state(GenerationRunState.FAILED, "执行结果待确认；不会自动重复出图。", run.progress)
+            self._save_run(run)
+
+    def restore_durable(self, entry):
+        with self._condition:
+            self._register_durable(entry)
+
+    def deliver_durable(self, entry, prepared, target):
+        with self._condition:
+            run_id = entry["run_id"]
+            if self._stopping or run_id not in self._reserved:
+                return False
+            run = self._runs[run_id]
+            # Persist before publishing any executable work. A crash here is safe
+            # to retry: dispatch_started is still false and run_id is stable.
+            run.request_json["generation_snapshot"] = entry["snapshot"]["provenance"]
+            run.request_json["resource_snapshot"] = {key: entry["snapshot"][key] for key in
+                                                      ("resources", "resolution", "remote_fingerprint", "workflow")}
+            if self._on_job_saved:
+                self._on_job_saved(prepared.job.model_copy(deep=True))
+            self._save_run(run)
+            self._reserved.remove(run_id)
+            self._scheduled_run_ids.add(run_id)
+            self._pending.append(_QueuedGeneration(prepared=prepared, target=target, run_id=run_id))
+            self._condition.notify_all()
+            return True
+
+    def fail_durable(self, entry, code):
+        with self._condition:
+            run = self._runs[entry["run_id"]]
+            if run.id not in self._reserved:
+                return
+            run.error_code = code
+            run.error_message = "已接受的任务暂不可执行，请检查资源或连接；未重复提交远端。"
+            run.update_state(GenerationRunState.FAILED, run.error_message, 0)
+            self._save_run(run)
+            self._reserved.discard(run.id)
 
     def list(self, *, limit: int = 100) -> list[GenerationRun]:
         if limit < 1:
@@ -262,6 +378,8 @@ class GenerationQueueService:
 
     def resume(self, run_id: str) -> GenerationRun:
         with self._condition:
+            if self._stopping:
+                raise GenerationQueueError("生成队列正在停止。")
             run = self._runs.get(run_id)
             if run is None:
                 raise GenerationRunNotFoundError(run_id)
@@ -272,7 +390,7 @@ class GenerationQueueService:
             if run.state in {GenerationRunState.COMPLETED, GenerationRunState.CANCELED}:
                 raise GenerationRunActionError("已完成或已取消的任务无需恢复。")
             capacity = self._max_pending if self._active_run_id is not None else self._max_pending + 1
-            if len(self._pending) >= capacity:
+            if len(self._pending) + len(self._reserved) >= capacity:
                 raise GenerationQueueFullError(f"文生图等待队列已达到 {self._max_pending} 项。")
             remote_profile_id = run.remote_profile_id
             workflow_profile_id = run.workflow_profile_id
@@ -288,8 +406,10 @@ class GenerationQueueService:
         with self._condition:
             if run_id in self._scheduled_run_ids or self._active_run_id == run_id:
                 raise GenerationRunActionError("任务已在本地执行或恢复队列中。")
+            if self._stopping:
+                raise GenerationQueueError("生成队列正在停止。")
             capacity = self._max_pending if self._active_run_id is not None else self._max_pending + 1
-            if len(self._pending) >= capacity:
+            if len(self._pending) + len(self._reserved) >= capacity:
                 raise GenerationQueueFullError(f"文生图等待队列已达到 {self._max_pending} 项。")
             run = self._runs[run_id]
             run.update_state(run.state, "等待恢复远程任务", run.progress)
@@ -317,6 +437,8 @@ class GenerationQueueService:
             run = self._runs.get(run_id)
             if run is None:
                 raise GenerationRunNotFoundError(run_id)
+            if run_id in self._reserved:
+                return ["cancel_queued"]
             if run_id in self._scheduled_run_ids:
                 if run.state == GenerationRunState.DRAFT and self._active_run_id != run_id:
                     return ["cancel_queued"]
@@ -335,6 +457,13 @@ class GenerationQueueService:
                 raise GenerationRunNotFoundError(run_id)
             if self._active_run_id == run_id or run.state != GenerationRunState.DRAFT:
                 raise GenerationRunActionError("只能取消尚未开始的排队任务。")
+            if run_id in self._reserved:
+                if self.on_durable_cancel:
+                    self.on_durable_cancel(run.request_json["submission_id"])
+                self._reserved.remove(run_id)
+                run.update_state(GenerationRunState.CANCELED, "已在交付队列前取消", 0)
+                self._save_run(run)
+                return run.model_copy(deep=True)
             match = next((item for item in self._pending if item.run_id == run_id), None)
             if match is None:
                 raise GenerationRunActionError("任务已不在等待队列。")
@@ -353,6 +482,8 @@ class GenerationQueueService:
                 self._scheduled_run_ids.discard(request.run_id)
                 if request.prepared is None:
                     run.update_state(run.state, "恢复尚未开始，本地服务已停止", run.progress)
+                elif run.request_json.get("submission_id"):
+                    run.update_state(GenerationRunState.DRAFT, "服务已停止，等待下次恢复", 0.0)
                 else:
                     run.update_state(GenerationRunState.CANCELED, "本地服务已停止", 0.0)
                 self._save_run(run)
@@ -374,33 +505,53 @@ class GenerationQueueService:
                     return
                 request = self._pending.popleft()
                 self._active_run_id = request.run_id
-                coordinator = self._coordinator_factory(request.target.output_root, self._record_update)
-                self._active_coordinator = coordinator
                 run = self._runs[request.run_id].model_copy(deep=True)
             try:
+                target = request.target
+                if request.prepared is not None and run.request_json.get("submission_id"):
+                    frozen = run.request_json["resource_snapshot"]
+                    _, target, resolution = self.plan(request.prepared, run.remote_profile_id,
+                        run.workflow_profile_id, [RequirementLora.model_validate(r) for r in frozen["resources"]],
+                        frozen["workflow"])
+                    if (resolution["remote_fingerprint"] != frozen["remote_fingerprint"]
+                            or resolution["bindings"] != frozen["resolution"]["bindings"]
+                            or digest(target.workflow_profile.model_dump(mode="json")) != digest(frozen["workflow"])):
+                        raise ValueError("已接受任务的目标或资源发生变化，请重新确认。")
+                coordinator = self._coordinator_factory(target.output_root, self._record_update)
+                with self._condition:
+                    self._active_coordinator = coordinator
+                if request.prepared is not None and run.request_json.get("submission_id"):
+                    # Durable marker precedes any remote operation. A crash after
+                    # this point is uncertainty, never permission to sample again.
+                    run.request_json["dispatch_started"] = True
+                    self._record_update(run)
                 if request.prepared is None:
                     result = coordinator.resume(
                         run,
-                        request.target.remote_profile,
-                        request.target.workflow_profile,
-                        request.target.credentials,
+                        target.remote_profile,
+                        target.workflow_profile,
+                        target.credentials,
                     )
                 else:
                     result = coordinator.execute(
                         request.prepared.job,
-                        request.target.remote_profile,
-                        request.target.workflow_profile,
+                        target.remote_profile,
+                        target.workflow_profile,
                         request.prepared.checkpoint_logical_name,
-                        request.target.credentials,
+                        target.credentials,
                         run=run,
                     )
                 self._record_result(result)
             except RemoteExecutionError as exc:
+                if (exc.run.request_json.get("submission_attempted") and not exc.run.remote_prompt_id):
+                    exc.run.error_code = "generation_execution_uncertain"
+                    exc.run.error_message = "执行结果待确认；不会自动重复出图，请检查远端队列。"
+                    exc.run.update_state(GenerationRunState.FAILED, exc.run.error_message, exc.run.progress)
                 self._record_update(exc.run)
             except Exception as exc:
                 run.error_code = type(exc).__name__
-                run.error_message = str(exc)
-                run.update_state(GenerationRunState.FAILED, str(exc), run.progress)
+                run.error_message = "任务执行失败，请检查资源和连接。" if run.request_json.get("submission_id") else str(exc)
+                run.update_state(GenerationRunState.FAILED, run.error_message, run.progress)
                 self._record_update(run)
             finally:
                 with self._condition:
@@ -551,6 +702,30 @@ def build_generation_queue(
         if run.error_code in {"missing_nodes", "invalid_workflow_inputs"}:
             workflows_manager.invalidate(run.remote_profile_id)
 
+    def plan_resolver(prepared, remote_id, workflow_id, resources, frozen):
+        # Obtain credentials without resolving a different graph first.
+        base = frozen if frozen is not None else LoraCatalog(workflows_manager).profile(workflow_id).model_dump(mode="json")
+        target = target_resolver(remote_id, workflow_id, base)
+        graph, resolution = LoraCatalog(workflows_manager).resolve(remote_id, workflow_id,
+            prepared.job.model_profile_id, resources, frozen=frozen, credentials=target.credentials, refresh=True)
+        job = prepared.job.model_copy(deep=True)
+        job.lora_selection = [LoRASelection(logical_id=b["logical_id"], file_name=b["remote_file_name"], weight=b["weight"], trigger_words=b["trigger_words"])
+                              for b in resolution["bindings"]]
+        job.integration_metadata["resolved_lora_bindings"] = resolution["bindings"]
+        planned = PreparedGeneration(job=job, checkpoint_logical_name=prepared.checkpoint_logical_name)
+        resolved = GenerationTarget(target.remote_profile, graph, target.credentials, target.output_root)
+        GenerationQueueService._validate_target(planned, resolved)
+        return planned, resolved, resolution
+
+    def load_durable_run(run_id):
+        repository = SQLiteRepository(database)
+        try:
+            return repository.get_generation_run(run_id)
+        except KeyError:
+            return None
+        finally:
+            repository.close()
+
     return GenerationQueueService(
         target_resolver,
         on_job_saved=with_repository(lambda repository, job: repository.save_job(job)),
@@ -565,6 +740,8 @@ def build_generation_queue(
         target_lister=target_lister,
         passphrase_vault=passphrases,
         recovery_resolver=lambda run: target_resolver(run.remote_profile_id, run.workflow_profile_id, run.request_json.get("workflow_snapshot")),
+        plan_resolver=plan_resolver,
+        durable_run_loader=load_durable_run,
     )
 
 

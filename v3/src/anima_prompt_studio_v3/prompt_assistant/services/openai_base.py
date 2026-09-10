@@ -426,6 +426,11 @@ class OpenAICompatibleService(BaseAPIService):
                         return result
                     except asyncio.CancelledError:
                         pbar.cancel(f"{WARN_PREFIX} 任务被中断 | 服务:{provider_display_name}")
+                        # A monitor may cancel only req_task, but wait_for/caller
+                        # cancellation targets this task too. Never swallow the latter.
+                        current = asyncio.current_task()
+                        if current is not None and current.cancelling():
+                            raise
                         return {"success": False, "error": "中断", "interrupted": True}
                     finally:
                         if not monitor_task.done():

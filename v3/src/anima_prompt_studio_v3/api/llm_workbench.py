@@ -106,6 +106,10 @@ def save_settings(manager, payload: LlmSettingsUpdateRequest) -> None:
     if not model:
         raise ValueError("请输入模型名称。")
     service["base_url"] = url
+    for field in ("supports_vision", "ingest_enable_thinking"):
+        value = getattr(payload, field)
+        if value is not None:
+            service[field] = value
     if payload.clear_api_key:
         service["api_key"] = ""
     elif key:

@@ -1,5 +1,37 @@
 # V3 架构决策记录
 
+## ADR-025：会话工作台的草稿权威、冻结提交与参考画廊（2026-09-10）
+
+状态：Accepted（实现合同；功能待实现、默认 flag=false）。本条修订 ADR-024 的预留接口及存储落点，不改写其历史正文。详细合同见 [CONVERSATIONAL_WORKBENCH.md](CONVERSATIONAL_WORKBENCH.md)，公开 API 见 [API_CONTRACT.md](API_CONTRACT.md) 第 9 节。
+
+1. requirements 是逐轮编辑的持久记忆。新能力走 `/workbench/turns`；旧 `/workbench/prompt` 和其请求协议保留，永不增加 reference_preset_id。用户按 faithful/expand 修改要求，显式点击生图。
+2. 会话、长期参考收藏、历史履历分为 `/workbench`、`/references`、`/gallery`。用户例图在 examples.db，官方包只读 overlay，备注在独立覆盖表；工作台与接受记录在 workspaces.db，不写 reference.db。
+3. 单 pin 按 role 复制未锁层和来源 required LoRA，冻结来源版本；之后草稿拥有资源列表。用户主动删除是正常编辑；提交不从来源重新补回资源。钉选允许离线，执行前缺文件/槽位仍必须拒绝，禁止系统静默剥离。
+4. 编译内容哈希不作为并发版本。会话提交需 workspace revision + 不可复用 compiled_token，inputs fingerprint 覆盖完整规范化输入。只读字段不能由通用 PUT 伪造；旧保存省略新字段必须保留会话状态。
+5. LLM 调用在数据库事务外，成功后短事务 CAS 原版本，原子更新 mode/requirements/compiled。模型失败或并发冲突不留下半轮状态。
+6. 新提交以同库事务原子接受不可变生成快照和必要草稿手改，再幂等交付队列。接受记录与 run 唯一关联，重试先查 key，不因原 token 已更新拒绝已接受请求。远端结果不确定不自动重复采样。
+7. availability 与工作流编译器消费同一最终 LoRA binding；重放先选 frozen dump 再验证当前远端。旧图收藏取生成当时的完整快照，不取当前草稿。
+8. 生图分 legacy/conversational/reference 模式，缺省 legacy 保留旧词典和原型语义；它不获得会话校验标记、不写回 compiled。新 UI 固定 conversational。独立 reference 模式必须冻结 source_version。
+9. Ingest 独立 attempt/version CAS，失败保留旧合法要求，用户锁层不被覆盖；只有 ingest 发像素。Vision/thinking 由设置拥有，不推断模型能力，不发送完整聊天。
+10. v1 含少量官方例图包；不做自动出图、不验收本地 4B、不做远端模型下载/上传。发布需确定性恢复测试和真实云端多轮/固定 seed 评测；feature flag 不是完整验收的替代。
+
+取舍：增加持久提交协调层来换取可恢复的一致性；仅保存有限会话回执；初版不承诺图像语义的绝对锁定或参考画风精确复刻。旧 ADR-024 的 few-shot、旧 prompt 合并和单一 user.db 落点由本条替代，ID 分轨和不静默剥离原则继续有效。
+
+## ADR-024：处理规则与参考预设分轨
+
+状态：Accepted（接口预留；目录尚未实现）
+
+工作台有两类不能混在一个控件里的“预设”：
+
+1. **处理规则**（closed set）：忠实转换、适度扩写，以及日后的通用/人像/Tags 等 system prompt。只改变 LLM 如何把用户描述写成提示词。数量少，放在输入框旁的开关。字段是 `mode` / `rule_id`。
+2. **参考预设**（open catalog）：从收集图片的提示词沉淀出的风格卡，数量会很多，且常绑定 LoRA、模型族和工作流。字段是 `reference_preset_id`，走独立目录 API 和独立选择器。
+
+禁止把参考预设放进「提示词处理方式」下拉、输入框处理规则按钮组，或 `generation_settings.preset_id`（该字段已表示生成配方，如 `stable_baseline`）。禁止复用 `rule_id` 指向超市条目。
+
+参考预设是生成资源，不只是一段提示词：解析后的 LoRA 必须进入直出任务的 `lora_selection`；远端缺少文件或未映射时 `availability` 为不可用，禁止静默摘掉 LoRA 后仍提交。目录更新按数据包方式版本化，用户钉选存在 `user.db` / 工作台草稿，不得被官方包覆盖。
+
+未实现前，客户端不得发送 `reference_preset_id`；当前 `extra=forbid` 会拒绝未知字段。实现时再把该字段加为可选，缺省 `null` 表示未选用参考预设。
+
 ## 工作流所有权与服务器绑定（2026-09-06，已实施）
 
 官方资源只读，用户工作流独立，服务器能力与资产映射按连接保存。停止用启动时向个人数据库追加固定 JSON 的方式发布模板。模板图/版本归档及排队快照防止升级覆盖用户内容或改变已提交任务。

@@ -1,0 +1,28 @@
+CMA style reference pack / 2026-09-10
+Images and source metadata: The Cleveland Museum of Art, CC0 1.0.
+https://www.clevelandart.org/open-access
+https://www.clevelandart.org/terms-and-conditions
+The museum does not sponsor or endorse this application.
+Downloaded web JPEGs were losslessly encoded as RGB WebP without resizing or cropping.
+Chinese requirements are application-authored visual descriptions, not museum catalogue text.
+Artist names are retained only in provenance; no artist or LoRA is added to generation requirements.
+Content reviewed for style reference; model reproduction quality has not yet been evaluated.
+
+off_cma_144688: Landscape with a Milkmaid (c. 1525)
+Niccolo Boldrini (Italian, c. 1500–after 1566); after Titian (Italian, c. 1488–1576)
+Mr. and Mrs. Charles G. Prasse Collection
+https://clevelandart.org/art/1969.307
+https://openaccess-cdn.clevelandart.org/1969.307/1969.307_web.jpg
+
+off_cma_166868: Portrait of Jean Ajalbert (c. 1893)
+Eugène Carrière (French, 1849–1906)
+Bequest of Muriel Butkin
+https://clevelandart.org/art/2009.116
+https://openaccess-cdn.clevelandart.org/2009.116/2009.116_web.jpg
+
+off_cma_159769: Italian Landscape (c. 1790–92)
+John Robert Cozens (British, 1752–1797)
+Leonard C. Hanna Jr. Fund
+https://clevelandart.org/art/1997.137
+https://openaccess-cdn.clevelandart.org/1997.137/1997.137_web.jpg
+

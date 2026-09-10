@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field
 from anima_prompt_studio.domain.execution_models import RemoteCredentials
 from ..runtime.workflow_catalog import WorkflowCatalog, InspectionJobs
 from .models import RemoteConnectionTestRequest
+from ..core.lora_resolution import LoraBindingsRequest, MappingConflict, ResourceUnavailable
+from ..runtime.lora_catalog import LoraCatalog
 
 
 class MappingRequest(BaseModel):
@@ -30,12 +32,17 @@ def register_workflow_routes(app, database, require_session):
     jobs = InspectionJobs(manager)
     app.state.workflow_jobs = jobs
     root = "/api/v3/workflows"
+    loras = LoraCatalog(manager)
 
     def guarded(call):
         try:
             return call()
         except KeyError as exc:
             return JSONResponse({"error": {"code": "workflow_not_found", "message": "连接或工作流不存在"}}, status_code=404)
+        except MappingConflict as exc:
+            return JSONResponse({"error": {"code": "mapping_revision_conflict", "message": str(exc)}}, status_code=409)
+        except ResourceUnavailable as exc:
+            return JSONResponse({"error": {"code": exc.code, "message": str(exc), "details": exc.details}}, status_code=422)
         except ValueError as exc:
             return JSONResponse({"error": {"code": "workflow_validation_failed", "message": str(exc)}}, status_code=422)
         except (OSError, RuntimeError):
@@ -64,6 +71,14 @@ def register_workflow_routes(app, database, require_session):
     @app.put(root + "/servers/{remote_id}/{workflow_id}/mapping", dependencies=[Depends(require_session)])
     def mapping(remote_id: str, workflow_id: str, payload: MappingRequest):
         return guarded(lambda: manager.save_mapping(remote_id, workflow_id, payload.revision, payload.mapping))
+
+    @app.get(root + "/servers/{remote_id}/{workflow_id}/lora-bindings", dependencies=[Depends(require_session)])
+    def lora_bindings(remote_id: str, workflow_id: str):
+        return guarded(lambda: loras.get(remote_id, workflow_id))
+
+    @app.put(root + "/servers/{remote_id}/{workflow_id}/lora-bindings", dependencies=[Depends(require_session)])
+    def save_lora_bindings(remote_id: str, workflow_id: str, payload: LoraBindingsRequest):
+        return guarded(lambda: loras.save(remote_id, workflow_id, payload))
 
     @app.post(root + "/import", dependencies=[Depends(require_session)])
     def import_workflow(payload: dict):

@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from ..core.validation import CandidateSetValidationReport
+from ..core.requirements import ConversationWriteFields
 from ..domain import IntentDocument, IntentElementType, IntentState, PromptCandidate, RelationKind
 
 
@@ -108,6 +109,8 @@ class LlmSettingsUpdateRequest(ApiModel):
     base_url: str | None = Field(default=None, max_length=2000)
     service_type: Literal["openai_compatible", "ollama"] = "openai_compatible"
     clear_api_key: bool = False
+    supports_vision: bool | None = None
+    ingest_enable_thinking: bool | None = None
 
 
 class DirectPromptPreviewRequest(ApiModel):
@@ -172,7 +175,7 @@ class WorkbenchGenerationSettings(ApiModel):
     workflow_profile_id: str | None = Field(default=None, max_length=200)
 
 
-class WorkspaceDraft(ApiModel):
+class WorkspaceDraft(ApiModel, ConversationWriteFields):
     positive_text: str = Field(default="", max_length=10_000)
     excluded_text: str = Field(default="", max_length=10_000)
     model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)
@@ -186,6 +189,15 @@ class WorkspaceDraft(ApiModel):
     @classmethod
     def workspace_tag_lists_are_canonical(cls, values: list[str]) -> list[str]:
         return _canonical_tag_list(values, field_name="tags")
+
+    def persistence_payload(self) -> dict:
+        # Legacy fields retain their whole-object/default behavior. New fields
+        # must distinguish omission from explicit values inside the store CAS.
+        values = self.model_dump(mode="json", by_alias=True)
+        for key in ConversationWriteFields.model_fields:
+            if key not in self.model_fields_set:
+                values.pop(key, None)
+        return values
 
 
 class SceneEntitySnapshot(ApiModel):
@@ -378,12 +390,46 @@ class GenerationBridgePreviewRequest(ApiModel):
     workspace_revision: int | None = Field(default=None, ge=1)
 
 
-class GenerationSubmitRequest(GenerationBridgePreviewRequest):
+class SubmissionLora(ApiModel):
+    logical_id: str = Field(min_length=1, max_length=200)
+    file_name: str = Field(min_length=1, max_length=1000)
+    weight: float = Field(default=0.8, ge=-2, le=2, allow_inf_nan=False)
+    trigger_words: list[str] = Field(default_factory=list, max_length=32)
+
+
+class SubmissionFields(ApiModel):
+    submission_kind: Literal["legacy", "conversational", "reference"] = "legacy"
+    compiled_token: str | None = Field(default=None, min_length=1, max_length=200)
+    reference_preset_id: str | None = Field(default=None, min_length=1, max_length=200)
+    source_version: str | None = Field(default=None, min_length=1, max_length=200)
+    lora_selection: list[SubmissionLora] = Field(default_factory=list, max_length=16)
+    workflow_snapshot_run_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_submission(self):
+        if self.submission_kind == "conversational":
+            if not self.workspace_id or self.workspace_revision is None or not self.compiled_token:
+                raise ValueError("对话提交必须携带工作台 ID、修订号和编译令牌。")
+            if "lora_selection" in self.model_fields_set or self.reference_preset_id or self.source_version:
+                raise ValueError("对话提交的资源只能来自工作台要求。")
+        elif self.compiled_token:
+            raise ValueError("编译令牌仅用于对话提交。")
+        if self.submission_kind == "reference":
+            if self.workspace_id or self.workspace_revision is not None or not self.reference_preset_id or not self.source_version:
+                raise ValueError("参考提交必须携带来源版本且不能携带工作台。")
+        elif self.reference_preset_id or self.source_version:
+            raise ValueError("参考来源字段仅用于参考提交。")
+        return self
+
+
+class GenerationSubmitRequest(GenerationBridgePreviewRequest, SubmissionFields):
     remote_profile_id: str = Field(min_length=1, max_length=200)
     workflow_profile_id: str = Field(min_length=1, max_length=200)
 
 
-class DirectPromptSubmitRequest(ApiModel):
+class DirectPromptSubmitRequest(SubmissionFields):
+    workspace_id: str | None = Field(default=None, pattern=r"^workspace_[A-Za-z0-9]+$")
+    workspace_revision: int | None = Field(default=None, ge=1)
     positive_prompt: str = Field(min_length=1, max_length=20_000)
     negative_prompt: str = Field(default="", max_length=20_000)
     model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)

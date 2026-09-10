@@ -4,8 +4,10 @@ from datetime import UTC, datetime
 import json
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
+
+from ..core.requirements import apply_workspace_edit, project_conversation
 
 
 class WorkspaceNotFoundError(LookupError):
@@ -63,7 +65,7 @@ class WorkspaceStore:
     ) -> dict[str, Any]:
         now = _utc_now()
         workspace_id = f"workspace_{uuid4().hex}"
-        serialized = _serialize_draft(draft)
+        serialized = _serialize_draft(apply_workspace_edit(None, draft))
         serialized_snapshot = _serialize_snapshot(candidate_snapshot)
         with self._connect() as connection:
             connection.execute(
@@ -93,12 +95,11 @@ class WorkspaceStore:
         draft: dict[str, Any],
         candidate_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        serialized = _serialize_draft(draft)
         serialized_snapshot = _serialize_snapshot(candidate_snapshot)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT revision FROM workspaces WHERE id=? AND deleted_at IS NULL",
+                "SELECT * FROM workspaces WHERE id=? AND deleted_at IS NULL",
                 (workspace_id,),
             ).fetchone()
             if row is None:
@@ -106,12 +107,42 @@ class WorkspaceStore:
             current_revision = int(row["revision"])
             if current_revision != expected_revision:
                 raise WorkspaceRevisionConflictError(current_revision)
+            serialized = _serialize_draft(apply_workspace_edit(json.loads(row["draft_json"]), draft))
             connection.execute(
                 """UPDATE workspaces SET title=?,draft_json=?,candidate_snapshot_json=?,revision=?,updated_at=?
                    WHERE id=? AND revision=? AND deleted_at IS NULL""",
                 (title, serialized, serialized_snapshot, current_revision + 1, _utc_now(), workspace_id, current_revision),
             )
-        return self.get(workspace_id)
+            updated = connection.execute("SELECT * FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+            result = self._record(updated)
+        return result
+
+    def transform(
+        self, workspace_id: str, *, expected_revision: int,
+        operation: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Internal short CAS. The callback MUST NOT perform network or slow IO."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM workspaces WHERE id=? AND deleted_at IS NULL", (workspace_id,),
+            ).fetchone()
+            if row is None:
+                raise WorkspaceNotFoundError(workspace_id)
+            if row["revision"] != expected_revision:
+                raise WorkspaceRevisionConflictError(row["revision"])
+            draft = operation(json.loads(row["draft_json"]))
+            # Validate internal transitions as well as public input before commit.
+            projected = project_conversation(draft)
+            for key in ("reference_preset_id", "session_previews", "compile_state"):
+                projected.pop(key, None)
+            connection.execute(
+                "UPDATE workspaces SET draft_json=?,revision=?,updated_at=? WHERE id=?",
+                (_serialize_draft(projected), expected_revision + 1, _utc_now(), workspace_id),
+            )
+            updated = connection.execute("SELECT * FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+            result = self._record(updated)
+        return result
 
     def delete(self, workspace_id: str, *, expected_revision: int) -> None:
         with self._connect() as connection:
@@ -144,7 +175,7 @@ class WorkspaceStore:
         return {
             "id": row["id"],
             "title": row["title"],
-            "draft": json.loads(row["draft_json"]),
+            "draft": project_conversation(json.loads(row["draft_json"])),
             "candidate_snapshot": (
                 json.loads(row["candidate_snapshot_json"])
                 if row["candidate_snapshot_json"] else None
@@ -156,7 +187,7 @@ class WorkspaceStore:
 
 
 def _serialize_draft(draft: dict[str, Any]) -> str:
-    return json.dumps(draft, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return json.dumps(draft, ensure_ascii=False, separators=(",", ":"), sort_keys=True, allow_nan=False)
 
 
 def _serialize_snapshot(snapshot: dict[str, Any] | None) -> str | None:

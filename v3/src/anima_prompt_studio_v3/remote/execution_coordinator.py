@@ -153,6 +153,9 @@ class RemoteExecutionCoordinator:
                     run.request_json["checkpoint_name"] = rendered.checkpoint_name
                     run.request_json["render_metadata"] = rendered.metadata
                     requested_prompt_id = str(uuid4())
+                    if run.request_json.get("submission_id"):
+                        run.request_json["submission_attempted"] = True
+                        self._update(run, GenerationRunState.PREPARING, "正在提交远端，请勿重复生成", run.progress)
                     run.remote_prompt_id = client.submit(rendered.workflow, run.client_id, requested_prompt_id)
                     self._active_prompt_id = run.remote_prompt_id
                     self._update(run, GenerationRunState.QUEUED, "已提交到 ComfyUI 队列", 0.2)

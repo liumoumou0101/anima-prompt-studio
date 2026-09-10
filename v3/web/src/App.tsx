@@ -10,6 +10,7 @@ import {TagSearchPage} from "./pages/TagSearchPage";
 import {TagGroupPage} from "./pages/TagGroupPage";
 import {TagUngroupedPage} from "./pages/TagUngroupedPage";
 import {WorkbenchPage} from "./pages/WorkbenchPage";
+import {ConversationWorkbenchPage} from "./pages/ConversationWorkbenchPage";
 import {DirectPromptPage} from "./pages/DirectPromptPage";
 import {GenerationPage} from "./pages/GenerationPage";
 import {GalleryPage} from "./pages/GalleryPage";
@@ -79,7 +80,10 @@ export default function App() {
       <Routes>
         <Route element={<AppShell bootstrap={bootstrap} />}>
           <Route index element={<Navigate to="/workbench" replace />} />
-          <Route path="workbench" element={<WorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} naturalLanguageEnabled={Boolean(bootstrap.features.local_translation)} localTranslationEnabled={Boolean(bootstrap.features.local_translation)} />} />
+          <Route path="workbench" element={bootstrap.features.conversational_workbench
+            ? <ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />
+            : <WorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} naturalLanguageEnabled={Boolean(bootstrap.features.local_translation)} localTranslationEnabled={Boolean(bootstrap.features.local_translation)} />} />
+          <Route path="workbench/conversation" element={<ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="direct" element={<DirectPromptPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="tags" element={<TagSearchPage />} />
           <Route path="tags/groups/:groupName" element={<TagGroupPage />} />

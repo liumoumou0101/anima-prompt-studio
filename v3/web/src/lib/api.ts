@@ -52,7 +52,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   if (!token) throw new ApiClientError("本地会话已经失效，请重新打开应用。", "session_invalid");
   const headers = new Headers(init.headers);
   headers.set("X-Anima-Session", token);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   let response: Response;
   try {
     response = await fetch(path, {...init, headers});
@@ -66,6 +66,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
+  if (response.status === 204) return undefined as T;
   const payload = (await response.json()) as T | ApiErrorPayload;
   if (!response.ok) {
     const apiError = payload as ApiErrorPayload;

@@ -83,7 +83,13 @@ OLLAMA_NATIVE_EXCLUDE_PATTERNS = [
 ]
 
 
+GLM_REQUIRED_THINKING_PATTERNS = [r"(?:^|[/])glm[-_/.]?5\.3(?:$|[-_/:])"]
+
+
 EXCLUDE_PATTERNS = [
+    # GLM-5.3/Flash require thinking; sending disabled is an API error.
+    # https://docs.z.ai/guides/capabilities/thinking
+    *GLM_REQUIRED_THINKING_PATTERNS,
     # Google states these cannot be fully disabled; final filtering is the fallback.
     r"gemini[-_/.]?2\.5[-_/.]?pro",
     r"gemini[-_/.]?3[-_/.]?pro",
@@ -99,6 +105,11 @@ EXCLUDE_PATTERNS = [
 
 def _matches(patterns: List[str], model_lower: str) -> bool:
     return any(re.search(pattern, model_lower) for pattern in patterns)
+
+
+def requires_glm_thinking(model: str) -> bool:
+    """Known GLM versions whose API rejects thinking.type=disabled."""
+    return _matches(GLM_REQUIRED_THINKING_PATTERNS, model.strip().lower())
 
 
 def build_thinking_suppression(

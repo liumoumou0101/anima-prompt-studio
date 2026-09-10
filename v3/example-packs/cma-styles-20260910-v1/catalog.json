@@ -1,0 +1,119 @@
+[
+  {
+    "id": "off_cma_144688",
+    "title": "木刻 · 牧场与远山",
+    "requirements": {
+      "layers": {
+        "subject": {
+          "text": "牧场中的人物与牲畜，右前景一人弯身给牛挤奶，远处有村镇、山岩与云层。",
+          "locked": false
+        },
+        "style": {
+          "text": "黑色线刻与暖米色纸底；密集平行线、交叉排线和粗细变化勾勒形体，硬朗轮廓，纸白形成亮部。",
+          "medium": "木刻版画",
+          "artists": [],
+          "locked": false
+        },
+        "lighting": {
+          "text": "明暗主要通过刻线疏密表达，保留大面积浅色天空。",
+          "locked": false,
+          "include_with_style_pin": false
+        },
+        "composition": {
+          "text": "横向远景，前景牲畜与人物、中景田野、远景城镇和山岩逐层展开，右侧大树形成边框。",
+          "shot": "远景",
+          "locked": false,
+          "include_with_style_pin": false
+        },
+        "exclusions": {
+          "global": [],
+          "scoped": [],
+          "locked": false
+        }
+      },
+      "loras": [],
+      "contract": "anima-requirements/1",
+      "revision": 1
+    },
+    "compat": {},
+    "media": "media/off_cma_144688/original.webp"
+  },
+  {
+    "id": "off_cma_166868",
+    "title": "炭笔 · 男性半身肖像",
+    "requirements": {
+      "layers": {
+        "subject": {
+          "text": "一位留胡须、穿深色外套的男子，头部略微转向画面左侧，呈半身肖像。",
+          "locked": false
+        },
+        "style": {
+          "text": "灰黑炭笔颗粒、擦抹的柔边和可见排线，灰色纸底；白垩提亮面部，衣服以深色块面概括。",
+          "medium": "炭笔与白垩素描",
+          "artists": [],
+          "locked": false
+        },
+        "lighting": {
+          "text": "额头与鼻梁较亮，眼窝和下颌阴影深，面部明暗过渡柔和。",
+          "locked": false,
+          "include_with_style_pin": false
+        },
+        "composition": {
+          "text": "竖向半身近景，人物居中，头肩占据画面主体，背景简化为灰色调与排线。",
+          "shot": "半身近景",
+          "locked": false,
+          "include_with_style_pin": false
+        },
+        "exclusions": {
+          "global": [],
+          "scoped": [],
+          "locked": false
+        }
+      },
+      "loras": [],
+      "contract": "anima-requirements/1",
+      "revision": 1
+    },
+    "compat": {},
+    "media": "media/off_cma_166868/original.webp"
+  },
+  {
+    "id": "off_cma_159769",
+    "title": "水彩 · 湖畔田野",
+    "requirements": {
+      "layers": {
+        "subject": {
+          "text": "开阔湖畔田野与远山，前景有羊群，右侧一棵大树旁有小建筑和细小人物。",
+          "locked": false
+        },
+        "style": {
+          "text": "低饱和蓝灰与灰绿色透明水彩色层，轻薄的色彩叠加，柔和边缘；树木局部用细碎深色笔触表现。",
+          "medium": "水彩与石墨底稿",
+          "artists": [],
+          "locked": false
+        },
+        "lighting": {
+          "text": "柔和漫射日光，远山和天空浅淡，前景树丛较深，空气透视明显。",
+          "locked": false,
+          "include_with_style_pin": false
+        },
+        "composition": {
+          "text": "横向全景，天空占画面上半部以上，湖水与田野向远处延伸，右侧大树平衡左下方羊群。",
+          "shot": "全景",
+          "locked": false,
+          "include_with_style_pin": false
+        },
+        "exclusions": {
+          "global": [],
+          "scoped": [],
+          "locked": false
+        }
+      },
+      "loras": [],
+      "contract": "anima-requirements/1",
+      "revision": 1
+    },
+    "compat": {},
+    "media": "media/off_cma_159769/original.webp"
+  }
+]
