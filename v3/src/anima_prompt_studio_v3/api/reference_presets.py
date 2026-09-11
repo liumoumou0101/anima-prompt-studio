@@ -5,12 +5,13 @@ from fastapi import Depends, Query
 
 from ..core.requirements import RequirementLora, WorkbenchError
 from ..core.lora_resolution import ResourceUnavailable
+from ..core.model_versions import matches_model_declaration
 
 
 def projection(example, model_profile=None, workflow_kind=None):
     requirements, compat = example["requirements"], example["compat"]
     availability = "unknown"
-    if model_profile and compat["model_profiles"] and model_profile not in compat["model_profiles"]:
+    if model_profile and compat["model_profiles"] and not matches_model_declaration(model_profile, compat["model_profiles"]):
         availability = "incompatible_model"
     elif workflow_kind and compat["workflow_kinds"] and workflow_kind not in compat["workflow_kinds"]:
         availability = "incompatible_workflow"

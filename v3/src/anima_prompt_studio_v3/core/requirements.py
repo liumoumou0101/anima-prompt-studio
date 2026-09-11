@@ -183,11 +183,19 @@ class SessionPreview(ContractModel):
     created_at: str = Field(max_length=50)
 
 
+class GenerationSource(ContractModel):
+    run_id: str
+    remote_profile_id: str
+    workflow_profile_id: str
+    model_profile: str
+
+
 class ConversationFields(ContractModel):
     mode: Mode = "faithful"
     requirements: Requirements | None = None
     compiled: CompiledPrompt | None = None
     reference_pin: ReferencePin | None = None
+    generation_source: GenerationSource | None = None
     reference_preset_id: str | None = None
     conversation_events: list[ConversationEvent] = Field(default_factory=list, max_length=100)
     session_previews: list[SessionPreview] = Field(default_factory=list, max_length=100)
@@ -282,6 +290,10 @@ def apply_pin(canonical: Requirements, source: Requirements, role: PinRole) -> R
 
 def project_conversation(draft: dict[str, Any]) -> dict[str, Any]:
     result = deepcopy(draft)
+    from .seeds import display_seed
+    settings = result.get("generation_settings")
+    if isinstance(settings, dict) and isinstance(settings.get("seed"), int):
+        settings["seed"] = display_seed(settings["seed"])
     try:
         state = ConversationFields.model_validate(
             {key: value for key, value in draft.items() if key in ConversationFields.model_fields})

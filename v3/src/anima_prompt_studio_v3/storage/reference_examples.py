@@ -258,7 +258,9 @@ class ExampleStore:
             # JSON fields stay server-owned; query parameters are bound, never SQL fragments.
             selected = official[offset:offset + limit + 1]
             rows = db.execute("""SELECT * FROM examples WHERE deleted_at IS NULL
-                AND instr(lower(json_extract(payload_json,'$.title')),lower(?)) > 0
+                AND instr(lower(json_extract(payload_json,'$.title') || ' ' ||
+                    coalesce(json_extract(payload_json,'$.notes.user_notes'),'') || ' ' ||
+                    coalesce(json_extract(payload_json,'$.notes.external_prompt'),'')),lower(?)) > 0
                 AND (? IS NULL OR json_extract(payload_json,'$.origin')=?)
                 ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?""", (q, origin, origin, max(0,limit + 1-len(selected)), max(0,offset-len(official)))).fetchall()
             for item in selected:

@@ -24,6 +24,7 @@ export interface ConversationRecord extends WorkspaceRecord {
     compiled: CompiledPrompt | null; compile_state: "missing" | "fresh" | "stale";
     conversation_events: ConversationEvent[];
     reference_pin?: {example_id: string; source_version: string; role: string} | null;
+    generation_source?: {run_id: string; remote_profile_id: string; workflow_profile_id: string; model_profile: string} | null;
   };
 }
 export interface LocalConversation {
@@ -53,7 +54,10 @@ function comparable(value: unknown): string {
     ? Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right))) : item);
 }
 export function hasUnsavedInputs(record: ConversationRecord, local: LocalConversation): boolean {
-  return record.draft.model_profile !== local.model || record.draft.mode !== local.mode
-    || comparable(editableRequirements(record)) !== comparable(cleanRequirements(local.requirements))
+  return hasUncompiledInputs(record, local)
     || comparable(record.draft.generation_settings || defaultGenerationSettings()) !== comparable(local.settings);
+}
+export function hasUncompiledInputs(record: ConversationRecord, local: LocalConversation): boolean {
+  return record.draft.model_profile !== local.model || record.draft.mode !== local.mode
+    || comparable(editableRequirements(record)) !== comparable(cleanRequirements(local.requirements));
 }

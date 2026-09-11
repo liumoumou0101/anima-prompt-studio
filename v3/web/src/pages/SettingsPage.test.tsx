@@ -21,30 +21,45 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
-it("checks template dependencies on the selected server and displays missing nodes", async () => {
+it("saves a local endpoint and tests it without SSH fields or fingerprint confirmation", async () => {
+  const local = {...profile, connection_type: "local", connection_ready: true, display_name: "本机",
+    comfy_host: "127.0.0.1", comfy_port: 8288, comfy_endpoint: "127.0.0.1:8288"};
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [], workflows: [], credential_store_available: true})))
+    .mockResolvedValueOnce(new Response(JSON.stringify(local)))
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [local], workflows: [], credential_store_available: true})))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ok: true, devices: ["Local GPU"], queue_running: 0,
+      queue_pending: 0, comfy_endpoint: local.comfy_endpoint})));
+  render(<SettingsPage remoteEnabled />);
+  fireEvent.change(await screen.findByLabelText("连接类型"), {target: {value: "local"}});
+  expect(screen.queryByLabelText("SSH 地址")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", {name: "检测 SSH 指纹"})).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("ComfyUI 端口"), {target: {value: "8288"}});
+  fireEvent.click(screen.getByRole("button", {name: "保存连接"}));
+  fireEvent.click(await screen.findByRole("button", {name: "测试本地连接"}));
+  expect(await screen.findByText(/连接正常 · Local GPU/)).toBeInTheDocument();
+  expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({connection_type: "local", comfy_port: 8288});
+  expect(screen.getByRole("button", {name: "打开 ComfyUI 网页"})).toBeEnabled();
+});
+
+it("links the selected server to the independent workflow resource page", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify({items: [{...profile, host_fingerprint_confirmed: true}], workflows: [], credential_store_available: true})))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ranking: "tag_fit"})))
     .mockResolvedValueOnce(new Response(JSON.stringify({remote_profile_id: "remote-new", checked_at: null, items: [{workflow_id: "turbo", revision: "abc", origin: "official", experimental: true, display_name: "Turbo experiment", state: "missing_nodes", errors: ["缺少节点 AnimaLayerReplayPatcher"], assets: []}]})));
   render(<SettingsPage remoteEnabled />);
-  const button = await screen.findByRole("button", {name: "管理工作流"});
-  await waitFor(() => expect(button).toBeEnabled());
-  fireEvent.click(button);
-  expect(await screen.findByText("缺少节点 AnimaLayerReplayPatcher")).toBeInTheDocument();
-  expect(fetchMock.mock.calls[2][0]).toBe("/api/v3/workflows/servers/remote-new");
+  const link = await screen.findByRole("link", {name: "管理此环境的工作流资源"});
+  expect(link).toHaveAttribute("href", "/workflows?environment=remote-new");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
 it("confirms a new host fingerprint and tests SSH plus ComfyUI entirely in V3", async () => {
   const ready = {...profile, host_fingerprint_confirmed: true};
   const settings = (item = profile) => ({items: [item], workflows: [], credential_store_available: true});
-  const ranking = {ranking: "tag_fit"};
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify(settings()), {status: 200}))
-    .mockResolvedValueOnce(new Response(JSON.stringify(ranking), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({fingerprint: "SHA256:new-host"}), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify(ready), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify(settings(ready)), {status: 200}))
-    .mockResolvedValueOnce(new Response(JSON.stringify(ranking), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify({ok: true, devices: ["NVIDIA Test GPU"], queue_running: 1, queue_pending: 2, comfy_endpoint: "127.0.0.1:8188"}), {status: 200}));
 
   render(<SettingsPage remoteEnabled />);
@@ -58,20 +73,15 @@ it("confirms a new host fingerprint and tests SSH plus ComfyUI entirely in V3", 
   await waitFor(() => expect(screen.getByRole("button", {name: "测试完整连接"})).toBeEnabled());
   fireEvent.click(screen.getByRole("button", {name: "测试完整连接"}));
   expect(await screen.findByText(/连接正常 · NVIDIA Test GPU/)).toHaveTextContent("队列 3");
-  expect(fetchMock.mock.calls[6][0]).toBe("/api/v3/settings/remote-profiles/remote-new/test-connection");
+  expect(fetchMock.mock.calls[4][0]).toBe("/api/v3/settings/remote-profiles/remote-new/test-connection");
 });
 
-it("saves a parallel artist ranking without treating it as a quality upgrade", async () => {
-  const fetchMock = vi.spyOn(globalThis, "fetch")
-    .mockResolvedValueOnce(new Response(JSON.stringify({items: [profile], workflows: [], credential_store_available: true}), {status: 200}))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ranking: "tag_fit"}), {status: 200}))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ranking: "balanced"}), {status: 200}));
-
+it("moves artist ranking controls to the workbench", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({items: [profile], workflows: [], credential_store_available: true})));
   render(<SettingsPage remoteEnabled />);
-  expect(await screen.findByText("画师推荐排序")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("radio", {name: /题材与投稿量均衡/}));
-  expect(await screen.findByText(/画师排序已保存/)).toBeInTheDocument();
-  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).ranking).toBe("balanced");
+  expect(await screen.findByRole("link", {name: "打开工作台"})).toHaveAttribute("href", "/workbench");
+  expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
 it("opens the selected remote ComfyUI through the managed local tunnel", async () => {
@@ -91,13 +101,12 @@ it("opens the selected remote ComfyUI through the managed local tunnel", async (
   };
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify({items: [ready], workflows: [], credential_store_available: true, comfy_access: {state: "stopped", ready: false, local_url: access.local_url}}), {status: 200}))
-    .mockResolvedValueOnce(new Response(JSON.stringify({ranking: "tag_fit"}), {status: 200}))
     .mockResolvedValueOnce(new Response(JSON.stringify(access), {status: 200}));
 
   render(<SettingsPage remoteEnabled />);
   fireEvent.click(await screen.findByRole("button", {name: "打开 ComfyUI 网页"}));
 
   expect(await screen.findByText(/ComfyUI 维护入口已连接/)).toHaveTextContent(access.local_url);
-  expect(fetchMock.mock.calls[2][0]).toBe("/api/v3/settings/remote-profiles/remote-new/open-comfy");
+  expect(fetchMock.mock.calls[1][0]).toBe("/api/v3/settings/remote-profiles/remote-new/open-comfy");
   expect(popup.location.replace).toHaveBeenCalledWith(access.local_url);
 });

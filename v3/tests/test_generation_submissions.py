@@ -58,10 +58,47 @@ def payload(**changes):
         remote_profile_id="remote-1", workflow_profile_id="anima_base_api_v1", **changes)
 
 
+def test_large_seed_digest_keeps_legacy_receipt_identity():
+    from anima_prompt_studio_v3.runtime.submissions import payload_digest
+    from anima_prompt_studio_v3.core.requirements import digest
+    seed = 8798399215689017476
+    request = payload(settings={"seed": str(seed)})
+    legacy = request.model_dump(mode="json", by_alias=True)
+    legacy["settings"]["seed"] = seed
+    assert payload_digest(request, "direct") == digest({"endpoint": "direct", "payload": legacy})
+    assert payload_digest(request, "direct") == payload_digest(payload(settings={"seed": seed}), "direct")
+
+
 def submit(service, request=None, key="key", prepare=None):
     request = request or payload()
     return service.submit(request, key, "direct", prepare or (lambda: CandidateToPromptJobAdapter().prepare_direct(
         positive_prompt=request.positive_prompt, negative_prompt=request.negative_prompt, model_profile_id=request.model_profile)))
+
+
+def test_case_workspace_uses_frozen_source_and_rejects_target_changes(harness, monkeypatch):
+    from types import SimpleNamespace
+    from anima_prompt_studio_v3.core.requirements import WorkbenchError
+    store, start, saved, executed, finished, base_plan = harness
+    seen = []
+    def plan(prepared, remote, workflow, resources, frozen):
+        seen.append(frozen)
+        return base_plan(prepared, remote, workflow, resources, frozen)
+    queue, service = start(plan_resolver=plan)
+    old_get = queue.get
+    frozen = workflow_profile().model_dump(mode="json")
+    monkeypatch.setattr(queue, "get", lambda id: SimpleNamespace(request_json={"workflow_snapshot": frozen}) if id == "source-run" else old_get(id))
+    workspace, request = workspace_payload(store)
+    source = dict(run_id="source-run", remote_profile_id=request.remote_profile_id, workflow_profile_id=request.workflow_profile_id, model_profile=request.model_profile)
+    def attach(draft):
+        draft["generation_source"] = source
+        return draft
+    workspace = store.transform(workspace["id"], expected_revision=workspace["revision"], operation=attach)
+    request = request.model_copy(update={"workspace_revision": workspace["revision"], "workflow_snapshot_run_id": "other-run"})
+    with pytest.raises(WorkbenchError, match="解除原工作流快照"):
+        submit(service, request.model_copy(update={"remote_profile_id": "other-server"}), key="bad")
+    assert seen == []
+    submit(service, request)
+    assert seen == [frozen]
 
 
 def workspace_payload(store):

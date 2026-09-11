@@ -59,6 +59,8 @@ def choose_txt2img_workflow(
         "anima_base_v1": "01",
         "anima_turbo_v1": "02",
         "anima_aesthetic_v1": "22",
+        "anima_aesthetic_v1_0": "21",
+        "anima_aesthetic_v1_1": "22",
         "anima_turbo_v1_1": "23",
         "animayume_v1_0_final": "24",
         "miaomiao_harem_anima_v1_6": "25",
@@ -174,34 +176,15 @@ class GalleryUpscaleRenderResult:
 
 
 class GalleryUpscaleRenderer:
-    """Turn the bundled tile-upscale template into a safe one-image API prompt."""
-
-    DROPPED_CLASSES = {
-        "reroute",
-        "seed (rgthree)",
-        "showtext|pysssss",
-        "jwstringconcat",
-        "image comparer (rgthree)",
-    }
+    """Build image super-resolution without executing legacy diffusion redraw nodes."""
 
     @classmethod
     def supports(cls, profile: WorkflowProfile | None) -> bool:
         if profile is None:
             return False
-        classes = {
-            str(node.get("class_type", "")).casefold()
-            for node in profile.api_workflow.values()
-            if isinstance(node, dict)
-        }
-        required = {
-            "loadimage",
-            "imageupscalewithmodel",
-            "imagescaletototalpixels",
-            "ttp_image_tile_batch",
-            "ttp_image_assy",
-            "saveimage",
-        }
-        return required.issubset(classes) and any("ksampler" in name for name in classes)
+        classes = {str(node.get("class_type", "")).casefold()
+                   for node in profile.api_workflow.values() if isinstance(node, dict)}
+        return {"loadimage", "upscalemodelloader", "imageupscalewithmodel", "saveimage"}.issubset(classes)
 
     def render(
         self,
@@ -215,62 +198,35 @@ class GalleryUpscaleRenderer:
         seed: int = -1,
     ) -> GalleryUpscaleRenderResult:
         if not self.supports(profile):
-            raise GalleryUpscaleError("分块放大工作流缺少必要的图片输入、放大或保存节点。")
+            raise GalleryUpscaleError("放大工作流缺少必要的图片输入、放大模型或保存节点。")
         if source_width <= 0 or source_height <= 0:
             raise GalleryUpscaleError("无法识别原图尺寸。")
 
-        workflow = {
-            str(node_id): copy.deepcopy(node)
-            for node_id, node in profile.api_workflow.items()
-            if isinstance(node, dict)
-            and str(node.get("class_type", "")).casefold() not in self.DROPPED_CLASSES
-        }
-        load_id = self._node_id(workflow, "loadimage")
-        upscale_id = self._node_id(workflow, "imageupscalewithmodel")
-        scale_id = self._node_id(workflow, "imagescaletototalpixels")
-        tile_size_id = self._node_id(workflow, "ttp_tile_image_size")
-        tile_batch_id = self._node_id(workflow, "ttp_image_tile_batch")
-        tile_assembly_id = self._node_id(workflow, "ttp_image_assy")
-        tagger_id = self._node_id(workflow, "wd14tagger|pysssss")
-        unet_id = self._node_id(workflow, "unetloader")
-        clip_id = self._node_id(workflow, "cliploader")
-        sampler_id = self._node_id_contains(workflow, "ksampler")
-        save_id = self._node_id(workflow, "saveimage")
-
-        positive_id = self._binding_node(profile, "positive_prompt", workflow)
-        negative_id = self._binding_node(profile, "negative_prompt", workflow)
+        # Explicit allowlist: never execute the legacy template's tagger,
+        # diffusion weights, text encoders, VAE or tiled sampling graph.
+        source = profile.api_workflow
+        load_id = self._node_id(source, "loadimage")
+        upscale_id = self._node_id(source, "imageupscalewithmodel")
+        model_id = self._node_id(source, "upscalemodelloader")
+        save_id = self._node_id(source, "saveimage")
+        model_name = source[model_id].get("inputs", {}).get("model_name")
+        if not isinstance(model_name, str) or not model_name.strip():
+            raise GalleryUpscaleError("放大模型文件未配置。")
         target_width = round(source_width * GALLERY_UPSCALE_SCALE)
         target_height = round(source_height * GALLERY_UPSCALE_SCALE)
-        resolved_seed = seed if seed >= 0 else secrets.randbelow(2**63 - 1)
-
-        workflow[load_id]["inputs"]["image"] = uploaded_image
-        workflow[upscale_id]["inputs"]["image"] = [load_id, 0]
-        workflow[scale_id]["inputs"]["image"] = [upscale_id, 0]
-        workflow[scale_id]["inputs"]["megapixels"] = target_width * target_height / 1_000_000
-        workflow[scale_id]["inputs"]["resolution_steps"] = 1
-        workflow[tile_size_id]["inputs"]["image"] = [scale_id, 0]
-        workflow[tile_batch_id]["inputs"]["image"] = [scale_id, 0]
-        workflow[positive_id]["inputs"]["clip"] = [clip_id, 0]
-        workflow[positive_id]["inputs"]["text"] = [tagger_id, 0]
-        workflow[negative_id]["inputs"]["clip"] = [clip_id, 0]
-        workflow[sampler_id]["inputs"]["model"] = [unet_id, 0]
-        workflow[sampler_id]["inputs"]["seed"] = resolved_seed
-        workflow[sampler_id]["inputs"]["sampler_mode"] = "standard"
-        workflow[sampler_id]["inputs"]["bongmath"] = True
-        final_scale_id = self._available_node_id(workflow, "900001")
-        workflow[final_scale_id] = {
-            "class_type": "ImageScale",
-            "inputs": {
-                "image": [tile_assembly_id, 0],
-                "upscale_method": "lanczos",
-                "width": target_width,
-                "height": target_height,
-                "crop": "disabled",
-            },
-            "_meta": {"title": "ANIMA 精确输出尺寸"},
+        final_scale_id = self._available_node_id(source, "900001")
+        workflow = {
+            load_id: {"class_type": "LoadImage", "inputs": {"image": uploaded_image}},
+            model_id: {"class_type": "UpscaleModelLoader", "inputs": {"model_name": model_name}},
+            upscale_id: {"class_type": "ImageUpscaleWithModel", "inputs": {
+                "upscale_model": [model_id, 0], "image": [load_id, 0]}},
+            final_scale_id: {"class_type": "ImageScale", "inputs": {
+                "image": [upscale_id, 0], "upscale_method": "lanczos",
+                "width": target_width, "height": target_height, "crop": "disabled"}},
+            save_id: {"class_type": "SaveImage", "inputs": {
+                "images": [final_scale_id, 0], "filename_prefix": f"Anima_Gallery15x_{run_id[:8]}"}},
         }
-        workflow[save_id]["inputs"]["images"] = [final_scale_id, 0]
-        workflow[save_id]["inputs"]["filename_prefix"] = f"Anima_Gallery15x_{run_id[:8]}"
+        resolved_seed = seed  # Recorded for compatibility; no random/sampling node is executed.
 
         self._validate_connections(workflow)
         metadata = {
@@ -282,7 +238,9 @@ class GalleryUpscaleRenderer:
             "output_width": target_width,
             "output_height": target_height,
             "source_image": source_relative_path,
-            "sampler": self._sampler_snapshot(workflow[sampler_id].get("inputs", {})),
+            "method": "super_resolution_lanczos",
+            "upscale_model": model_name,
+            "diffusion_redraw": False,
         }
         return GalleryUpscaleRenderResult(workflow=workflow, seed=resolved_seed, metadata=metadata)
 
@@ -437,8 +395,8 @@ class GalleryUpscaleCoordinator:
                 )
                 remote_artifacts = client.list_output_artifacts(history)
                 if not remote_artifacts:
-                    raise ComfyAPIError("高清修复完成，但没有发现图片输出。", code="no_outputs")
-                self._update(run, GenerationRunState.DOWNLOADING, "正在下载高清修复结果", 0.82)
+                    raise ComfyAPIError("图像放大完成，但没有发现图片输出。", code="no_outputs")
+                self._update(run, GenerationRunState.DOWNLOADING, "正在下载图像放大结果", 0.82)
                 for index, remote_artifact in enumerate(remote_artifacts, 1):
                     content, mime_type = client.download_artifact(remote_artifact)
                     artifacts.append(
@@ -450,7 +408,7 @@ class GalleryUpscaleCoordinator:
                         f"正在下载结果 {index}/{len(remote_artifacts)}",
                         0.82 + 0.16 * index / len(remote_artifacts),
                     )
-                run.update_state(GenerationRunState.COMPLETED, "1.5× 高清修复完成", 1.0)
+                run.update_state(GenerationRunState.COMPLETED, "1.5× 图像放大完成", 1.0)
                 self.organizer.write_sidecars(job, run, artifacts)
                 self._notify(run)
                 return GalleryUpscaleExecutionResult(run=run, artifacts=artifacts)
@@ -467,7 +425,7 @@ class GalleryUpscaleCoordinator:
 
     def _remote_state(self, run: GenerationRun, state: str, message: str) -> None:
         if state == "running":
-            self._update(run, GenerationRunState.RUNNING, "云端正在进行 1.5× 高清修复", max(run.progress, 0.35))
+            self._update(run, GenerationRunState.RUNNING, "云端正在进行 1.5× 图像放大", max(run.progress, 0.35))
         elif state == "queued" and run.state != GenerationRunState.RUNNING:
             self._update(run, GenerationRunState.QUEUED, message, max(run.progress, 0.2))
 
@@ -492,7 +450,7 @@ class GalleryProcessJob:
     workflow_name: str
     operation: str = GALLERY_UPSCALE_OPERATION
     batch_count: int = 1
-    project: str = "画廊高清修复"
+    project: str = "画廊图像放大"
     model: str = "anima_base_v1"
     prompt: str = ""
     parameters: dict[str, Any] = field(default_factory=dict)
@@ -532,7 +490,7 @@ class GalleryProcessJob:
             workflow_name=str(payload.get("workflowName") or ""),
             operation=str(payload.get("operation") or GALLERY_UPSCALE_OPERATION),
             batch_count=max(1, min(int(payload.get("batchCount") or 1), GALLERY_REGEN_MAX_COUNT)),
-            project=str(payload.get("project") or "画廊高清修复"),
+            project=str(payload.get("project") or "画廊图像放大"),
             model=str(payload.get("model") or "anima_base_v1"),
             prompt=str(payload.get("prompt") or ""),
             parameters=dict(payload.get("parameters") or {}) if isinstance(payload.get("parameters"), dict) else {},
@@ -590,12 +548,14 @@ class GalleryUpscaleManager:
         coordinator_factory: Callable[..., GalleryUpscaleCoordinator] = GalleryUpscaleCoordinator,
         regen_coordinator_factory: Callable[..., RemoteExecutionCoordinator] = RemoteExecutionCoordinator,
         workflow_provider: Callable[[RemoteProfile], list[WorkflowProfile]] | None = None,
+        allow_legacy_regeneration: bool = True,
     ) -> None:
         self.repository_path = repository_path
         self.output_root = output_root.expanduser()
         self.coordinator_factory = coordinator_factory
         self.regen_coordinator_factory = regen_coordinator_factory
         self.workflow_provider = workflow_provider
+        self.allow_legacy_regeneration = allow_legacy_regeneration
         self._remote_profile: RemoteProfile | None = None
         self._workflow_profile: WorkflowProfile | None = None
         self._txt2img_workflows: list[WorkflowProfile] = []
@@ -621,7 +581,7 @@ class GalleryUpscaleManager:
         if not pending:
             return ""
         return (
-            f"还有 {pending} 项高清修复任务未完成。"
+            f"还有 {pending} 项图像放大任务未完成。"
             "请先在任务中心等待完成，或取消仍在排队的任务后再切换画廊目录。"
         )
 
@@ -690,7 +650,7 @@ class GalleryUpscaleManager:
                 None,
             )
             if duplicate:
-                raise GalleryUpscaleError("这张图片已经在高清修复队列中。")
+                raise GalleryUpscaleError("这张图片已经在图像放大队列中。")
             width = int(asset.get("width") or 0)
             height = int(asset.get("height") or 0)
             if width <= 0 or height <= 0:
@@ -708,9 +668,10 @@ class GalleryUpscaleManager:
                 target_width=round(width * GALLERY_UPSCALE_SCALE),
                 target_height=round(height * GALLERY_UPSCALE_SCALE),
                 workflow_name=self._workflow_profile.display_name,
-                project=str(asset.get("project") or source.parent.name or "画廊高清修复"),
+                project=str(asset.get("project") or source.parent.name or "画廊图像放大"),
                 model=str(asset.get("model") or "anima_base_v1"),
                 prompt=str(asset.get("prompt") or ""),
+                parameters=copy.deepcopy(asset.get("parameters") or {}),
                 queue_position=queue_position,
                 message=f"等待处理 · 队列第 {queue_position} 位",
             )
@@ -830,7 +791,7 @@ class GalleryUpscaleManager:
                 and other.source_path.casefold() == job.source_path.casefold()
                 for other in self._jobs.values()
             ):
-                raise GalleryUpscaleError("这张图片已经在高清修复队列中。")
+                raise GalleryUpscaleError("这张图片已经在图像放大队列中。")
             job.state = "queued"
             job.queue_position = max(
                 (item.queue_position for item in self._jobs.values() if item.state == "queued"),
@@ -888,11 +849,12 @@ class GalleryUpscaleManager:
         if self._remote_profile is None:
             return "请先在主窗口配置并连接云显卡。"
         if (
-            self._remote_profile.auth_type == RemoteAuthType.PASSWORD
+            self._remote_profile.connection_type == "ssh"
+            and self._remote_profile.auth_type == RemoteAuthType.PASSWORD
             and not self._credentials.password
         ):
             return "云主机密码不可用，请先回到主窗口连接一次。"
-        if not self._remote_profile.known_host_fingerprint:
+        if not self._remote_profile.connection_ready:
             return "请先在主窗口连接并确认云主机指纹。"
         return ""
 
@@ -905,6 +867,8 @@ class GalleryUpscaleManager:
         return ""
 
     def _regen_reason(self, model_profile_id: str = "") -> str:
+        if not self.allow_legacy_regeneration:
+            return "旧再生成管线已停用，请从画廊原图重新发起任务。"
         connection = self._connection_reason()
         if connection:
             return connection
@@ -942,6 +906,12 @@ class GalleryUpscaleManager:
             repository.close()
         for payload in payloads:
             job = GalleryProcessJob.from_payload(payload)
+            if not self.allow_legacy_regeneration and job.operation == GALLERY_REGEN_OPERATION and not job.terminal:
+                job.state = "failed"
+                job.message = job.error = "旧再生成管线已停用，请从画廊原图重新发起任务。"
+                job.queue_position = 0
+                job.updated_at = utc_now()
+                self._persist_locked(job)
             if self._is_active(job):
                 job.state = "failed"
                 job.message = "应用上次退出时任务仍在执行，请确认云端状态后重试"
@@ -1047,9 +1017,10 @@ class GalleryUpscaleManager:
             "height": process_job.source_height,
         }
         job = PromptJob(
-            project_name=str(asset.get("project") or source.parent.name or "画廊高清修复"),
+            project_name=str(asset.get("project") or source.parent.name or "画廊图像放大"),
             model_profile_id=str(asset.get("model") or "anima_base_v1"),
             positive_prompt=str(asset.get("prompt") or ""),
+            negative_prompt=str(process_job.parameters.get("negative_prompt") or ""),
             generation_params=GenerationParams(
                 width=int(asset.get("width") or 0),
                 height=int(asset.get("height") or 0),
@@ -1057,7 +1028,11 @@ class GalleryUpscaleManager:
                 batch_size=1,
             ),
             workflow_template_id=workflow.id,
-            notes=f"画廊 1.5× 高清修复，源图：{asset.get('path', source.name)}",
+            notes=f"画廊 1.5× 图像放大，源图：{asset.get('path', source.name)}",
+            integration_metadata={"image_process": {"method": "super_resolution_lanczos",
+                "scale": GALLERY_UPSCALE_SCALE, "source_image": process_job.source_path,
+                "source_parameters": copy.deepcopy(process_job.parameters),
+                "diffusion_redraw": False}},
         )
         repository = SQLiteRepository(self.repository_path)
         repository.save_job(job)
@@ -1109,7 +1084,7 @@ class GalleryUpscaleManager:
                 current = self._jobs.get(process_job.id)
                 if current:
                     current.state = "completed"
-                    current.message = "1.5× 高清修复完成，结果已加入画廊"
+                    current.message = "1.5× 图像放大完成，结果已加入画廊"
                     current.progress = 1.0
                     current.result_path = result_path
                     current.updated_at = utc_now()
@@ -1119,7 +1094,7 @@ class GalleryUpscaleManager:
                 current = self._jobs.get(process_job.id)
                 if current:
                     current.state = "failed"
-                    current.message = "高清修复失败"
+                    current.message = "图像放大失败"
                     current.error = str(exc)
                     current.updated_at = utc_now()
                     self._persist_locked(current)

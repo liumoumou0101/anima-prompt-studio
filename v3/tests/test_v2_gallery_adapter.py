@@ -266,7 +266,7 @@ class FakeProcessManager:
         return True
 
 
-def test_gallery_process_adapter_submits_both_reused_v2_operations(tmp_path: Path) -> None:
+def test_gallery_process_adapter_never_falls_back_to_legacy_regeneration(tmp_path: Path) -> None:
     database, root, image = make_gallery(tmp_path)
     manager = FakeProcessManager()
     service = V2GalleryReadService(database, root, process_manager=manager)  # type: ignore[arg-type]
@@ -275,11 +275,42 @@ def test_gallery_process_adapter_submits_both_reused_v2_operations(tmp_path: Pat
     assert service.process_configuration()["available"] is True
     assert service.list_process_jobs()["jobs"][0]["id"] == "job-1"
     assert service.submit_process([relative], "upscale")["jobs"][0]["id"] == "job-upscale"
-    assert service.submit_process([relative], "regenerate", 3)["jobs"][0]["id"] == "job-regen"
-    assert manager.submitted == [("upscale", relative, 1), ("regenerate", relative, 3)]
-    assert manager.assets[1]["parameters"]["integration_metadata"]["candidate"]["id"] == "candidate_hybrid"
-    assert manager.assets[1]["parameters"]["integration_metadata"]["artist_comparison"]["rendered_artist"] == "@harusa1107"
-    assert manager.assets[1]["parameters"]["negative_prompt"] == "text, watermark"
+    import pytest
+    from anima_prompt_studio.services.gallery_upscale import GalleryUpscaleError
+    assert service.process_configuration()["regenAvailable"] is False
+    with pytest.raises(GalleryUpscaleError, match="统一生成队列"):
+        service.submit_process([relative], "regenerate", 3, idempotency_key="test")
+    assert manager.submitted == [("upscale", relative, 1)]
+    assert manager.assets[0]["parameters"]["negative_prompt"] == "text, watermark"
+    class Regeneration:
+        def submit(self, asset, count, key):
+            assert asset["batch_id"] == "run-v3-1"
+            assert (count, key) == (3, "test")
+            return {"id": "durable-run"}
+
+        def list_jobs(self):
+            return []
+    service.regeneration_service = Regeneration()
+    assert service.process_configuration()["regenAvailable"] is True
+    with pytest.raises(GalleryUpscaleError, match="Idempotency-Key"):
+        service.submit_process([relative], "regenerate", 3)
+    result = service.submit_process([relative, "missing.png"], "regenerate", 3, idempotency_key="test")
+    assert result["jobs"] == [{"id": "durable-run"}]
+    assert result["failed"][0]["path"] == "missing.png"
+    assert manager.submitted == [("upscale", relative, 1)]
     assert service.process_action("job-1", "cancel")["job"]["state"] == "canceled"
     assert service.process_action("job-1", "retry")["job"]["state"] == "queued"
     assert service.process_action("", "clear_completed") == {"cleared": 2}
+
+
+def test_restore_reports_source_identity_even_when_destination_is_renamed(tmp_path: Path) -> None:
+    database, root, image = make_gallery(tmp_path)
+    service = V2GalleryReadService(database, root)
+    relative = image.relative_to(root).as_posix()
+    moved = service.move_to_trash([relative])
+    image.write_bytes(b"new image at original path")
+    result = service.restore_from_trash(moved["trash_paths"])
+    assert result["restored_trash_paths"] == moved["trash_paths"]
+    assert result["restored"] != [relative]
+    assert image.read_bytes() == b"new image at original path"
+    assert (root / result["restored"][0]).is_file()

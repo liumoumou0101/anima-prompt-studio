@@ -9,12 +9,13 @@ import {TagDetailPage} from "./pages/TagDetailPage";
 import {TagSearchPage} from "./pages/TagSearchPage";
 import {TagGroupPage} from "./pages/TagGroupPage";
 import {TagUngroupedPage} from "./pages/TagUngroupedPage";
-import {WorkbenchPage} from "./pages/WorkbenchPage";
 import {ConversationWorkbenchPage} from "./pages/ConversationWorkbenchPage";
 import {DirectPromptPage} from "./pages/DirectPromptPage";
 import {GenerationPage} from "./pages/GenerationPage";
 import {GalleryPage} from "./pages/GalleryPage";
 import {SettingsPage} from "./pages/SettingsPage";
+import {WorkflowsPage} from "./pages/WorkflowsPage";
+import {ReferencesPage} from "./pages/ReferencesPage";
 import {ArtistSearchPage} from "./pages/ArtistSearchPage";
 import {ArtistDetailPage} from "./pages/ArtistDetailPage";
 
@@ -80,10 +81,8 @@ export default function App() {
       <Routes>
         <Route element={<AppShell bootstrap={bootstrap} />}>
           <Route index element={<Navigate to="/workbench" replace />} />
-          <Route path="workbench" element={bootstrap.features.conversational_workbench
-            ? <ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} showClassic={false} />
-            : <WorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} naturalLanguageEnabled={Boolean(bootstrap.features.local_translation)} localTranslationEnabled={Boolean(bootstrap.features.local_translation)} />} />
-          <Route path="workbench/conversation" element={<ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} showClassic={!bootstrap.features.conversational_workbench} />} />
+          <Route path="workbench" element={<ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
+          <Route path="workbench/conversation" element={<ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="direct" element={<DirectPromptPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="tags" element={<TagSearchPage />} />
           <Route path="tags/groups/:groupName" element={<TagGroupPage />} />
@@ -94,6 +93,8 @@ export default function App() {
           <Route path="generate" element={<GenerationPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="gallery" element={<GalleryPage enabled={Boolean(bootstrap.features.gallery)} />} />
           <Route path="settings" element={<SettingsPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
+          <Route path="workflows" element={<WorkflowsPage enabled={Boolean(bootstrap.features.remote_generation)} modelProfiles={bootstrap.model_profile_options} />} />
+          <Route path="references" element={<ReferencesPage />} />
           <Route path="*" element={<Navigate to="/workbench" replace />} />
         </Route>
       </Routes>

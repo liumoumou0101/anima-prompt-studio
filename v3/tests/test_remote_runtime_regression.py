@@ -448,6 +448,28 @@ def test_execution_coordinator_completes_full_fake_remote_flow(tmp_path):
     assert updates[-1] == GenerationRunState.COMPLETED
     manifest = json.loads((Path(result.run.output_dir) / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["generation_run"]["state"] == "completed"
+    timing = manifest["generation_run"]["request_json"]["execution_timings"][0]
+    assert set(timing) == {"ssh_open_ms", "environment_ms", "compile_ms",
+                           "node_validation_ms", "input_validation_ms", "submit_ms", "prepare_total_ms"}
+    assert all(value >= 0 for value in timing.values())
+
+
+def test_preparation_failure_records_duration_without_submitting(tmp_path):
+    class BrokenClient(FakeClient):
+        def validate_workflow_nodes(self, workflow):
+            raise ComfyAPIError("offline", code="connection_error")
+
+        def submit(self, *args):
+            pytest.fail("failed preflight must not submit")
+
+    coordinator = RemoteExecutionCoordinator(organizer=ResultOrganizer(tmp_path),
+        tunnel_factory=FakeTunnel, client_factory=lambda _: BrokenClient())
+    job = PromptJob(model_profile_id="anima_turbo_v1", positive_prompt="a garden")
+    with pytest.raises(RemoteExecutionError) as error:
+        coordinator.execute(job, remote_profile(), workflow_profile(), "anima_turbo_v1")
+    timing = error.value.run.request_json["execution_timings"][0]
+    assert timing["node_validation_ms"] >= 0
+    assert "submit_ms" not in timing
 
 
 def test_batch_generation_renders_downloads_and_records_every_image(tmp_path):

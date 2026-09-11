@@ -14,7 +14,9 @@ from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 from anima_prompt_studio_v3.remote.comfy_client import ComfyUIClient
 from anima_prompt_studio_v3.remote.credential_store import CredentialStore
 from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
+from anima_prompt_studio_v3.remote.local_connection import LocalComfyConnection
 from ..core.workflow_compiler import V3WorkflowCompiler as WorkflowRenderer
+from ..core.model_versions import workflow_models
 from .packaged_workflows import packaged_workflow_profiles, workflow_revision, workflow_catalog_manifest
 
 ASSET_INPUTS = {"unet_name", "ckpt_name", "clip_name", "clip_name1", "clip_name2", "vae_name", "lora_name"}
@@ -51,6 +53,9 @@ def graph_errors(profile):
 def fingerprint(profile):
     values = profile.model_dump(mode="json")
     values.pop("display_name", None)
+    # Preserve existing SSH snapshot hashes across the additive schema change.
+    if values.get("connection_type") == "ssh":
+        values.pop("connection_type")
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
 
@@ -121,6 +126,29 @@ class WorkflowCatalog:
         self.database = Path(database).resolve()
         self._submission_inspection_lock = Lock()
 
+    def library(self):
+        """Local templates are available independently of any execution server."""
+        repo = SQLiteRepository(self.database)
+        try:
+            items = []
+            for profile, origin in catalog(self.database, repository=repo):
+                items.append({
+                    "workflow_id": profile.id, "display_name": profile.display_name,
+                    "revision": workflow_revision(profile), "origin": origin,
+                    "enabled": not repo.get_setting("workflow_disabled:" + profile.id, False),
+                    "experimental": is_experimental(profile), "model_profiles": workflow_models(profile),
+                    "workflow_kind": profile.workflow_kind, "notes": profile.notes,
+                    "nodes": sorted({n["class_type"] for n in profile.api_workflow.values()}),
+                    "assets": [{"key": f"{key}.{name}", "value": value, "node_type": node["class_type"]}
+                               for key, node in profile.api_workflow.items()
+                               for name, value in node.get("inputs", {}).items()
+                               if name in ASSET_INPUTS and isinstance(value, str)],
+                    "source": repo.get_setting("workflow_source:" + profile.id),
+                })
+            return {"items": items}
+        finally:
+            repo.close()
+
     def archive_official_versions(self):
         repo = SQLiteRepository(self.database)
         try:
@@ -176,12 +204,12 @@ class WorkflowCatalog:
 
     def inspect(self, remote_id, credentials=None, cancel=None):
         profile = self.remote(remote_id)
-        if not profile.enabled or not profile.known_host_fingerprint:
+        if not profile.enabled or not profile.connection_ready:
             raise ValueError("请启用连接并确认 SSH 主机指纹。")
         credentials = credentials or RemoteCredentials()
-        if profile.auth_type == RemoteAuthType.PASSWORD and not credentials.password:
+        if profile.connection_type == "ssh" and profile.auth_type == RemoteAuthType.PASSWORD and not credentials.password:
             credentials = credentials.model_copy(update={"password": CredentialStore().read_password(profile.id)})
-        tunnel = SshTunnel(profile, connect_timeout=10)
+        tunnel = (LocalComfyConnection if profile.connection_type == "local" else SshTunnel)(profile, connect_timeout=10)
         stamp = fingerprint(profile)
         try:
             tunnel.open(credentials)
@@ -208,20 +236,27 @@ class WorkflowCatalog:
             tunnel.close()
 
     def report(self, remote_id):
-        remote = self.remote(remote_id)
-        snapshot = self._read("workflow_capabilities:" + remote_id, {})
+        repository = SQLiteRepository(self.database)
+        try:
+            return self._report(remote_id, repository)
+        finally:
+            repository.close()
+
+    def _report(self, remote_id, repository):
+        remote = repository.get_remote_profile(remote_id)
+        snapshot = repository.get_setting("workflow_capabilities:" + remote_id, {})
         state = "unchecked"
         if snapshot:
             state = "connection_failed" if snapshot.get("error") else "ready"
             if snapshot.get("fingerprint") != fingerprint(remote) or time.time() - snapshot.get("checked_at", 0) > TTL:
                 state = "stale"
-        if not remote.enabled or not remote.known_host_fingerprint:
+        if not remote.enabled or not remote.connection_ready:
             state = "unchecked"
         info = snapshot.get("object_info", {})
         items = []
-        for profile, origin in catalog(self.database):
+        for profile, origin in catalog(self.database, repository=repository):
             revision = workflow_revision(profile)
-            saved = self._read("workflow_mapping:" + remote_id + ":" + profile.id, {})
+            saved = repository.get_setting("workflow_mapping:" + remote_id + ":" + profile.id, {})
             mapping_current = saved.get("revision") == revision and saved.get("fingerprint") == fingerprint(remote)
             mapping = saved.get("mapping", {}) if mapping_current else {}
             resolved = apply_mapping(profile, mapping)
@@ -238,11 +273,13 @@ class WorkflowCatalog:
                     spec = specs.get(name, [])
                     choices = spec[0] if spec and isinstance(spec[0], list) else []
                     assets.append({"key": f"{node_id}.{name}", "value": value, "choices": choices,
+                                   "template_value": profile.api_workflow[node_id]["inputs"][name],
+                                   "node_type": node["class_type"],
                                    "mapped": f"{node_id}.{name}" in mapping})
             errors = graph_errors(resolved)
             if not errors:
                 errors = WorkflowRenderer().validate_profile(resolved)
-            if not resolved.compatible_model_profiles or resolved.workflow_kind == "unknown":
+            if not workflow_models(resolved) or resolved.workflow_kind == "unknown":
                 errors.append("该工作流尚未声明受支持的生成类型及兼容模型。")
             missing = []
             invalid = []
@@ -257,7 +294,7 @@ class WorkflowCatalog:
                 item_state = "missing_nodes" if missing else "invalid_inputs"
             if state != "ready":
                 errors.append({"unchecked": "请先检测模型与工作流", "stale": "检测已过期或连接配置变化，请重新检测", "connection_failed": "连接检测失败，请重试"}.get(state, state))
-            if self._read("workflow_disabled:" + profile.id, False):
+            if repository.get_setting("workflow_disabled:" + profile.id, False):
                 item_state = "disabled"
                 errors.append("该工作流已停用。")
             elif saved and not mapping_current and state == "ready":
@@ -265,7 +302,7 @@ class WorkflowCatalog:
                 errors.append("模板或连接已变化，请重新确认文件映射；不会自动退回默认文件。")
             items.append({"workflow_id": profile.id, "display_name": profile.display_name,
                           "revision": revision, "origin": origin, "experimental": is_experimental(profile),
-                          "model_profiles": profile.compatible_model_profiles, "workflow_kind": profile.workflow_kind,
+                          "model_profiles": workflow_models(resolved), "workflow_kind": profile.workflow_kind,
                           "state": item_state, "errors": errors, "assets": assets,
                           "template_version": workflow_catalog_manifest()["templates"].get(profile.id.removeprefix("official:"), {}).get("version") if origin == "official" else None})
         return {"remote_profile_id": remote_id, "checked_at": snapshot.get("checked_at"),
@@ -294,7 +331,7 @@ class WorkflowCatalog:
             item = next((i for i in self.report(remote_id)["items"] if i["workflow_id"] == workflow_id), None)
             if item and item["state"] in {"unchecked", "stale", "connection_failed"}:
                 remote = self.remote(remote_id)
-                if not remote.enabled or not remote.known_host_fingerprint:
+                if not remote.enabled or not remote.connection_ready:
                     raise ValueError("请启用连接并确认 SSH 主机指纹后再生成。")
                 try:
                     self.inspect(remote_id, credentials)
@@ -322,7 +359,8 @@ class WorkflowCatalog:
         self._write("workflow_disabled:" + workflow_id, not enabled)
         return {"enabled": enabled}
 
-    def import_profile(self, payload):
+    def preview_import(self, payload):
+        source = payload.get("source") if payload.get("schema") == "anima-user-workflow/1" else None
         encoded = json.dumps(payload, ensure_ascii=False)
         if len(encoded.encode()) > 2_000_000:
             raise ValueError("工作流文件不能超过 2 MB。")
@@ -337,9 +375,24 @@ class WorkflowCatalog:
         errors = graph_errors(profile)
         if not errors:
             errors = WorkflowRenderer().validate_profile(profile)
-        if errors or not profile.compatible_model_profiles or profile.workflow_kind == "unknown":
-            raise ValueError("；".join(errors) or "必须声明兼容模型。")
-        source = {"id": profile.id, "revision": workflow_revision(profile)}
+        if errors:
+            raise ValueError("；".join(errors))
+        if source is not None and (not isinstance(source, dict)
+                or not isinstance(source.get("id"), str) or not 0 < len(source["id"]) <= 512
+                or not isinstance(source.get("revision"), str) or len(source["revision"]) != 64
+                or any(c not in "0123456789abcdef" for c in source["revision"])):
+            raise ValueError("来源模板版本信息无效。")
+        source = {"id": source["id"], "revision": source["revision"]} if source else {"id": profile.id, "revision": workflow_revision(profile)}
+        result = profile.model_dump(mode="json")
+        result["source_path"] = ""
+        return {"schema": "anima-user-workflow/1", "profile": result, "source": source}
+
+    def import_profile(self, payload):
+        prepared = self.preview_import(payload)
+        profile = WorkflowProfile.model_validate(prepared["profile"])
+        if not workflow_models(profile) or profile.workflow_kind == "unknown":
+            raise ValueError("必须声明与工作流权重一致的兼容模型和生成类型。")
+        source = prepared["source"]
         profile = profile.model_copy(update={"id": "user:" + str(uuid4()), "source_path": "user-import"})
         repo = SQLiteRepository(self.database)
         try:
@@ -356,17 +409,20 @@ class WorkflowCatalog:
         result = profile.model_dump(mode="json")
         result["source_path"] = ""
         # Export may contain user-supplied node inputs. UI requires review before sharing.
-        return {"schema": "anima-user-workflow/1", "profile": result}
+        return {"schema": "anima-user-workflow/1", "profile": result,
+                "source": {"id": profile.id, "revision": workflow_revision(profile)}}
 
     def read_remote_file(self, remote_id, path, credentials):
+        if self.remote(remote_id).connection_type == "local":
+            raise ValueError("本地环境请使用文件导入或粘贴 JSON，无需云端文件读取。")
         if not path.startswith("/") or not path.lower().endswith(".json") or len(path) > 2048:
             raise ValueError("请输入云端 JSON 文件的绝对路径。")
         profile = self.remote(remote_id)
-        if not profile.enabled or not profile.known_host_fingerprint:
+        if not profile.enabled or not profile.connection_ready:
             raise ValueError("请先启用连接并确认 SSH 指纹。")
-        if profile.auth_type == RemoteAuthType.PASSWORD and not credentials.password:
+        if profile.connection_type == "ssh" and profile.auth_type == RemoteAuthType.PASSWORD and not credentials.password:
             credentials = credentials.model_copy(update={"password": CredentialStore().read_password(remote_id)})
-        tunnel = SshTunnel(profile, connect_timeout=10)
+        tunnel = (LocalComfyConnection if profile.connection_type == "local" else SshTunnel)(profile, connect_timeout=10)
         try:
             tunnel.open(credentials)
             with tunnel.client.open_sftp() as sftp:

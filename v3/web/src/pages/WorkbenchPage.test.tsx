@@ -138,7 +138,7 @@ it("retains unsaved edits after a revision conflict without retrying",async () =
 
 it.each(["unchecked","stale","connection_failed","invalid_inputs"])("keeps target controls editable when availability is %s",async availability => {
   targets=[{remote_profile_id:"cloud",remote_display_name:"测试云主机",workflow_profile_id:"workflow",workflow_display_name:"测试工作流",
-    workflow_kind:"txt2img_basic",compatible_model_profiles:["anima_aesthetic_v1"],host_fingerprint_ready:true,availability,
+    workflow_kind:"txt2img_basic",compatible_model_profiles:["anima_aesthetic_v1_1"],host_fingerprint_ready:true,availability,
     default_recipe_id:"stable_baseline",generation_recipes:[{id:"stable_baseline",display_name:"稳定基线",objective:"baseline",
       parameters:{steps:30,cfg:4,sampler:"er_sde",scheduler:"simple"},notes:"test",evidence:"workflow_template"}]}];
   render(<MemoryRouter><WorkbenchPage remoteEnabled /></MemoryRouter>);
@@ -155,7 +155,7 @@ it("preserves an existing candidate snapshot when reopening and saving a workspa
     data_pack_id:"pack-r1",scene_draft:{source_text:"雨中的女仆",translated_text:"A maid in the rain",entities:[],relations:[],
       confirmed:[],exclusions:[],suggestions:[],unresolved:[],risk_notes:[]}};
   saved={id:"workspace_old",title:"旧候选工作台",revision:7,created_at:"2026-09-10",updated_at:"2026-09-10",
-    draft:{natural_text:"雨中的女仆",positive_text:"",excluded_text:"",input_mode:"natural",model_profile:"anima_aesthetic_v1"},candidate_snapshot:snapshot};
+    draft:{natural_text:"雨中的女仆",positive_text:"",excluded_text:"",input_mode:"natural",model_profile:"anima_aesthetic_v1_1"},candidate_snapshot:snapshot};
   mount();fireEvent.click(screen.getByRole("button",{name:"打开"}));
   fireEvent.click(await screen.findByRole("button",{name:/旧候选工作台.*r7/}));
   expect(screen.getByLabelText("描述你想生成的画面")).toHaveValue("雨中的女仆");

@@ -123,7 +123,7 @@ class CandidateToPromptJobAdapter:
         *,
         positive_prompt: str,
         negative_prompt: str = "",
-        model_profile_id: str = "anima_aesthetic_v1",
+        model_profile_id: str = "anima_aesthetic_v1_1",
         project_name: str = "英文提示词直出",
         settings: GenerationSettings | None = None,
     ) -> PreparedGeneration:

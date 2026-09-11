@@ -4,8 +4,8 @@ import {CaretDown, Images, ListChecks, MagicWand, NotePencil, Translate, UsersTh
 import {Link, useSearchParams} from "react-router-dom";
 import {apiRequest, ApiClientError} from "../lib/api";
 import {consumeDirectImport} from "../lib/directPrompt";
-import {applyAspect, applyGenerationRecipe, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
-import {modelProfileChoices} from "../lib/modelProfiles";
+import {seedInput, validSeed, applyAspect, applyGenerationRecipe, changeGenerationModel, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
+import {modelProfileChoices, LEGACY_AESTHETIC, resolveLegacyAesthetic} from "../lib/modelProfiles";
 import {targetReady, defaultTarget, targetStatus} from "../lib/workflowTargets";
 import type {ArtistComparisonSubmission, ArtistRanking, ArtistSuggestion, CandidateLane, CandidateTag, CompositionChip, CompositionPreset, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, IntentParseResponse, ModelProfileOption, PromptCandidate, SceneDraft, SceneDraftItem, SceneRelation, TagSuggestion, TranslationResponse, WorkbenchGenerationSettings, WorkbenchResponse, WorkspaceDraft, WorkspaceListResponse, WorkspaceRecord} from "../lib/types";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
@@ -77,6 +77,10 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
   ));
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [generationTargets, setGenerationTargets] = useState<GenerationTarget[]>([]);
+  useEffect(() => {
+    const model = resolveLegacyAesthetic(draft.model_profile, draft.generation_settings!, generationTargets);
+    if (model !== draft.model_profile) editDraft({model_profile: model});
+  }, [draft.model_profile, draft.generation_settings, generationTargets]);
   const [selectedTarget, setSelectedTarget] = useState(() => {
     const saved = draft.generation_settings;
     if (saved?.remote_profile_id && saved.workflow_profile_id) return `${saved.remote_profile_id}::${saved.workflow_profile_id}`;
@@ -98,7 +102,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
   const [artistComparisonBase, setArtistComparisonBase] = useState<PromptCandidate | null>(null);
   const [artistSuggestions, setArtistSuggestions] = useState<ArtistSuggestion[]>([]);
   const [selectedArtists, setSelectedArtists] = useState<string[]>([]);
-  const [artistComparisonSeed, setArtistComparisonSeed] = useState(() => Math.floor(Math.random() * 2_000_000_000));
+  const [artistComparisonSeed, setArtistComparisonSeed] = useState<number | string>(() => Math.floor(Math.random() * 2_000_000_000));
   const [artistComparisonBusy, setArtistComparisonBusy] = useState(false);
   const [llmPrompt, setLlmPrompt] = useState<string | null>(null);
   const [llmNegative, setLlmNegative] = useState("");
@@ -137,7 +141,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
 
   const positiveItems = useMemo(() => splitConcepts(positiveText), [positiveText]);
   const compatibleTargets = useMemo(() => generationTargets.filter((target) => (
-    target.compatible_model_profiles.includes(profile)
+    profile !== LEGACY_AESTHETIC && target.compatible_model_profiles.includes(profile)
   )), [generationTargets, profile]);
   const remoteConnections = useMemo(() => {
     const unique = new Map<string, GenerationTarget>();
@@ -321,7 +325,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
       target.compatible_model_profiles.includes(modelProfile)
       && target.remote_profile_id === selectedRemoteId
     ))) || defaultTarget(generationTargets.filter((target) => target.compatible_model_profiles.includes(modelProfile)));
-    const nextSettings = nextTarget ? applyGenerationRecipe(generationSettings, nextTarget) : generationSettings;
+    const nextSettings = changeGenerationModel(generationSettings, nextTarget);
     if (nextTarget) setSelectedTarget(targetKey(nextTarget));
     editDraft({model_profile: modelProfile, generation_settings: nextSettings});
   }
@@ -840,7 +844,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
       setGenerationNotice("请至少选择一位画师后再提交对照组。");
       return;
     }
-    if (!Number.isInteger(artistComparisonSeed) || artistComparisonSeed < 0) {
+    if (!validSeed(artistComparisonSeed, false)) {
       setGenerationNotice("画师对照必须使用非负整数 Seed。");
       return;
     }
@@ -1078,6 +1082,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
             <div className="generation-field">
               <label htmlFor="model-profile">模型配置</label>
               <select id="model-profile" value={profile} onChange={(event) => changeModelProfile(event.target.value)}>
+                {profile === LEGACY_AESTHETIC && <option value={LEGACY_AESTHETIC} disabled>旧美学配置：请选择 v1.0 或 v1.1</option>}
                 {profiles.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
               </select>
             </div>
@@ -1157,7 +1162,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
               </div>
               <div className="generation-field generation-field--seed">
                 <label htmlFor="generation-seed">Seed</label>
-                <input id="generation-seed" type="number" min="-1" max="2147483647" value={generationSettings.seed} onChange={(event) => updateGenerationSettings({seed: Number(event.target.value)})} />
+                <input id="generation-seed" type="text" inputMode="numeric" value={generationSettings.seed} onChange={(event) => updateGenerationSettings({seed: seedInput(event.target.value)})} />
                 <small>-1 表示每次随机</small>
               </div>
               <div className="generation-field">
@@ -1191,7 +1196,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
             </>}
             {generationNotice && <p className="workspace-notice workspace-notice--error" role="alert">{generationNotice}</p>}
             {llmPrompt && <div className="llm-prompt-actions">
-              <button type="button" className="button generate-button" disabled={!llmPrompt.trim() || llmStale || !remoteEnabled || !activeTarget?.host_fingerprint_ready || generationBusy !== null || llmBusy} onClick={() => void submitLlmPrompt()}>{generationBusy === "llm" ? "正在提交…" : "用此提示词远程生图"}</button>
+              <button type="button" className="button generate-button" disabled={profile === LEGACY_AESTHETIC || !llmPrompt.trim() || llmStale || !remoteEnabled || !activeTarget?.host_fingerprint_ready || generationBusy !== null || llmBusy} onClick={() => void submitLlmPrompt()}>{generationBusy === "llm" ? "正在提交…" : "用此提示词远程生图"}</button>
               <small>{activeTarget ? `目标：${activeTarget.workflow_display_name}${activeTarget.host_fingerprint_ready ? "" : " · 指纹未确认"}` : "当前模型无兼容工作流"}</small>
             </div>}
             <p className="llm-prompt-note">将按上方当前正负提示词原文提交（仅去除首尾空白），不再经过词典编译或补默认负面词。请人工核对主体、数量、空间关系和排除范围。工作流与高级参数使用“生成设置”中的当前选择。</p>
@@ -1201,7 +1206,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
             <section className="translation-preview" aria-label="本地翻译预览">
               <div><strong>本地英译预览</strong><span>独立工具，不参与 V3 候选编译</span></div>
               <button type="button" onClick={() => void previewTranslation()} disabled={!translationSource.trim() || translationBusy}>{translationBusy ? "正在本地翻译…" : "翻译当前输入"}</button>
-              {translation && <div className="translation-result"><p>{translation.translated_text}</p><small>{translation.engine} · {translation.model_ready ? "本地 Marian 模型" : "内置离线词典"}</small></div>}
+              {translation && <div className="translation-result"><p>{translation.translated_text}</p><small>{translation.engine} · 内置离线词典</small></div>}
             </section>
           </WorkbenchDisclosure>}
 
@@ -1313,7 +1318,7 @@ function ArtistComparisonPanel({items, ranking, base, selectedArtists, seed, rem
   ranking?: ArtistRanking;
   base: PromptCandidate | null;
   selectedArtists: string[];
-  seed: number;
+  seed: number | string;
   remoteEnabled: boolean;
   canSubmit: boolean;
   busy: boolean;
@@ -1321,7 +1326,7 @@ function ArtistComparisonPanel({items, ranking, base, selectedArtists, seed, rem
   onToggle: (name: string) => void;
   onSelectVisible: () => void;
   onClear: () => void;
-  onSeedChange: (value: number) => void;
+  onSeedChange: (value: number | string) => void;
   onSubmit: () => void;
 }) {
   const weakEvidence = items.length > 0 && items.every((item) => item.hit_count < 2);
@@ -1333,7 +1338,7 @@ function ArtistComparisonPanel({items, ranking, base, selectedArtists, seed, rem
         <span>已选 {selectedArtists.length}/20</span>
         <button type="button" onClick={onSelectVisible} disabled={busy}>选中当前 {Math.min(items.length, 20)} 位</button>
         <button type="button" onClick={onClear} disabled={!selectedArtists.length || busy}>清空</button>
-        <label>固定 Seed<input type="number" min="0" max="2147483647" value={seed} disabled={busy} onChange={(event) => onSeedChange(Number(event.target.value))} /></label>
+        <label>固定 Seed<input type="text" inputMode="numeric" value={seed} disabled={busy} onChange={(event) => onSeedChange(seedInput(event.target.value))} /></label>
         <button type="button" className="artist-comparison-submit" disabled={!remoteEnabled || !canSubmit || !selectedArtists.length || busy} onClick={onSubmit}>{busy ? "正在提交对照组…" : `提交 ${selectedArtists.length || ""} 位画师对照`}</button>
       </div>}
       {items.length ? <ol>
@@ -1769,7 +1774,7 @@ function PromptBlock({label, value, copied, onCopy, negative = false, notes = []
 }
 
 function normalizeDraft(draft: Partial<WorkspaceDraft> | undefined, naturalLanguageEnabled: boolean): WorkspaceDraft {
-  const modelProfile = draft?.model_profile || "anima_aesthetic_v1";
+  const modelProfile = draft?.model_profile || "anima_aesthetic_v1_1";
   return {
     positive_text: draft?.positive_text || "",
     excluded_text: draft?.excluded_text || "",
@@ -1844,7 +1849,7 @@ function annotatePrompt(value: string, labels: Map<string, string>, proseZh: str
 }
 
 function generationSummary(settings: WorkbenchGenerationSettings): string {
-  const seedLabel = settings.seed < 0 ? "随机 Seed" : `Seed ${settings.seed}`;
+  const seedLabel = String(settings.seed) === "-1" ? "随机 Seed" : `Seed ${settings.seed}`;
   const sizeLabel = settings.aspect === "custom" ? `${settings.width}×${settings.height}` : aspectLabels[settings.aspect];
   const recipeLabel = settings.preset_id === "custom" ? "自定义参数" : settings.preset_id;
   return `${recipeLabel} · ${sizeLabel} · ${settings.steps} Steps · CFG ${settings.cfg} · ${settings.sampler}/${settings.scheduler} · ${seedLabel} · 批量 ${settings.batch_size}`;

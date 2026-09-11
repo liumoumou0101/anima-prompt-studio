@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from ..core.model_versions import aesthetic_checkpoint_version
 
 
 def infer_workflow_model_profiles(
@@ -16,6 +17,13 @@ def infer_workflow_model_profiles(
     be restricted automatically.
     """
     name = Path(source_name).stem.casefold()
+    # Loader filenames take precedence over stale display names and prompt text.
+    versions = {version for node in workflow.values() if isinstance(node, dict)
+                for key, value in node.get("inputs", {}).items()
+                if key in {"unet_name", "ckpt_name"} and isinstance(value, str)
+                for version in [aesthetic_checkpoint_version(value)] if version}
+    if versions:
+        return sorted(versions)
     if name.startswith("23_"):
         return ["anima_turbo_v1_1"]
     if name.startswith("24_"):
@@ -28,8 +36,10 @@ def infer_workflow_model_profiles(
         return ["animayume_v1_0_final"]
     if name.startswith("28_"):
         return ["miaomiao_harem_anima_v1_6"]
-    if name.startswith(("21_", "22_")):
-        return ["anima_aesthetic_v1"]
+    if name.startswith("21_"):
+        return ["anima_aesthetic_v1_0"]
+    if name.startswith("22_"):
+        return ["anima_aesthetic_v1_1"]
     if name.startswith(("01_", "04_")):
         return ["anima_base_v1"]
     if name.startswith(("02_", "05_")):

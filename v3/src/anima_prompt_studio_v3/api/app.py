@@ -236,6 +236,9 @@ def create_api_runtime(
         app.router.add_event_handler("shutdown", app.state.submission_service.close)
     app.state.intent_parser = intent_parser
     app.state.gallery_service = gallery_service
+    if gallery_service is not None and hasattr(gallery_service, "regeneration_service") and app.state.submission_service is not None:
+        from ..runtime.gallery_generation import GalleryGenerationService
+        gallery_service.regeneration_service = GalleryGenerationService(app.state.submission_service)
     app.state.translation_service = translation_service
     app.state.comfy_access = comfy_access
     profiles = ModelProfileRegistry.built_in()
@@ -464,7 +467,7 @@ def create_api_runtime(
                 "cooccurrence": ready,
                 "artist_recommendation": ready,
                 "workspace_persistence": app.state.workspace_store is not None,
-                "conversational_workbench": False,
+                "conversational_workbench": True,
                 "reference_gallery": False,
                 "online_preview": False,
                 "remote_generation": app.state.generation_queue is not None,
@@ -1329,7 +1332,7 @@ def create_api_runtime(
         return {
             "comparison_id": payload.comparison_id,
             "project_name": project_name,
-            "seed": payload.settings.seed,
+            "seed": payload.settings.model_dump(mode="json")["seed"],
             "requested_count": len(payload.artist_names),
             "submitted": submitted,
             "failed": failed,
@@ -1477,6 +1480,8 @@ def create_api_runtime(
         database: Path = Depends(require_v2_settings_database),
     ) -> dict[str, object]:
         profile = _get_v2_remote_profile(database, profile_id)
+        if profile.connection_type == "local":
+            raise ApiError(409, "local_connection_no_ssh", "本地 ComfyUI 不使用 SSH 指纹。")
         try:
             from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
             fingerprint = SshTunnel(profile).probe_fingerprint()
@@ -1494,6 +1499,8 @@ def create_api_runtime(
         database: Path = Depends(require_v2_settings_database),
     ) -> dict[str, object]:
         profile = _get_v2_remote_profile(database, profile_id)
+        if profile.connection_type == "local":
+            raise ApiError(409, "local_connection_no_ssh", "本地 ComfyUI 不使用 SSH 指纹。")
         try:
             from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
             actual = SshTunnel(profile).probe_fingerprint()
@@ -1527,18 +1534,19 @@ def create_api_runtime(
         from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
 
         profile = _get_v2_remote_profile(database, profile_id)
-        if not profile.known_host_fingerprint.strip():
+        if not profile.connection_ready:
             raise ApiError(409, "ssh_host_key_unconfirmed", "请先检测并确认 SSH 主机指纹。")
         password = payload.password.get_secret_value() if payload.password is not None else ""
-        if profile.auth_type == RemoteAuthType.PASSWORD and not password:
+        if profile.connection_type == "ssh" and profile.auth_type == RemoteAuthType.PASSWORD and not password:
             try:
                 password = CredentialStore().read_password(profile.id)
             except CredentialStoreError as exc:
                 raise ApiError(503, "credential_store_unavailable", str(exc), retryable=True) from exc
         passphrase = payload.passphrase.get_secret_value() if payload.passphrase is not None else ""
-        if profile.auth_type == RemoteAuthType.PASSWORD and not password:
+        if profile.connection_type == "ssh" and profile.auth_type == RemoteAuthType.PASSWORD and not password:
             raise ApiError(409, "ssh_credentials_missing", "没有可用的 SSH 密码；请填写并保存密码后再测试。")
-        tunnel = SshTunnel(profile)
+        from anima_prompt_studio_v3.remote.local_connection import LocalComfyConnection
+        tunnel = (LocalComfyConnection if profile.connection_type == "local" else SshTunnel)(profile)
         try:
             tunnel.open(RemoteCredentials(password=password, passphrase=passphrase))
             client = ComfyUIClient(tunnel.base_url)
@@ -1768,12 +1776,14 @@ def create_api_runtime(
         return service.list_process_jobs()
 
     @app.post(f"{API_PREFIX}/gallery/process", dependencies=[Depends(require_session)], status_code=202)
-    def submit_gallery_process(payload: GalleryProcessRequest) -> dict[str, object]:
+    def submit_gallery_process(payload: GalleryProcessRequest,
+                               idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, object]:
         service = app.state.gallery_service
         if service is None:
             raise ApiError(503, "gallery_not_configured", "画廊尚未连接 V2 图片目录。")
         try:
-            result = service.submit_process(payload.paths, payload.operation, payload.count)
+            result = service.submit_process(payload.paths, payload.operation, payload.count,
+                                            **({"idempotency_key": idempotency_key} if payload.operation == "regenerate" else {}))
         except GalleryUpscaleError as exc:
             raise ApiError(422, "gallery_process_unavailable", str(exc)) from exc
         if not result["jobs"] and result["failed"]:
@@ -1787,7 +1797,7 @@ def create_api_runtime(
             raise ApiError(503, "gallery_not_configured", "画廊尚未连接 V2 图片目录。")
         try:
             return service.process_action(payload.job_id, payload.action)
-        except (GalleryUpscaleError, ValueError) as exc:
+        except (GalleryUpscaleError, GenerationQueueError, ValueError) as exc:
             raise ApiError(409, "gallery_process_action_invalid", str(exc)) from exc
 
     @app.post(f"{API_PREFIX}/workbench/turns", dependencies=[Depends(require_session)])
@@ -1981,6 +1991,7 @@ def create_api_runtime(
 
 
 def _generation_run_response(run, queue) -> dict[str, object]:
+    from ..core.seeds import display_seed
     try:
         artifact_count = len(queue.artifacts(run.id))
     except GenerationRunNotFoundError:
@@ -1992,6 +2003,8 @@ def _generation_run_response(run, queue) -> dict[str, object]:
     prompt_job = run.request_json.get("prompt_job", {}) if isinstance(run.request_json, dict) else {}
     integration = prompt_job.get("integration_metadata", {}) if isinstance(prompt_job, dict) else {}
     comparison = integration.get("artist_comparison") if isinstance(integration, dict) else None
+    if isinstance(comparison, dict) and isinstance(comparison.get("seed"), int):
+        comparison = {**comparison, "seed": display_seed(comparison["seed"])}
     return {
         "id": run.id,
         "prompt_job_id": run.prompt_job_id,
@@ -2017,14 +2030,18 @@ def _remote_profile_settings_response(profile, credentials) -> dict[str, object]
     return {
         "id": profile.id,
         "display_name": profile.display_name,
+        "connection_type": profile.connection_type,
+        "comfy_host": profile.comfy_host,
+        "comfy_port": profile.comfy_port,
         "ssh_host": profile.ssh_host,
         "ssh_port": profile.ssh_port,
         "ssh_user": profile.ssh_user,
         "auth_type": profile.auth_type.value,
         "private_key_path": profile.private_key_path,
         "enabled": profile.enabled,
-        "has_saved_password": bool(credentials.read_password(profile.id)),
+        "has_saved_password": profile.connection_type == "ssh" and bool(credentials.read_password(profile.id)),
         "host_fingerprint_confirmed": bool(profile.known_host_fingerprint.strip()),
+        "connection_ready": profile.connection_ready,
         "comfy_endpoint": f"{profile.comfy_host}:{profile.comfy_port}",
     }
 
@@ -2062,10 +2079,13 @@ def _save_remote_profile_settings(database: Path, payload: RemoteProfileSettings
                 raise ApiError(404, "remote_profile_not_found", "云主机配置不存在。") from exc
         changes = {
             "display_name": payload.display_name,
+            "connection_type": payload.connection_type,
+            "comfy_host": payload.comfy_host if "comfy_host" in payload.model_fields_set or existing is None else existing.comfy_host,
+            "comfy_port": payload.comfy_port if "comfy_port" in payload.model_fields_set or existing is None else existing.comfy_port,
             "ssh_host": payload.ssh_host,
             "ssh_port": payload.ssh_port,
             "ssh_user": payload.ssh_user,
-            "auth_type": RemoteAuthType(payload.auth_type),
+            "auth_type": RemoteAuthType.AGENT if payload.connection_type == "local" else RemoteAuthType(payload.auth_type),
             "private_key_path": payload.private_key_path,
             "enabled": payload.enabled,
         }
@@ -2085,7 +2105,7 @@ def _save_remote_profile_settings(database: Path, payload: RemoteProfileSettings
                 payload.auth_type,
                 payload.private_key_path,
             )
-            if endpoint_changed:
+            if endpoint_changed or existing.connection_type != payload.connection_type:
                 changes["known_host_fingerprint"] = ""
             profile = existing.model_copy(update=changes)
         repository.save_remote_profile(profile)
@@ -2093,12 +2113,12 @@ def _save_remote_profile_settings(database: Path, payload: RemoteProfileSettings
             repository.set_setting("last_remote_profile_id", profile.id)
 
         entered_password = payload.password.get_secret_value() if payload.password is not None else ""
-        if entered_password and payload.remember_password:
+        if profile.connection_type == "ssh" and entered_password and payload.remember_password:
             try:
                 credentials.save_password(profile.id, profile.ssh_user, entered_password)
             except CredentialStoreError as exc:
                 raise ApiError(503, "credential_store_unavailable", str(exc), retryable=True) from exc
-        elif not payload.remember_password:
+        elif profile.connection_type == "local" or not payload.remember_password:
             credentials.delete_password(profile.id)
         return _remote_profile_settings_response(profile, credentials)
     finally:

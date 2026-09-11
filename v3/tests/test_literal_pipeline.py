@@ -172,7 +172,8 @@ def test_builtin_profiles_are_packaged_and_variant_safe() -> None:
     registry = ModelProfileRegistry.built_in()
 
     assert [profile.id for profile in registry.all()] == [
-        "anima_aesthetic_v1",
+        "anima_aesthetic_v1_0",
+        "anima_aesthetic_v1_1",
         "anima_base_v1",
         "anima_turbo_v1",
         "anima_turbo_v1_1",
@@ -222,6 +223,18 @@ def test_base_literal_candidate_is_deterministic_and_traceable(store: ReferenceD
     assert candidate.unresolved_element_ids == ["e_relation"]
     assert candidate.warnings[0].code == "required_tag_unresolved"
     assert candidate.versions.data_pack == store.pack_id
+
+
+def test_community_defaults_do_not_add_unrequested_content_or_unverified_scores(store):
+    registry = ModelProfileRegistry.built_in()
+    generator = LiteralCandidateGenerator(store)
+    yume = generator.generate(intent(), registry.get("animayume_v1_0_final")).candidates[0]
+    assert "score_" not in yume.negative_prompt
+    assert "blonde hair" in yume.negative_prompt  # Explicit exclusions still work.
+    miaomiao = generator.generate(intent(), registry.get("miaomiao_harem_anima_v1_6")).candidates[0]
+    tokens = set(miaomiao.positive_prompt.split(", "))
+    assert not tokens & {"sensitive", "fair skin", "high contrast"}
+    assert "shiny skin" in miaomiao.negative_prompt  # Keep the model's negative guidance.
 
 
 def test_literal_orders_reviewed_fact_layers_without_adding_content(store: ReferenceDataStore) -> None:

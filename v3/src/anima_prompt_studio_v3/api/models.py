@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 
 from ..core.validation import CandidateSetValidationReport
 from ..core.requirements import ConversationWriteFields
+from ..core.seeds import Seed
 from ..domain import IntentDocument, IntentElementType, IntentState, PromptCandidate, RelationKind
 
 
@@ -127,7 +128,7 @@ class LocalNaturalRelationInput(ApiModel):
 class LocalNaturalCandidateRequest(ApiModel):
     source_text: str = Field(min_length=1, max_length=10_000)
     excluded_text: str = Field(default="", max_length=10_000)
-    model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)
+    model_profile: str = Field(default="anima_aesthetic_v1_1", min_length=1, max_length=100)
     translated_text: str | None = Field(default=None, min_length=1, max_length=20_000)
     selected_tags: list[str] = Field(default_factory=list, max_length=40)
     suppressed_tags: list[str] = Field(default_factory=list, max_length=80)
@@ -169,7 +170,7 @@ class WorkbenchGenerationSettings(ApiModel):
     cfg: float | None = Field(default=4.5, ge=0, le=30)
     sampler: str | None = Field(default="euler", min_length=1, max_length=100)
     scheduler: str | None = Field(default="normal", min_length=1, max_length=100)
-    seed: int = Field(default=-1, ge=-1)
+    seed: Seed = -1
     batch_size: int = Field(default=1, ge=1, le=100)
     remote_profile_id: str | None = Field(default=None, max_length=200)
     workflow_profile_id: str | None = Field(default=None, max_length=200)
@@ -178,7 +179,7 @@ class WorkbenchGenerationSettings(ApiModel):
 class WorkspaceDraft(ApiModel, ConversationWriteFields):
     positive_text: str = Field(default="", max_length=10_000)
     excluded_text: str = Field(default="", max_length=10_000)
-    model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)
+    model_profile: str = Field(default="anima_aesthetic_v1_1", min_length=1, max_length=100)
     input_mode: Literal["concepts", "natural"] = "concepts"
     natural_text: str = Field(default="", max_length=50_000)
     selected_tags: list[str] = Field(default_factory=list, max_length=40)
@@ -377,7 +378,7 @@ class GenerationBridgeSettings(ApiModel):
     cfg: float | None = Field(default=None, ge=0, le=30)
     sampler: str | None = Field(default=None, min_length=1, max_length=100)
     scheduler: str | None = Field(default=None, min_length=1, max_length=100)
-    seed: int = Field(default=-1, ge=-1)
+    seed: Seed = -1
     batch_size: int = Field(default=1, ge=1, le=100)
 
 
@@ -432,7 +433,7 @@ class DirectPromptSubmitRequest(SubmissionFields):
     workspace_revision: int | None = Field(default=None, ge=1)
     positive_prompt: str = Field(min_length=1, max_length=20_000)
     negative_prompt: str = Field(default="", max_length=20_000)
-    model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)
+    model_profile: str = Field(default="anima_aesthetic_v1_1", min_length=1, max_length=100)
     project_name: str = Field(default="英文提示词直出", min_length=1, max_length=200)
     settings: GenerationBridgeSettings = Field(default_factory=GenerationBridgeSettings)
     remote_profile_id: str = Field(min_length=1, max_length=200)
@@ -491,7 +492,10 @@ class RemoteProfileSettingsRequest(ApiModel):
     """
 
     display_name: str = Field(min_length=1, max_length=200)
-    ssh_host: str = Field(min_length=1, max_length=253)
+    connection_type: Literal["ssh", "local"] = "ssh"
+    comfy_host: str = Field(default="127.0.0.1", max_length=253)
+    comfy_port: int = Field(default=8188, ge=1, le=65535)
+    ssh_host: str = Field(default="", max_length=253)
     ssh_port: int = Field(default=22, ge=1, le=65535)
     ssh_user: str = Field(default="root", min_length=1, max_length=128)
     auth_type: Literal["password", "private_key", "agent"] = "password"
@@ -499,6 +503,16 @@ class RemoteProfileSettingsRequest(ApiModel):
     enabled: bool = True
     password: SecretStr | None = Field(default=None, max_length=4096)
     remember_password: bool = True
+
+
+    @model_validator(mode="after")
+    def validate_connection(self):
+        if self.connection_type == "local":
+            if self.comfy_host not in {"127.0.0.1", "localhost", "::1"}:
+                raise ValueError("本地地址必须为 127.0.0.1、localhost 或 ::1。")
+        elif not self.ssh_host:
+            raise ValueError("SSH 地址不能为空。")
+        return self
 
 
 class RemoteHostFingerprintRequest(ApiModel):

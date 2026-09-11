@@ -74,7 +74,9 @@ including empty fields, unless the delta explicitly requests that particular cha
 Do not add such camera/composition details to positive either. Modest compatible
 environment, texture or expression details may be added; list every addition in warnings.
 Never place LoRA file_name in positive; preserve declared trigger_words verbatim.
-negative must be empty when no global exclusions exist. Warnings are brief review notes.
+Preserve reviewed negative prompt content, including user-added quality negatives,
+unless the delta explicitly changes it. If there are no global exclusions and no
+reviewed negative content, negative is empty. Warnings are brief review notes.
 """
 
 

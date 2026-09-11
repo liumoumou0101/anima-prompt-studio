@@ -75,7 +75,8 @@ it("offers every current built-in model when bootstrap profile labels are unavai
   const modelSelect = screen.getByLabelText("模型配置") as HTMLSelectElement;
   expect(Array.from(modelSelect.options, (option) => option.value)).toEqual([
     "anima_base_v1",
-    "anima_aesthetic_v1",
+    "anima_aesthetic_v1_0",
+    "anima_aesthetic_v1_1",
     "anima_turbo_v1",
     "anima_turbo_v1_1",
     "animayume_v1_0_final",
@@ -136,7 +137,7 @@ it("submits the original English prompt without compiling", async () => {
         workflow_display_name: "基础工作流",
         workflow_kind: "txt2img_basic",
         workflow_notes: "实验工作流说明",
-        compatible_model_profiles: ["anima_aesthetic_v1"],
+        compatible_model_profiles: ["anima_aesthetic_v1_1"],
         host_fingerprint_ready: true,
         auth_type: "agent",
         private_key_passphrase_configured: false,
@@ -155,7 +156,7 @@ it("submits the original English prompt without compiling", async () => {
   render(<MemoryRouter><DirectPromptPage remoteEnabled /></MemoryRouter>);
   fireEvent.change(screen.getByLabelText("正向提示词（英文，原样发送）"), {target: {value: "1girl, finger to lips, clean delicate lineart"}});
   // This test verifies prompt passthrough, using the model declared by its target fixture.
-  fireEvent.change(screen.getByLabelText("模型配置"), {target: {value: "anima_aesthetic_v1"}});
+  fireEvent.change(screen.getByLabelText("模型配置"), {target: {value: "anima_aesthetic_v1_1"}});
   expect(await screen.findByRole("option", {name: "测试云主机"})).toBeInTheDocument();
   await waitFor(() => expect(screen.getByLabelText("云主机连接")).toHaveValue("remote-1"));
   expect(await screen.findByText("实验工作流说明")).toBeInTheDocument();

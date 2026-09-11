@@ -590,7 +590,8 @@ class GenerationQueueService:
         compatible = _compatible_models(workflow)
         if not compatible:
             raise ValueError("工作流尚未声明兼容模型，不能安全提交。")
-        if prepared.job.model_profile_id not in compatible:
+        from ..core.model_versions import model_matches_workflow
+        if not model_matches_workflow(prepared.job.model_profile_id, workflow):
             raise ValueError("工作流与当前模型配置不兼容。")
         validate_job_recipe(prepared.job, workflow)
 
@@ -600,7 +601,7 @@ class GenerationQueueService:
         workflow = target.workflow_profile
         if not profile.enabled:
             raise ValueError("所选云主机配置已停用。")
-        if not profile.known_host_fingerprint:
+        if not profile.connection_ready:
             raise ValueError("请先在设置中测试连接并确认 SSH 主机指纹。")
         if workflow.workflow_kind not in SUPPORTED_GENERATION_WORKFLOW_KINDS:
             raise ValueError("当前工作流不在受支持的执行范围内。")
@@ -639,8 +640,8 @@ def build_generation_queue(
             ))
         finally:
             repository.close()
-        password = secrets.read_password(profile.id) if profile.auth_type == RemoteAuthType.PASSWORD else ""
-        if profile.auth_type == RemoteAuthType.PASSWORD and not password:
+        password = secrets.read_password(profile.id) if profile.connection_type == "ssh" and profile.auth_type == RemoteAuthType.PASSWORD else ""
+        if profile.connection_type == "ssh" and profile.auth_type == RemoteAuthType.PASSWORD and not password:
             raise ValueError("当前云主机没有可用的安全存储密码。")
         passphrase = passphrases.get(profile.id) if profile.auth_type == RemoteAuthType.PRIVATE_KEY else ""
         credentials = RemoteCredentials(password=password, passphrase=passphrase)
@@ -666,14 +667,15 @@ def build_generation_queue(
             {
                 "remote_profile_id": profile.id,
                 "remote_display_name": profile.display_name,
+                "connection_type": profile.connection_type,
                 "remote_ssh_host": profile.ssh_host,
                 "remote_ssh_port": profile.ssh_port,
                 "workflow_profile_id": workflow.id,
                 "workflow_display_name": workflow.display_name,
                 "workflow_kind": workflow.workflow_kind,
                 "workflow_notes": workflow.notes,
-                "compatible_model_profiles": _compatible_models(workflow),
-                "host_fingerprint_ready": bool(profile.known_host_fingerprint),
+                "compatible_model_profiles": reports[profile.id][workflow.id]["model_profiles"],
+                "host_fingerprint_ready": profile.connection_ready,
                 "auth_type": profile.auth_type.value,
                 "private_key_passphrase_configured": passphrases.has(profile.id),
                 "availability": reports[profile.id][workflow.id]["state"],
@@ -746,7 +748,8 @@ def build_generation_queue(
 
 
 def _compatible_models(workflow: WorkflowProfile) -> list[str]:
-    return workflow.compatible_model_profiles or infer_workflow_model_profiles(
+    from ..core.model_versions import workflow_models
+    return workflow_models(workflow) if workflow.compatible_model_profiles else infer_workflow_model_profiles(
         workflow.api_workflow,
         workflow.source_path or workflow.display_name or workflow.id,
     )

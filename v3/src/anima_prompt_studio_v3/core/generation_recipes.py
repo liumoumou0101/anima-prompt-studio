@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from anima_prompt_studio.domain.execution_models import HIRES_FIX_WORKFLOW_KIND, WorkflowProfile
 from anima_prompt_studio.domain.models import PromptJob
 from .runtime_profiles import V3RuntimeProfiles
+from .model_versions import workflow_models
 
 
 class RecipeParameters(BaseModel):
@@ -88,7 +89,7 @@ def build_workflow_recipe_contract(workflow: WorkflowProfile) -> dict[str, objec
     """
 
     template = _template_parameters(workflow)
-    model_profiles = set(workflow.compatible_model_profiles)
+    model_profiles = set(workflow_models(workflow))
     workflow_label = f"{workflow.id} {workflow.display_name}".lower()
     is_turbo_v11 = "anima_turbo_v1_1" in model_profiles
     is_yume = "animayume_v1_0_final" in model_profiles
@@ -181,7 +182,7 @@ def build_workflow_recipe_contract(workflow: WorkflowProfile) -> dict[str, objec
     else:
         default_recipe_id = "stable_baseline"
         model_id = next(iter(model_profiles), "")
-        if model_id in {"anima_base_v1", "anima_aesthetic_v1"}:
+        if model_id in {"anima_base_v1", "anima_aesthetic_v1", "anima_aesthetic_v1_0", "anima_aesthetic_v1_1"}:
             defaults = V3RuntimeProfiles().get_model(model_id)
             stable = RecipeParameters(steps=defaults.steps, cfg=defaults.cfg, sampler=defaults.sampler, scheduler=defaults.scheduler)
         else:

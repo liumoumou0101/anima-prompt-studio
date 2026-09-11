@@ -76,4 +76,4 @@ class ModelProfileRegistry:
             raise KeyError(f"未知 ModelProfile：{profile_id}") from exc
 
     def all(self) -> list[ModelProfile]:
-        return list(self._profiles.values())
+        return [profile for profile in self._profiles.values() if profile.id != "anima_aesthetic_v1"]

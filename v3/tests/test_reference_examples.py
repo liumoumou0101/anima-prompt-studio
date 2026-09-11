@@ -14,6 +14,103 @@ def picture(fmt="PNG"):
     return output.getvalue()
 
 
+def test_case_images_load_with_browser_gallery_cookie(conversation_client):
+    client, _ = conversation_client
+    example = client.app.state.example_store.create(picture(), "浏览器图片", ExampleMetadata())
+    client.headers.pop("x-anima-session", None)
+    prefix = f"/api/v3/gallery/reference-examples/{example['id']}"
+    assert client.get(prefix + "/content").content == picture()
+    response = client.get(prefix + "/thumbnail")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert Image.open(BytesIO(response.content)).format == "JPEG"
+    assert client.get("/api/v3/bootstrap").status_code == 401
+    client.cookies.clear()
+    assert client.get(prefix + "/content").status_code == 401
+
+
+def test_library_start_creates_new_workspace_and_leaves_existing_untouched(conversation_client):
+    client, calls = conversation_client
+    store = client.app.state.example_store
+    example = store.create(picture(), "要求案例", ExampleMetadata(requirements_edit=edit()))
+    existing = client.app.state.workspace_store.create("已有草稿", {"natural_text": "保留这个想法"})
+    response = client.post(f"/api/v3/reference-examples/{example['id']}/workspace",
+        json={"source_version": example["source_version"], "mode": "requirements", "role": "style"})
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert created["id"] != existing["id"]
+    assert created["draft"]["reference_pin"]["example_id"] == example["id"]
+    assert created["draft"]["compiled"] is None
+    assert created["draft"]["generation_source"] is None
+    assert client.app.state.workspace_store.get(existing["id"]) == existing
+    assert calls == []
+    assert client.post(f"/api/v3/reference-examples/{example['id']}/workspace",
+        json={"source_version": "999", "mode": "requirements"}).status_code == 409
+
+
+def test_gallery_case_keeps_metadata_and_owns_its_image_copy(conversation_client, tmp_path):
+    from types import SimpleNamespace
+    client, _ = conversation_client
+    image = tmp_path / "gallery.png"
+    image.write_bytes(picture())
+    client.app.state.gallery_service = SimpleNamespace(resolve_content=lambda path: image,
+        list_assets=lambda **kwargs: {"items": [{"path": "gallery.png", "positive_prompt": "rainy garden", "negative_prompt": "text",
+            "model_profile": "anima_base_v1", "generation_params": {"seed": "8798399215689017476"}}]})
+    result = client.post("/api/v3/reference-examples/from-gallery", json={"path": "gallery.png"})
+    assert result.status_code == 201, result.text
+    example = result.json()
+    assert "rainy garden" in example["notes"]["external_prompt"]
+    assert example["provenance"]["settings"]["seed"] == "8798399215689017476"
+    image.unlink()
+    assert client.get(f"/api/v3/reference-examples/{example['id']}/content").content == picture()
+    assert client.get("/api/v3/reference-examples?q=garden").json()["items"][0]["id"] == example["id"]
+    response = client.post(f"/api/v3/reference-examples/{example['id']}/workspace", json={"source_version": "1", "mode": "generation"})
+    assert response.status_code == 422
+
+
+def test_generation_case_copies_exact_seed_prompt_and_locks_workflow(conversation_client):
+    from types import SimpleNamespace
+    client, calls = conversation_client
+    example = client.app.state.example_store.create(picture(), "生成案例", ExampleMetadata(), provenance={"run_id": "run1"})
+    client.app.state.submission_service = SimpleNamespace(store=SimpleNamespace(for_runs=lambda ids: [{"snapshot": {
+        "provenance": {"positive": "original prompt", "negative": "text", "model_profile": "anima_base_v1", "requirements": None,
+            "settings": {"seed": 8798399215689017476, "width": 896, "height": 1152}},
+        "run": {"remote_profile_id": "remote1", "workflow_profile_id": "wf1"}, "workflow": {"id": "wf1"},
+        "resources": [{"logical_id": "watercolor", "file_name": "watercolor.safetensors", "weight": 0.7}]}}]))
+    response = client.post(f"/api/v3/reference-examples/{example['id']}/workspace", json={"source_version": "1", "mode": "generation"})
+    assert response.status_code == 201, response.text
+    record = response.json()
+    assert record["draft"]["generation_settings"]["seed"] == "8798399215689017476"
+    assert record["draft"]["compiled"]["positive"] == "original prompt"
+    assert record["draft"]["compile_state"] == "fresh"
+    assert record["draft"]["generation_source"]["run_id"] == "run1"
+    assert record["draft"]["requirements"]["loras"][0]["weight"] == 0.7
+    assert record["draft"]["requirements"]["loras"][0]["logical_id"] == "watercolor"
+    detached = client.request("DELETE", "/api/v3/workbench/generation-source", json={"workspace_id": record["id"], "revision": record["revision"]})
+    assert detached.status_code == 200
+    assert detached.json()["draft"]["generation_source"] is None
+    assert detached.json()["draft"]["compiled"]["positive"] == "original prompt"
+    count = len(client.app.state.example_store.list()["items"])
+    continued = client.post("/api/v3/generation-runs/run1/workspace", json={})
+    assert continued.status_code == 201, continued.text
+    assert continued.json()["id"] != record["id"]
+    assert continued.json()["draft"]["generation_source"]["run_id"] == "run1"
+    assert continued.json()["draft"]["generation_settings"]["seed"] == "8798399215689017476"
+    assert continued.json()["draft"]["requirements"]["loras"][0]["weight"] == 0.7
+    assert client.app.state.workspace_store.get(record["id"]) == detached.json()
+    assert len(client.app.state.example_store.list()["items"]) == count
+    assert calls == []
+
+
+def test_continue_missing_generation_does_not_create_workspace(conversation_client):
+    client, calls = conversation_client
+    before = client.get("/api/v3/workspaces").json()
+    response = client.post("/api/v3/generation-runs/missing/workspace", json={})
+    assert response.status_code == 422
+    assert client.get("/api/v3/workspaces").json() == before
+    assert calls == []
+
+
 def test_bundled_install_is_explicit_and_preserves_notes(conversation_client, monkeypatch):
     client, calls = conversation_client
     endpoint = "/api/v3/reference-examples/install-bundled"

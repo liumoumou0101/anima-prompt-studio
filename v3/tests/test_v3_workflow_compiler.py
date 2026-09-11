@@ -29,6 +29,7 @@ def test_explicit_edits_reach_actual_sampler_regardless_of_recipe_label(profile,
     assert actual("checkpoint") != "wrong-legacy-alias.safetensors"
     assert result.metadata["compiler"] == "v3-workflow/1"
     assert actual("positive_prompt") == "a crane in a garden"
+    assert actual("negative_prompt") == "text"
 
 
 def test_missing_parameters_use_v3_defaults_even_for_old_quality_label():

@@ -36,6 +36,7 @@ class ComfyUIClient:
         self.session = session
         self.timeout = timeout
         self._object_info_cache: dict[str, Any] | None = None
+        self._uploaded_images: set[str] = set()
 
     def validate_environment(self) -> EnvironmentReport:
         stats = self._get_json("/system_stats")
@@ -91,6 +92,10 @@ class ComfyUIClient:
                     specifications.update(group)
             for input_name, value in node.get("inputs", {}).items():
                 if isinstance(value, (list, tuple, dict)):
+                    continue
+                # LoadImage's UI enumeration may omit freshly uploaded subfolders.
+                # Only accept exact successful upload receipts from this client.
+                if class_type == "LoadImage" and input_name == "image" and value in self._uploaded_images:
                     continue
                 spec = specifications.get(input_name)
                 choices = spec[0] if isinstance(spec, (list, tuple)) and spec else None
@@ -166,7 +171,9 @@ class ComfyUIClient:
             raise ComfyAPIError("ComfyUI 未返回上传文件名。", code="invalid_upload_response")
         uploaded_subfolder = str(result.get("subfolder") or subfolder).strip("/\\")
         uploaded_name = str(result["name"])
-        return f"{uploaded_subfolder}/{uploaded_name}" if uploaded_subfolder else uploaded_name
+        uploaded_path = f"{uploaded_subfolder}/{uploaded_name}" if uploaded_subfolder else uploaded_name
+        self._uploaded_images.add(uploaded_path)
+        return uploaded_path
 
     def get_history_entry(self, prompt_id: str) -> dict[str, Any] | None:
         result = self._get_json(f"/history/{prompt_id}")

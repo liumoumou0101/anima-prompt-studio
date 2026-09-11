@@ -124,7 +124,26 @@ it("moves an image to recoverable trash and restores it", async () => {
   ]);
 });
 
-it("queues regeneration through the reused gallery process API", async () => {
+it("uses trash identities for renamed restores and keeps failed items selected", async () => {
+  const trashItems = assets.map(asset => ({...asset, path: `trash-batch/${asset.path}`, original_path: asset.path}));
+  const payload = {root: "D:/gallery", items: assets, projects: [], models: [], trash_count: 2};
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: trashItems, trash_count: 2})))
+    .mockResolvedValueOnce(new Response(JSON.stringify({restored: ["renamed-restored.png"], restored_trash_paths: [trashItems[0].path], failed: [{path: trashItems[1].path, error: "locked"}]})))
+    .mockResolvedValueOnce(new Response(JSON.stringify({...payload, trash_count: 1})));
+  render(<GalleryPage enabled />);
+  await screen.findByAltText("one.png");
+  fireEvent.click(screen.getByRole("button", {name: /画廊回收站/}));
+  await screen.findByAltText("two.jpg");
+  fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
+  fireEvent.click(screen.getByRole("button", {name: /^恢复$/}));
+  expect(await screen.findByText("已恢复 1 张，1 张未完成，已保留选择。")).toBeInTheDocument();
+  expect(screen.queryByAltText("one.png")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("取消选择 two.jpg")).toHaveAttribute("aria-pressed", "true");
+});
+
+it("queues regeneration with an idempotency key through the gallery API", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify({
       root: "D:/gallery", items: [assets[0]], projects: ["雨夜项目"], models: ["anima_base_v1"], trash_count: 0,
@@ -144,6 +163,53 @@ it("queues regeneration through the reused gallery process API", async () => {
   expect(screen.getByRole("region", {name: "画廊处理任务"})).toBeInTheDocument();
   const request = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
   expect(request).toEqual({paths: [assets[0].path], operation: "regenerate", count: 1});
+  expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get("Idempotency-Key")).toBeTruthy();
+});
+
+it("refreshes task progress and new images after a durable gallery run finishes", async () => {
+  const added = {...assets[0], id: "new.png", path: "new.png", name: "new.png"};
+  const job = {id: "durable-run", operation: "gallery_txt2img_more", state: "draft", progress: 0,
+    message: "已接受，等待入队", sourceName: "one.png"};
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+    if (String(url).includes("/gallery/process")) return new Response(JSON.stringify({
+      jobs: [options?.method === "POST" ? job : {...job, state: "completed", progress: 1, message: "已下载测试图片"}], failed: [],
+    }), {status: 200});
+    return new Response(JSON.stringify({root: "D:/gallery", projects: ["雨夜项目"], models: ["anima_base_v1"], trash_count: 0,
+      items: String(url).includes("refresh=true") ? [added, assets[0]] : [assets[0]],
+      processing: {available: true, regenAvailable: true, scale: 1.5}}), {status: 200});
+  });
+  render(<GalleryPage enabled />);
+  fireEvent.click(await screen.findByAltText("one.png"));
+  fireEvent.click(screen.getByRole("button", {name: "再生成"}));
+  fireEvent.click(screen.getByRole("button", {name: "加入队列"}));
+  expect(await screen.findByText("已下载测试图片", {}, {timeout: 4000})).toBeInTheDocument();
+  expect(await screen.findByAltText("new.png")).toBeInTheDocument();
+  expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+});
+
+it("reuses the request key after an uncertain network failure", async () => {
+  let attempts = 0;
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+    if (options?.method === "POST") {
+      attempts++;
+      if (attempts === 1) throw new TypeError("network failed");
+      return new Response(JSON.stringify({jobs: [{id: "one-run", operation: "gallery_txt2img_more",
+        state: "draft", progress: 0, message: "已接受", sourceName: "one.png"}], failed: []}), {status: 202});
+    }
+    return new Response(JSON.stringify({root: "D:/gallery", items: [assets[0]], projects: [], models: [], trash_count: 0,
+      processing: {available: true, regenAvailable: true}}), {status: 200});
+  });
+  render(<GalleryPage enabled />);
+  fireEvent.click(await screen.findByAltText("one.png"));
+  fireEvent.click(screen.getByRole("button", {name: "再生成"}));
+  fireEvent.click(screen.getByRole("button", {name: "加入队列"}));
+  await screen.findByText("无法连接本地服务。请确认应用仍在运行。");
+  fireEvent.click(screen.getByRole("button", {name: "再生成"}));
+  fireEvent.click(screen.getByRole("button", {name: "加入队列"}));
+  await screen.findByText("已加入 1 项再生成任务。");
+  const posts = fetchMock.mock.calls.filter(([, options]) => options?.method === "POST");
+  expect(posts).toHaveLength(2);
+  expect(new Headers(posts[0][1]?.headers).get("Idempotency-Key")).toBe(new Headers(posts[1][1]?.headers).get("Idempotency-Key"));
 });
 
 it("shows an inherited artist tag on gallery-regenerated images without stale comparison positions", async () => {
@@ -190,4 +256,57 @@ it("selects the current result set and permanently deletes the original image fi
   expect(fetchMock.mock.calls[1][0]).toBe("/api/v3/gallery/assets/delete");
   expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({paths: assets.map((item) => item.path)});
   expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("直接从磁盘删除"));
+});
+
+it("selects an inclusive Shift range across date groups and allows individual deselection", async () => {
+  const items = Array.from({length: 5}, (_, i) => ({...assets[0], path: `range-${i}.png`, name: `range-${i}.png`, created_at: `2026-08-${26-i}T12:00:00+08:00`}));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({items, projects: [], models: [], trash_count: 0})));
+  render(<GalleryPage enabled />);
+  fireEvent.click(await screen.findByRole("button", {name: "选择 range-1.png"}));
+  fireEvent.click(screen.getByRole("button", {name: "查看 range-4.png"}), {shiftKey: true});
+  expect(screen.getByText("已选择 4 项")).toBeInTheDocument();
+  expect(screen.queryByRole("dialog", {name: "图片详情"})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "取消选择 range-2.png"}));
+  expect(screen.getByText("已选择 3 项")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("排序"), {target: {value: "oldest"}});
+  expect(screen.queryByRole("region", {name: "批量操作"})).not.toBeInTheDocument();
+});
+
+it("keeps only failed trash items selected and retries only those items", async () => {
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: assets, projects: [], models: [], trash_count: 0})))
+    .mockResolvedValueOnce(new Response(JSON.stringify({moved: [assets[0].path], failed: [{path: assets[1].path, error: "文件正在使用"}]})))
+    .mockResolvedValueOnce(new Response(JSON.stringify({moved: [assets[1].path], failed: []})));
+  render(<GalleryPage enabled />);
+  await screen.findByAltText("one.png");
+  fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
+  fireEvent.click(screen.getByRole("button", {name: "移入回收站"}));
+  expect(await screen.findByText("已选择 1 项")).toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "取消选择 two.jpg"})).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", {name: "移入回收站"}));
+  await screen.findByText("图片已移入画廊回收站，可随时恢复。");
+  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({paths: [assets[1].path]});
+  expect(screen.queryByText("文件正在使用")).not.toBeInTheDocument();
+});
+
+it("marquee selects rendered cards, supports additive selection and Escape rollback", async () => {
+  const originalPointer = window.PointerEvent;
+  window.PointerEvent = class extends MouseEvent {pointerId = 1; pointerType = "mouse";} as typeof PointerEvent;
+  try {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({items: assets, projects: [], models: [], trash_count: 0})));
+    render(<GalleryPage enabled />); await screen.findByAltText("one.png");
+    const cards = document.querySelectorAll<HTMLElement>("[data-selection-path]");
+    cards.forEach((card, i) => vi.spyOn(card, "getBoundingClientRect").mockReturnValue({left: 20 + i*120, top: 20, right: 120+i*120, bottom: 120, width: 100, height: 100, x: 20+i*120, y: 20, toJSON: () => ({})}));
+    const grid = screen.getByLabelText("图片选择区域");
+    fireEvent.pointerDown(grid, {button: 0, clientX: 0, clientY: 0});
+    fireEvent.pointerMove(document, {clientX: 125, clientY: 125});
+    fireEvent.pointerUp(document);
+    expect(screen.getByText("已选择 1 项")).toBeInTheDocument();
+    fireEvent.pointerDown(grid, {button: 0, clientX: 130, clientY: 0, ctrlKey: true});
+    fireEvent.pointerMove(document, {clientX: 250, clientY: 130});
+    expect(screen.getByText("已选择 2 项")).toBeInTheDocument();
+    fireEvent.keyDown(document, {key: "Escape"});
+    expect(screen.getByText("已选择 1 项")).toBeInTheDocument();
+  } finally {window.PointerEvent = originalPointer;}
 });

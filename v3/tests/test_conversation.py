@@ -88,6 +88,22 @@ def test_first_compile_persists_and_restart_restores(conversation_client):
     assert len(captured) == 1  # no chargeable call for fresh empty delta
 
 
+def test_sampling_settings_save_preserves_compiled_prompt_and_token(conversation_client):
+    client, captured = conversation_client
+    first = turn(client, create(client)).json()
+    settings = {**first["draft"]["generation_settings"], "seed": "8798399215689017476", "steps": 31, "cfg": 4.5}
+    response = client.put(f"/api/v3/workspaces/{first['id']}", json={
+        "revision": first["revision"], "title": first["title"],
+        "draft": {"model_profile": first["draft"]["model_profile"], "mode": first["draft"]["mode"],
+                  "requirements_edit": edit(), "generation_settings": settings}})
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    assert saved["draft"]["compiled"] == first["draft"]["compiled"]
+    assert saved["draft"]["compile_state"] == "fresh"
+    assert saved["draft"]["generation_settings"]["seed"] == "8798399215689017476"
+    assert len(captured) == 1
+
+
 def test_mode_recompile_changes_token_even_when_text_identical(conversation_client):
     client, _ = conversation_client
     first = turn(client, create(client)).json()
@@ -545,10 +561,10 @@ def test_reasoning_model_error_is_actionable_and_preserves_draft(conversation_cl
     assert client.get('/api/v3/workspaces/' + workspace['id']).json()['draft'] == workspace['draft']
 
 
-def test_flags_stay_off_and_reference_catalog_reports_missing_pack(conversation_client):
+def test_conversation_is_default_and_reference_catalog_reports_missing_pack(conversation_client):
     client, _ = conversation_client
     features = client.get("/api/v3/bootstrap").json()["features"]
-    assert features["conversational_workbench"] is False
+    assert features["conversational_workbench"] is True
     assert features["reference_gallery"] is False
     catalog = client.get("/api/v3/reference-presets")
     assert catalog.status_code == 200

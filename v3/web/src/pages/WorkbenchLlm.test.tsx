@@ -8,7 +8,7 @@ import {resetDirectImportForTests} from "../lib/directPrompt";
 const settings = {services: [{id: "sample", name: "测试服务", type: "openai_compatible", base_url: "https://sample.example/v1", api_key_exists: true, api_key_masked: "***", llm_models: [{name: "sample-model", is_default: true}]}], current: {service: "sample", model: "sample-model"}};
 const target = {
   remote_profile_id: "cloud", remote_display_name: "测试云主机", workflow_profile_id: "workflow", workflow_display_name: "测试工作流",
-  workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_aesthetic_v1"], host_fingerprint_ready: true,
+  workflow_kind: "txt2img_basic", compatible_model_profiles: ["anima_aesthetic_v1_1"], host_fingerprint_ready: true,
   auth_type: "agent", private_key_passphrase_configured: false, availability: "ready",
   default_recipe_id: "stable_baseline", generation_recipes: [{id: "stable_baseline", display_name: "稳定基准", objective: "baseline", parameters: {steps: 30, cfg: 4, sampler: "er_sde", scheduler: "simple"}, notes: "test", evidence: "workflow_template"}],
   parameter_capabilities: {
@@ -72,7 +72,7 @@ it("sends exclusions, submits reviewed prompts with workflow/settings and blocks
   fireEvent.click(screen.getByText("用此提示词远程生图"));
   await waitFor(() => expect(requests.some((r) => r.url.endsWith("/direct-prompt/runs"))).toBe(true));
   const body = requests.find((r) => r.url.endsWith("/direct-prompt/runs"))!.body;
-  expect(body).toMatchObject({positive_prompt: "An ink painting of a white crane bird", negative_prompt: "text, watermark", remote_profile_id: "cloud", workflow_profile_id: "workflow", model_profile: "anima_aesthetic_v1"});
+  expect(body).toMatchObject({positive_prompt: "An ink painting of a white crane bird", negative_prompt: "text, watermark", remote_profile_id: "cloud", workflow_profile_id: "workflow", model_profile: "anima_aesthetic_v1_1"});
   expect(body.settings).toMatchObject({steps: 37, cfg: 4.5, seed: 20260907, sampler: "euler", scheduler: "simple"});
   fireEvent.change(screen.getByLabelText("明确排除（可选）"), {target: {value: "人物"}});
   expect(screen.getByText("用此提示词远程生图")).toBeDisabled();

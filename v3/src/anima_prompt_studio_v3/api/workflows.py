@@ -48,15 +48,28 @@ def register_workflow_routes(app, database, require_session):
         except (OSError, RuntimeError):
             return JSONResponse({"error": {"code": "workflow_remote_failed", "message": "读取失败，请检查服务器连接和文件路径。"}}, status_code=502)
 
+    @app.get(root + "/catalog", dependencies=[Depends(require_session)])
+    def library():
+        return guarded(manager.library)
+
+    @app.post(root + "/preview", dependencies=[Depends(require_session)])
+    def preview(payload: dict):
+        return guarded(lambda: manager.preview_import(payload))
+
     @app.get(root + "/servers/{remote_id}", dependencies=[Depends(require_session)])
     def report(remote_id: str):
-        return guarded(lambda: {**manager.report(remote_id), "inspection": jobs.status(remote_id)})
+        def read():
+            # A fast local check can finish while report() reads SQLite. Capture
+            # status first so an older report still tells the UI to poll again.
+            inspection = jobs.status(remote_id)
+            return {**manager.report(remote_id), "inspection": inspection}
+        return guarded(read)
 
     @app.post(root + "/servers/{remote_id}/inspect", dependencies=[Depends(require_session)])
     def inspect(remote_id: str, payload: RemoteConnectionTestRequest):
         def start():
             remote = manager.remote(remote_id)
-            if not remote.known_host_fingerprint or not remote.enabled:
+            if not remote.connection_ready or not remote.enabled:
                 raise ValueError("请启用连接并确认 SSH 指纹。")
             return jobs.start(remote_id, RemoteCredentials(
                 password=payload.password.get_secret_value() if payload.password else "",

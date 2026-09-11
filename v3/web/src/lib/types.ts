@@ -262,7 +262,7 @@ export interface ArtistComparisonInfo {
   rendered_artist: string;
   position?: number;
   total?: number;
-  seed?: number;
+  seed?: number | string;
   derived_from?: "gallery_regenerate";
   source_comparison_id?: string;
 }
@@ -270,7 +270,7 @@ export interface ArtistComparisonInfo {
 export interface ArtistComparisonSubmission {
   comparison_id: string;
   project_name: string;
-  seed: number;
+  seed: number | string;
   requested_count: number;
   submitted: Array<{artist: string; run: GenerationRunRecord}>;
   failed: Array<{artist: string; error: string}>;
@@ -472,7 +472,7 @@ export interface WorkbenchGenerationSettings {
   cfg: number;
   sampler: string;
   scheduler: string;
-  seed: number;
+  seed: number | string;
   batch_size: number;
   remote_profile_id?: string | null;
   workflow_profile_id?: string | null;

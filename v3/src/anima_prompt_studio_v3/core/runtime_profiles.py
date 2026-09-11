@@ -27,6 +27,8 @@ class V3RuntimeProfiles:
             p.id: p for p in (
                 RuntimeProfile("anima_base_v1", 35, 4.5, "er_sde", "normal"),
                 RuntimeProfile("anima_aesthetic_v1", 35, 4.5, "euler", "normal"),
+                RuntimeProfile("anima_aesthetic_v1_0", 35, 4.5, "euler", "normal"),
+                RuntimeProfile("anima_aesthetic_v1_1", 35, 4.5, "euler", "normal"),
                 RuntimeProfile("anima_turbo_v1", 10, 1, "er_sde", "simple"),
                 RuntimeProfile("anima_turbo_v1_1", 10, 1, "er_sde", "simple"),
                 RuntimeProfile("animayume_v1_0_final", 30, 5.5, "euler_ancestral", "normal"),

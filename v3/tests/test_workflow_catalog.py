@@ -43,6 +43,56 @@ def test_empty_database_uses_resources_without_seeding(manager):
         manager.resolve("server-a", "23_Turbo_v1.1")
 
 
+def test_local_library_and_preview_need_no_server(tmp_path):
+    manager = WorkflowCatalog(tmp_path / "offline.db")
+    library = manager.library()
+    assert len(library["items"]) == 9
+    assert all(item["revision"] and item["nodes"] for item in library["items"])
+    document = manager.export_profile("23_Turbo_v1.1")
+    document["profile"]["compatible_model_profiles"] = []
+    preview = manager.preview_import(document)
+    assert preview["profile"]["compatible_model_profiles"] == []
+    assert len(manager.library()["items"]) == 9
+    with pytest.raises(ValueError, match="兼容模型"):
+        manager.import_profile(preview)
+    preview["profile"]["compatible_model_profiles"] = ["anima_turbo_v1_1"]
+    preview["profile"]["display_name"] = "My confirmed template"
+    result = manager.import_profile(preview)
+    item = next(i for i in manager.library()["items"] if i["workflow_id"] == result["id"])
+    assert item["origin"] == "user"
+    assert item["model_profiles"] == ["anima_turbo_v1_1"]
+    assert item["source"]["id"] == "23_Turbo_v1.1"
+    assert item["source"]["revision"] == next(i["revision"] for i in library["items"] if i["workflow_id"] == "23_Turbo_v1.1")
+    assert manager.export_profile("23_Turbo_v1.1")["profile"]["display_name"] != "My confirmed template"
+
+
+def test_library_default_assets_do_not_follow_server_mapping(manager):
+    before = manager.library()
+    capabilities(manager, "server-a", "renamed.safetensors")
+    item = next(i for i in manager.report("server-a")["items"] if i["workflow_id"] == "23_Turbo_v1.1")
+    asset = next(a for a in item["assets"] if a["key"].endswith(".unet_name"))
+    manager.save_mapping("server-a", item["workflow_id"], item["revision"], {asset["key"]: "renamed.safetensors"})
+    assert manager.library() == before
+    mapped = next(i for i in manager.report("server-a")["items"] if i["workflow_id"] == item["workflow_id"])
+    resolved_asset = next(a for a in mapped["assets"] if a["key"] == asset["key"])
+    assert resolved_asset["value"] == "renamed.safetensors"
+    assert resolved_asset["template_value"] == asset["value"]
+
+
+def test_report_reuses_one_database_connection_without_changing_results(manager, monkeypatch):
+    capabilities(manager, "server-a")
+    expected = manager.report("server-a")
+    from anima_prompt_studio_v3.runtime import workflow_catalog as implementation
+    opened = []
+    def repository(path):
+        result = SQLiteRepository(path)
+        opened.append(result)
+        return result
+    monkeypatch.setattr(implementation, "SQLiteRepository", repository)
+    assert manager.report("server-a") == expected
+    assert len(opened) == 1
+
+
 @pytest.mark.parametrize("initial", ["unchecked", "stale", "connection_failed", "ready"])
 def test_submission_refreshes_only_when_needed(manager, monkeypatch, initial):
     from anima_prompt_studio.domain.execution_models import RemoteCredentials

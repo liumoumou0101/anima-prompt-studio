@@ -120,7 +120,8 @@ def test_health_session_exchange_is_one_time_and_bootstrap_is_protected(referenc
         "cutoff_mode": "approximate",
     }
     assert bootstrap.json()["model_profiles"] == [
-        "anima_aesthetic_v1",
+        "anima_aesthetic_v1_0",
+        "anima_aesthetic_v1_1",
         "anima_base_v1",
         "anima_turbo_v1",
         "anima_turbo_v1_1",
@@ -527,6 +528,8 @@ def test_workflow_management_requires_session_and_imports_copies(reference_db, t
     client = TestClient(runtime.app, base_url=ORIGIN)
     path = "/api/v3/workflows/servers/workflow-server"
     assert client.get(path).status_code == 401
+    assert client.get("/api/v3/workflows/catalog").status_code == 401
+    assert client.post("/api/v3/workflows/preview", json={}, headers={"Origin": ORIGIN}).status_code == 401
     exchanged = client.post("/api/v3/session/exchange", json={"bootstrap_token": runtime.bootstrap_token}, headers={"Origin": ORIGIN})
     headers = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
     report = client.get(path, headers=headers)
@@ -534,6 +537,12 @@ def test_workflow_management_requires_session_and_imports_copies(reference_db, t
     assert len(report.json()["items"]) == 9
     assert all(i["state"] == "unchecked" for i in report.json()["items"])
     exported = client.get("/api/v3/workflows/export/23_Turbo_v1.1", headers=headers)
+    library = client.get("/api/v3/workflows/catalog", headers=headers)
+    assert library.status_code == 200
+    assert len(library.json()["items"]) == 9
+    preview = client.post("/api/v3/workflows/preview", json=exported.json(), headers=headers)
+    assert preview.status_code == 200
+    assert len(catalog(database)) == 9
     imported = client.post("/api/v3/workflows/import", json=exported.json(), headers=headers)
     assert imported.status_code == 200
     assert imported.json()["id"].startswith("user:")

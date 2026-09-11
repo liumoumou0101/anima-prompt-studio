@@ -1,5 +1,5 @@
 import {NavLink, Outlet} from "react-router-dom";
-import {ChatCircleDots, GearSix, Hash, Images, ImageSquare, PaintBrush, TextAlignLeft} from "@phosphor-icons/react";
+import {ChatCircleDots, GearSix, Hash, Images, ImageSquare, PaintBrush, TextAlignLeft, FlowArrow} from "@phosphor-icons/react";
 import type {BootstrapResponse} from "../lib/types";
 
 const nav = [
@@ -9,6 +9,8 @@ const nav = [
   {to: "/artists", icon: PaintBrush, label: "画师", enabled: true},
   {to: "/generate", icon: ImageSquare, label: "生成", enabled: true},
   {to: "/gallery", icon: Images, label: "画廊", enabled: true},
+  {to: "/workflows", icon: FlowArrow, label: "工作流", enabled: true},
+  {to: "/references", icon: Images, label: "参考案例", enabled: true},
 ];
 
 export function AppShell({bootstrap}: {bootstrap: BootstrapResponse}) {

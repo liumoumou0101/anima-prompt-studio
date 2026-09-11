@@ -43,6 +43,7 @@ ACTIVE_RUN_STATES = {
 
 
 class RemoteProfile(BaseModel):
+    connection_type: Literal["ssh", "local"] = "ssh"
     id: str = Field(default_factory=lambda: str(uuid4()))
     provider_preset_id: str = "compshare_container"
     display_name: str = "云端 ComfyUI"
@@ -58,6 +59,10 @@ class RemoteProfile(BaseModel):
     startup_command: str = ""
     model_aliases: dict[str, str] = Field(default_factory=dict)
     enabled: bool = True
+
+    @property
+    def connection_ready(self) -> bool:
+        return self.connection_type == "local" or bool(self.known_host_fingerprint.strip())
 
 
 class WorkflowBinding(BaseModel):

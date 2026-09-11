@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import threading
+import time
+from contextlib import contextmanager
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +21,7 @@ from anima_prompt_studio.domain.models import PromptJob
 from anima_prompt_studio_v3.remote.comfy_client import ComfyAPIError, ComfyUIClient
 from anima_prompt_studio_v3.remote.result_organizer import ResultOrganizer
 from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
+from anima_prompt_studio_v3.remote.local_connection import LocalComfyConnection
 from anima_prompt_studio_v3.core.workflow_compiler import V3WorkflowCompiler
 
 
@@ -116,32 +119,43 @@ class RemoteExecutionCoordinator:
     ) -> ExecutionResult:
         self._cancel.clear()
         artifacts: list[GenerationArtifact] = []
+        preparation_started = time.monotonic()
+        timing = {}
+        run.request_json.setdefault("execution_timings", []).append(timing)
         try:
-            self._update(run, GenerationRunState.CONNECTING, "正在连接云主机", 0.05)
-            tunnel = self.tunnel_factory(remote_profile)
+            self._update(run, GenerationRunState.CONNECTING, "正在连接 ComfyUI", 0.05)
+            tunnel = (LocalComfyConnection if remote_profile.connection_type == "local" else self.tunnel_factory)(remote_profile)
             with tunnel:
-                tunnel.open(credentials or RemoteCredentials())
+                with self._timed(timing, "local_open" if remote_profile.connection_type == "local" else "ssh_open"):
+                    tunnel.open(credentials or RemoteCredentials())
                 client = self.client_factory(tunnel.base_url)
                 self._active_client = client
-                client.validate_environment()
+                self._update(run, GenerationRunState.CONNECTING, "正在检查 ComfyUI 环境", 0.09)
+                with self._timed(timing, "environment"):
+                    client.validate_environment()
 
                 if not resume:
                     self._update(run, GenerationRunState.PREPARING, "正在准备 ComfyUI 工作流", 0.12)
-                    rendered = self.renderer.render(
-                        job,
-                        workflow_profile,
-                        remote_profile,
-                        checkpoint_logical_name,
-                        run.id,
-                    )
-                    missing_nodes = client.validate_workflow_nodes(rendered.workflow)
+                    with self._timed(timing, "compile"):
+                        rendered = self.renderer.render(
+                            job,
+                            workflow_profile,
+                            remote_profile,
+                            checkpoint_logical_name,
+                            run.id,
+                        )
+                    self._update(run, GenerationRunState.PREPARING, "正在读取并检查 ComfyUI 节点", 0.14)
+                    with self._timed(timing, "node_validation"):
+                        missing_nodes = client.validate_workflow_nodes(rendered.workflow)
                     if missing_nodes:
                         raise ComfyAPIError(
                             "云端缺少工作流节点：" + ", ".join(missing_nodes),
                             code="missing_nodes",
                         )
                     input_validator = getattr(client, "validate_workflow_inputs", None)
-                    invalid_inputs = input_validator(rendered.workflow) if callable(input_validator) else []
+                    self._update(run, GenerationRunState.PREPARING, "正在校验模型文件与采样参数", 0.16)
+                    with self._timed(timing, "input_validation"):
+                        invalid_inputs = input_validator(rendered.workflow) if callable(input_validator) else []
                     if invalid_inputs:
                         raise ComfyAPIError(
                             "云端工作流参数预检失败：" + "；".join(invalid_inputs),
@@ -156,7 +170,9 @@ class RemoteExecutionCoordinator:
                     if run.request_json.get("submission_id"):
                         run.request_json["submission_attempted"] = True
                         self._update(run, GenerationRunState.PREPARING, "正在提交远端，请勿重复生成", run.progress)
-                    run.remote_prompt_id = client.submit(rendered.workflow, run.client_id, requested_prompt_id)
+                    with self._timed(timing, "submit"):
+                        run.remote_prompt_id = client.submit(rendered.workflow, run.client_id, requested_prompt_id)
+                    timing["prepare_total_ms"] = round((time.monotonic() - preparation_started) * 1000, 3)
                     self._active_prompt_id = run.remote_prompt_id
                     self._update(run, GenerationRunState.QUEUED, "已提交到 ComfyUI 队列", 0.2)
                 else:
@@ -220,6 +236,15 @@ class RemoteExecutionCoordinator:
         finally:
             self._active_client = None
             self._active_prompt_id = ""
+
+    @staticmethod
+    @contextmanager
+    def _timed(timing: dict, stage: str):
+        started = time.monotonic()
+        try:
+            yield
+        finally:
+            timing[stage + "_ms"] = round((time.monotonic() - started) * 1000, 3)
 
     def _remote_state(self, run: GenerationRun, state: str, message: str) -> None:
         if state == "running":

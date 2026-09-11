@@ -43,12 +43,12 @@
     "v3_aesthetic_v1_1": {
       "version": "1.0.0",
       "tier": "baseline",
-      "model": "anima_aesthetic_v1"
+      "model": "anima_aesthetic_v1_1"
     },
     "v3_aesthetic_v1_0": {
       "version": "1.0.0",
       "tier": "baseline",
-      "model": "anima_aesthetic_v1"
+      "model": "anima_aesthetic_v1_0"
     }
   }
 }

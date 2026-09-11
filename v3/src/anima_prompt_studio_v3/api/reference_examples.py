@@ -15,6 +15,8 @@ from starlette.datastructures import UploadFile
 from .conversation import WorkspaceCommand
 from .reference_ingest import IngestRequest, IngestService
 from ..core.requirements import ContractModel, PinRole, Requirements, apply_pin, dump
+from ..core.requirements import PromptEdit, compile_prompt
+from .models import WorkspaceDraft, WorkbenchGenerationSettings
 from ..storage.reference_examples import (
     ExampleMetadata, ExampleNotes, ExamplePatch, ExampleStore, MAX_IMAGE_BYTES, fail, now,
 )
@@ -49,6 +51,15 @@ class GalleryCopy(ContractModel):
 
 class RunCopy(GalleryCopy):
     run_id: str = Field(min_length=1, max_length=200)
+
+
+class StartExample(OfficialCopy):
+    mode: Literal["requirements", "generation"]
+    role: PinRole = "whole_scene"
+
+
+class ContinueGeneration(ContractModel):
+    pass
 
 
 def register_reference_routes(app, workspace_db, require_session):
@@ -132,7 +143,17 @@ def register_reference_routes(app, workspace_db, require_session):
     @app.post(prefix + "/from-gallery", dependencies=dependencies, status_code=201)
     def from_gallery(payload: GalleryCopy):
         path, data = gallery_bytes(payload.path)
-        return store.create(data, path.stem[:200], ExampleMetadata(), origin="gallery_keep", origin_ref=payload.path)
+        gallery = app.state.gallery_service
+        assets = gallery.list_assets(limit=1000)["items"] if hasattr(gallery, "list_assets") else []
+        asset = next((item for item in assets if item["path"] == payload.path), {})
+        service = app.state.submission_service
+        if asset.get("batch_id") and service and service.store.for_runs([asset["batch_id"]]):
+            return from_run(RunCopy(path=payload.path, run_id=asset["batch_id"]))
+        positive, negative = asset.get("positive_prompt", ""), asset.get("negative_prompt", "")
+        notes = ExampleNotes(external_prompt=(f"正向：{positive}\n负向：{negative}" if positive or negative else "")[:20000])
+        return store.create(data, path.stem[:200], ExampleMetadata(notes=notes), origin="gallery_keep", origin_ref=payload.path,
+            provenance={"positive": positive, "negative": negative, "model_profile": asset.get("model_profile", ""),
+                        "settings": asset.get("generation_params", {}), "source": "gallery_metadata"})
 
     @app.post(prefix + "/from-run", dependencies=dependencies, status_code=201)
     def from_run(payload: RunCopy):
@@ -155,13 +176,76 @@ def register_reference_routes(app, workspace_db, require_session):
         # Only explicitly selected fields cross the API boundary; snapshots may contain local paths.
         verified = {key: provenance.get(key) for key in ("positive", "negative", "model_profile", "settings", "workflow_snapshot_ref")}
         verified["run_id"] = payload.run_id
-        return store.create(data, path.stem[:200], ExampleMetadata(), origin="session_pin", origin_ref=payload.run_id,
+        from copy import deepcopy
+        from ..core.seeds import display_seed
+        verified = deepcopy(verified)
+        if isinstance(verified.get("settings"), dict) and isinstance(verified["settings"].get("seed"), int):
+            verified["settings"]["seed"] = display_seed(verified["settings"]["seed"])
+        notes = ExampleNotes(external_prompt=f"正向：{verified.get('positive') or ''}\n负向：{verified.get('negative') or ''}"[:20000])
+        return store.create(data, path.stem[:200], ExampleMetadata(notes=notes), origin="session_pin", origin_ref=payload.run_id,
             requirements=provenance.get("requirements"), provenance=verified,
             compat={"model_profiles": [provenance["model_profile"]], "workflow_snapshot_ref": payload.run_id})
 
     @app.get(prefix + "/{example_id}", dependencies=dependencies)
     def get_example(example_id: str):
         return store.get(example_id)
+
+    def create_generation_workspace(run_id, title=None):
+        service = app.state.submission_service
+        entries = service.store.for_runs([run_id]) if service and run_id else []
+        if not entries:
+            fail("reference_preset_unavailable", "没有可用的原始生成快照。")
+        snapshot = entries[0]["snapshot"]
+        original, run = snapshot["provenance"], snapshot["run"]
+        if not snapshot.get("workflow"):
+            fail("workflow_snapshot_missing", "原始工作流快照缺失。")
+        model = original["model_profile"]
+        values = {k: v for k, v in original["settings"].items() if k in WorkbenchGenerationSettings.model_fields}
+        values.update(preset_id="custom", aspect="custom", remote_profile_id=run["remote_profile_id"], workflow_profile_id=run["workflow_profile_id"])
+        settings = WorkbenchGenerationSettings.model_validate(values)
+        requirements = Requirements.model_validate(original["requirements"]) if original.get("requirements") else Requirements.empty()
+        # Direct-prompt runs can have LoRAs without structured creative requirements.
+        if "resources" in snapshot:
+            requirements = Requirements.model_validate({**dump(requirements), "loras": snapshot["resources"]})
+        prompt = PromptEdit(positive=original["positive"], negative=original["negative"])
+        draft = WorkspaceDraft(model_profile=model, generation_settings=settings).persistence_payload()
+        title = title or "继续 · " + (requirements.layers.subject.text or original["positive"])[:40]
+        record = app.state.workspace_store.create(title[:200], draft)
+        def populate(draft):
+            draft["requirements"] = dump(requirements)
+            draft["generation_source"] = dict(run_id=run_id, remote_profile_id=run["remote_profile_id"], workflow_profile_id=run["workflow_profile_id"], model_profile=model)
+            draft["compiled"] = compile_prompt(draft, prompt, source="user")
+            return draft
+        return app.state.workspace_store.transform(record["id"], expected_revision=record["revision"], operation=populate)
+
+    @app.post("/api/v3/generation-runs/{run_id}/workspace", dependencies=dependencies, status_code=201)
+    def continue_generation(run_id: str, payload: ContinueGeneration):
+        return create_generation_workspace(run_id)
+
+    @app.post(prefix + "/{example_id}/workspace", dependencies=dependencies, status_code=201)
+    def start_workspace(example_id: str, payload: StartExample):
+        source = store.get(example_id, payload.source_version)
+        if payload.mode == "generation":
+            return create_generation_workspace((source.get("provenance") or {}).get("run_id"), "参考 · " + source["title"])
+        if not source["requirements_valid"]:
+            fail("empty_requirements", "请先编辑或提取参考要求。")
+        requirements = apply_pin(Requirements.empty(), Requirements.model_validate(source["requirements"]), payload.role)
+        model = source["compat"]["model_profiles"][0] if source["compat"]["model_profiles"] else "anima_aesthetic_v1_1"
+        draft = WorkspaceDraft(model_profile=model, generation_settings=WorkbenchGenerationSettings()).persistence_payload()
+        record = app.state.workspace_store.create(("参考 · " + source["title"])[:200], draft)
+        def populate(draft):
+            draft["requirements"] = dump(requirements)
+            draft["reference_pin"] = dict(example_id=example_id, source_version=payload.source_version, role=payload.role,
+                pinned_at=now(), source_snapshot={"requirements": source["requirements"], "compat": source["compat"]})
+            return draft
+        return app.state.workspace_store.transform(record["id"], expected_revision=record["revision"], operation=populate)
+
+    @app.delete("/api/v3/workbench/generation-source", dependencies=dependencies)
+    def detach_generation_source(payload: WorkspaceCommand):
+        def operation(draft):
+            draft["generation_source"] = None
+            return draft
+        return app.state.workspace_store.transform(payload.workspace_id, expected_revision=payload.revision, operation=operation)
 
     @app.patch(prefix + "/{example_id}/notes", dependencies=dependencies)
     def official_notes(example_id: str, payload: OfficialNotes):
@@ -184,11 +268,14 @@ def register_reference_routes(app, workspace_db, require_session):
         store.delete(example_id, payload.revision)
         return Response(status_code=204)
 
+    # Browser image requests use the existing gallery-scoped HttpOnly session cookie.
+    @app.get("/api/v3/gallery/reference-examples/{example_id}/content", dependencies=dependencies)
     @app.get(prefix + "/{example_id}/content", dependencies=dependencies)
     def example_content(example_id: str):
         path, mime = store.content(example_id)
         return FileResponse(path, media_type=mime, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
+    @app.get("/api/v3/gallery/reference-examples/{example_id}/thumbnail", dependencies=dependencies)
     @app.get(prefix + "/{example_id}/thumbnail", dependencies=dependencies)
     def example_thumbnail(example_id: str, size: int = Query(default=320, ge=64, le=1024)):
         return Response(store.thumbnail(example_id, size), media_type="image/jpeg", headers={"Cache-Control": "no-store"})

@@ -181,7 +181,7 @@
   "workflow_kind": "txt2img_basic",
   "lora_slots": [],
   "compatible_model_profiles": [
-    "anima_aesthetic_v1"
+    "anima_aesthetic_v1_0"
   ],
   "runtime_assets": {
     "checkpoint": "anima-aesthetic-v1.0.safetensors",

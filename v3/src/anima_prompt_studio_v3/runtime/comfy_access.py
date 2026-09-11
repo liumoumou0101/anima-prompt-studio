@@ -10,6 +10,7 @@ from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 from anima_prompt_studio_v3.remote.comfy_client import ComfyUIClient
 from anima_prompt_studio_v3.remote.credential_store import CredentialStore
 from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
+from anima_prompt_studio_v3.remote.local_connection import LocalComfyConnection
 
 
 COMFY_ACCESS_HOST = "127.0.0.1"
@@ -40,6 +41,7 @@ class ManagedComfyAccess:
         self._tunnel: SshTunnel | None = None
         self._profile_id = ""
         self._profile_name = ""
+        self._profile_snapshot = None
         self._state = "stopped"
         self._message = "维护隧道尚未连接。"
         self._devices: list[str] = []
@@ -50,6 +52,8 @@ class ManagedComfyAccess:
 
     @property
     def local_url(self) -> str:
+        if isinstance(self._tunnel, LocalComfyConnection):
+            return self._tunnel.base_url
         return f"http://{COMFY_ACCESS_HOST}:{self.local_port}"
 
     def status(self) -> dict[str, Any]:
@@ -91,7 +95,7 @@ class ManagedComfyAccess:
             with self._state_lock:
                 if self._closing:
                     raise RuntimeError("应用正在关闭，不能建立 ComfyUI 维护隧道。")
-                if self._profile_id == profile.id and self._tunnel_is_active():
+                if profile.connection_type == "ssh" and self._profile_snapshot == profile and self._tunnel_is_active():
                     return self.status()
                 self._state = "connecting"
                 self._profile_id = profile.id
@@ -100,7 +104,7 @@ class ManagedComfyAccess:
 
             credentials = self._credentials(profile, password=password, passphrase=passphrase)
             self._close_current_tunnel()
-            tunnel = self.tunnel_factory(
+            tunnel = (LocalComfyConnection if profile.connection_type == "local" else self.tunnel_factory)(
                 profile,
                 local_bind_host=COMFY_ACCESS_HOST,
                 local_bind_port=self.local_port,
@@ -123,8 +127,10 @@ class ManagedComfyAccess:
                     tunnel.close()
                     raise RuntimeError("应用正在关闭，已取消 ComfyUI 维护隧道。")
                 self._tunnel = tunnel
+                self._profile_snapshot = profile.model_copy(deep=True)
                 self._state = "ready"
-                self._message = f"ComfyUI 网页已通过本机安全隧道连接到 {profile.display_name}。"
+                self._message = (f"已连接本地 ComfyUI：{tunnel.base_url}" if profile.connection_type == "local"
+                                 else f"ComfyUI 网页已通过本机安全隧道连接到 {profile.display_name}。")
                 self._devices = list(report.devices)
                 self._queue_running = int(report.queue_running)
                 self._queue_pending = int(report.queue_pending)
@@ -171,19 +177,21 @@ class ManagedComfyAccess:
             repository.close()
         if not profile.enabled:
             raise ValueError("所选云主机已停用。")
-        if not profile.known_host_fingerprint.strip():
+        if not profile.connection_ready:
             raise ValueError("请先检测并确认 SSH 主机指纹。")
         return profile
 
     def _credentials(self, profile, *, password: str, passphrase: str) -> RemoteCredentials:
-        if profile.auth_type == RemoteAuthType.PASSWORD and not password:
+        if profile.connection_type == "ssh" and profile.auth_type == RemoteAuthType.PASSWORD and not password:
             password = self.credential_store.read_password(profile.id)
-        if profile.auth_type == RemoteAuthType.PASSWORD and not password:
+        if profile.connection_type == "ssh" and profile.auth_type == RemoteAuthType.PASSWORD and not password:
             raise ValueError("没有可用的 SSH 密码；请在设置中填写并保存密码。")
         return RemoteCredentials(password=password, passphrase=passphrase)
 
     def _tunnel_is_active(self) -> bool:
         tunnel = self._tunnel
+        if isinstance(tunnel, LocalComfyConnection):
+            return tunnel.active
         if tunnel is None or tunnel.client is None or tunnel.server is None:
             return False
         transport = tunnel.client.get_transport()

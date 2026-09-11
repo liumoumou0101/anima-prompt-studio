@@ -64,7 +64,7 @@ export function applyAspect(
 
 export function resolvedGenerationSettings(
   settings: WorkbenchGenerationSettings,
-  overrides: {seed?: number; batch_size?: number} = {},
+  overrides: {seed?: number | string; batch_size?: number} = {},
 ) {
   const size = settings.aspect === "model_default"
     ? null
@@ -81,4 +81,28 @@ export function resolvedGenerationSettings(
     seed: overrides.seed ?? settings.seed,
     batch_size: overrides.batch_size ?? settings.batch_size,
   };
+}
+
+// Keep large seeds as decimal text until Python converts them to exact integers.
+export function seedInput(value: string): number | string {
+  if (!/^-?\d+$/.test(value)) return value;
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : value;
+}
+
+// A model change starts a new sampling recipe. Target refreshes within the same
+// model still use applyGenerationRecipe to retain saved/manual parameters.
+export function changeGenerationModel(
+  settings: WorkbenchGenerationSettings,
+  target?: GenerationTarget,
+): WorkbenchGenerationSettings {
+  const next = {...settings, preset_id: "stable_baseline", workflow_profile_id: null};
+  return target ? applyGenerationRecipe(next, target, target.default_recipe_id) : next;
+}
+
+export function validSeed(value: number | string, allowRandom = true): boolean {
+  if (typeof value === "number" && !Number.isSafeInteger(value)) return false;
+  if (!/^-?\d{1,19}$/.test(String(value))) return false;
+  const seed = BigInt(value);
+  return seed >= (allowRandom ? -1n : 0n) && seed <= 9223372036854775807n;
 }

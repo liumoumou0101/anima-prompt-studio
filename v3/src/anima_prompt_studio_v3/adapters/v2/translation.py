@@ -3,12 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from anima_prompt_studio.services.resource_manager import ResourceManager
 from anima_prompt_studio.services.translation_service import (
     BuiltinOfflineEngine,
-    LazyLocalMarianEngine,
     TranslationService,
-    marian_runtime_available,
 )
 from ...core.prompt_translation import translate_prompt
 
@@ -25,8 +22,8 @@ class V2LocalTranslationAdapter:
     """Thin, local-only adapter around V2's reviewed translation service.
 
     Translation is intentionally separate from V3 intent extraction and prompt
-    compilation. Local Marian models are selected only when they already exist;
-    this adapter never downloads resources.
+    compilation. V3 uses the lightweight built-in dictionary only;
+    it never discovers, loads, or downloads local neural translation models.
     """
 
     def __init__(self, service: TranslationService, *, model_ready: bool) -> None:
@@ -56,11 +53,6 @@ class V2LocalTranslationAdapter:
 def build_v2_local_translation_adapter(
     resource_root: Path | None = None,
 ) -> V2LocalTranslationAdapter:
-    resources = ResourceManager(resource_root)
-    model_ready = resources.models_available() and marian_runtime_available()
-    engine = (
-        LazyLocalMarianEngine(resources.model_path("zh_en"), resources.model_path("en_zh"))
-        if model_ready
-        else BuiltinOfflineEngine()
-    )
-    return V2LocalTranslationAdapter(TranslationService(engine), model_ready=model_ready)
+    # Keep the argument for callers using the old factory signature. Existing
+    # model directories remain untouched and are no longer inspected by V3.
+    return V2LocalTranslationAdapter(TranslationService(BuiltinOfflineEngine()), model_ready=False)

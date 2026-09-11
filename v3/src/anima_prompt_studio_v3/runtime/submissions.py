@@ -5,6 +5,7 @@ import secrets
 from copy import deepcopy
 import logging
 import sqlite3
+import time
 from threading import Event, Thread
 from uuid import uuid4
 
@@ -15,10 +16,16 @@ from ..core.requirements import PromptEdit, RequirementLora, WorkbenchError, com
 from ..storage.generation_submissions import SubmissionStore, IdempotencyConflict
 from .generation import PreparedGeneration
 from .workflow_catalog import fingerprint
+from ..core.model_versions import matches_model_declaration
 
 
 def payload_digest(payload, endpoint):
-    return digest({"endpoint": endpoint, "payload": payload.model_dump(mode="json", by_alias=True)})
+    data = payload.model_dump(mode="json", by_alias=True)
+    # Keep the historical integer canonical form across browser string transport.
+    # Existing receipts must remain replayable after the precision fix.
+    if hasattr(payload, "settings") and "settings" in data:
+        data["settings"]["seed"] = payload.settings.seed
+    return digest({"endpoint": endpoint, "payload": data})
 
 
 class SubmissionService:
@@ -36,7 +43,8 @@ class SubmissionService:
             self.worker.start()
             self.wake.set()
 
-    def submit(self, payload, key, endpoint, prepare):
+    def submit(self, payload, key, endpoint, prepare, *, expected_snapshot=None):
+        started = time.monotonic()
         key = key.strip()
         if not key or len(key) > 256:
             raise WorkbenchError("invalid_request", "幂等键必须是 1–256 个字符。")
@@ -73,11 +81,30 @@ class SubmissionService:
             resources = [RequirementLora.model_validate(item) for item in reference["requirements"]["loras"] if item["required"]]
         else:
             resources = [RequirementLora.model_validate(item.model_dump()) for item in payload.lora_selection]
+        if expected_snapshot is not None:
+            resources = [RequirementLora.model_validate(item) for item in expected_snapshot["resources"]]
+        prepare_started = time.monotonic()
         prepared = prepare()
+        preparation_ms = round((time.monotonic() - prepare_started) * 1000, 3)
         if workspace and prepared.job.model_profile_id != workspace["draft"]["model_profile"]:
             raise WorkbenchError("stale_compiled_prompt", "请求模型与已编译的草稿不一致。")
         frozen = None
-        if payload.workflow_snapshot_run_id:
+        generation_source = workspace["draft"].get("generation_source") if workspace else None
+        if generation_source:
+            from .generation_queue import GenerationRunNotFoundError
+            if (payload.remote_profile_id != generation_source["remote_profile_id"]
+                    or payload.workflow_profile_id != generation_source["workflow_profile_id"]
+                    or payload.model_profile != generation_source["model_profile"]):
+                raise WorkbenchError("incompatible_workflow", "请先解除原工作流快照，再更换模型或执行目标。")
+            try:
+                frozen = self.queue.get(generation_source["run_id"]).request_json.get("workflow_snapshot")
+            except GenerationRunNotFoundError:
+                raise WorkbenchError("workflow_snapshot_missing", "原任务快照不可用，请解除来源后明确选择新工作流。") from None
+            if not frozen:
+                raise WorkbenchError("workflow_snapshot_missing", "原任务没有可用工作流快照。")
+        if expected_snapshot is not None:
+            frozen = deepcopy(expected_snapshot["workflow"])
+        elif payload.workflow_snapshot_run_id and not generation_source:
             from .generation_queue import GenerationRunNotFoundError
             try:
                 run = self.queue.get(payload.workflow_snapshot_run_id)
@@ -86,12 +113,20 @@ class SubmissionService:
             frozen = run.request_json.get("workflow_snapshot")
             if not frozen:
                 raise WorkbenchError("workflow_snapshot_missing", "原任务没有可用工作流快照。")
+        resolution_started = time.monotonic()
         prepared, target, resolution = self.queue.plan(prepared, payload.remote_profile_id,
                                                       payload.workflow_profile_id, resources, frozen)
+        resolution_ms = round((time.monotonic() - resolution_started) * 1000, 3)
+        if expected_snapshot is not None and (
+            fingerprint(target.remote_profile) != expected_snapshot["remote_fingerprint"]
+            or resolution["bindings"] != expected_snapshot["resolution"]["bindings"]
+            or digest(target.workflow_profile.model_dump(mode="json")) != digest(expected_snapshot["workflow"])
+        ):
+            raise WorkbenchError("gallery_source_changed", "原图的连接或资源映射已变化，请到会话工作台明确选择新的生成条件。")
         compat = (reference["compat"] if reference else workspace["draft"]["reference_pin"]["source_snapshot"]["compat"]
                   if workspace and workspace["draft"]["reference_pin"] else None)
         if compat:
-            if (compat["model_profiles"] and prepared.job.model_profile_id not in compat["model_profiles"]
+            if (compat["model_profiles"] and not matches_model_declaration(prepared.job.model_profile_id, compat["model_profiles"])
                     or compat["workflow_kinds"] and target.workflow_profile.workflow_kind not in compat["workflow_kinds"]):
                 raise WorkbenchError("reference_preset_unavailable", "当前目标不符合已钉选来源的兼容声明。")
         if prepared.job.generation_params.seed == -1:
@@ -99,7 +134,11 @@ class SubmissionService:
         sid = "sub_" + uuid4().hex
         run = GenerationRun(prompt_job_id=prepared.job.id, remote_profile_id=payload.remote_profile_id,
                             workflow_profile_id=payload.workflow_profile_id, status_message="已接受，等待入队",
-                            request_json={"submission_id": sid, "prompt_job": prepared.job.model_dump(mode="json"),
+                            request_json={"submission_id": sid,
+                                          "acceptance_timings_ms": {"prepare_job": preparation_ms,
+                                              "resolve_target": resolution_ms,
+                                              "before_persistence": round((time.monotonic() - started) * 1000, 3)},
+                                          "prompt_job": prepared.job.model_dump(mode="json"),
                                           "workflow_snapshot": target.workflow_profile.model_dump(mode="json"),
                                           "local_queue": {"idempotency_key": key, "payload_hash": request_hash}})
         snapshot = {"run": run.model_dump(mode="json"), "job": prepared.job.model_dump(mode="json"),

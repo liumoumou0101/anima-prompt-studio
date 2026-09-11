@@ -2,8 +2,8 @@ import {useEffect, useMemo, useRef, useState} from "react";
 import {useNavigate} from "react-router-dom";
 import {ApiClientError, apiRequest} from "../lib/api";
 import {storeDirectImport} from "../lib/directPrompt";
-import {applyAspect, applyGenerationRecipe, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
-import {modelProfileChoices} from "../lib/modelProfiles";
+import {seedInput, applyAspect, applyGenerationRecipe, changeGenerationModel, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
+import {modelProfileChoices, LEGACY_AESTHETIC, resolveLegacyAesthetic} from "../lib/modelProfiles";
 import {targetReady, defaultTarget, targetStatus} from "../lib/workflowTargets";
 import type {DirectPromptPreview, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, ModelProfileOption, WorkbenchGenerationSettings} from "../lib/types";
 import {ErrorState} from "../components/States";
@@ -25,7 +25,7 @@ const emptyDraft: DirectDraft = {
   project_name: "英文提示词直出",
   positive_prompt: "",
   negative_prompt: "",
-  model_profile: "anima_aesthetic_v1",
+  model_profile: "anima_aesthetic_v1_1",
   generation_settings: defaultGenerationSettings(),
 };
 
@@ -40,6 +40,10 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
   const [generationBusy, setGenerationBusy] = useState(false);
   const [targetsBusy, setTargetsBusy] = useState(false);
   const [generationTargets, setGenerationTargets] = useState<GenerationTarget[]>([]);
+  useEffect(() => {
+    const model = resolveLegacyAesthetic(draft.model_profile, draft.generation_settings!, generationTargets);
+    if (model !== draft.model_profile) editDraft({model_profile: model});
+  }, [draft.model_profile, draft.generation_settings, generationTargets]);
   const [selectedTarget, setSelectedTarget] = useState(() => {
     if (draft.generation_settings.remote_profile_id && draft.generation_settings.workflow_profile_id) return `${draft.generation_settings.remote_profile_id}::${draft.generation_settings.workflow_profile_id}`;
     try { return localStorage.getItem(GENERATION_TARGET_KEY) || ""; } catch { return ""; }
@@ -56,7 +60,7 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
   const targetRequest = useRef<Promise<GenerationTarget[]> | null>(null);
 
   const compatibleTargets = useMemo(() => generationTargets.filter((target) => (
-    target.compatible_model_profiles.includes(draft.model_profile)
+    draft.model_profile !== LEGACY_AESTHETIC && target.compatible_model_profiles.includes(draft.model_profile)
   )), [generationTargets, draft.model_profile]);
   const remoteConnections = useMemo(() => {
     const unique = new Map<string, GenerationTarget>();
@@ -239,8 +243,8 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
       || defaultTarget(generationTargets.filter((item) => item.compatible_model_profiles.includes(modelProfile)));
     if (target) {
       setSelectedTarget(targetKey(target));
-      editDraft({model_profile: modelProfile, generation_settings: applyGenerationRecipe(settings, target)});
-    } else editDraft({model_profile: modelProfile});
+      editDraft({model_profile: modelProfile, generation_settings: changeGenerationModel(settings, target)});
+    } else editDraft({model_profile: modelProfile, generation_settings: changeGenerationModel(settings)});
   }
 
   return (
@@ -270,6 +274,7 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
           <p className="natural-mode-hint">工作台编译会把 `black hair ribbons` 拆成黑发，把 `lineart` 当成线稿。直出页按逗号保留整词，生图时不改原文。</p>
           <label htmlFor="direct-model">模型配置</label>
           <select id="direct-model" value={draft.model_profile} onChange={(event) => changeModel(event.target.value)}>
+                {draft.model_profile === LEGACY_AESTHETIC && <option value={LEGACY_AESTHETIC} disabled>旧美学配置：请选择 v1.0 或 v1.1</option>}
             {profiles.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
           <div className="generation-spec">
@@ -307,7 +312,7 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
               </div>
             </details>
             <label htmlFor="direct-seed">Seed</label>
-            <input id="direct-seed" type="number" min="-1" max="2147483647" value={settings.seed} onChange={(event) => editDraft({generation_settings: {...settings, seed: Number(event.target.value)}})} />
+            <input id="direct-seed" type="text" inputMode="numeric" value={settings.seed} onChange={(event) => editDraft({generation_settings: {...settings, seed: seedInput(event.target.value)}})} />
             <label htmlFor="direct-batch">批量</label>
             <input id="direct-batch" type="number" min="1" max="8" value={settings.batch_size} onChange={(event) => editDraft({generation_settings: {...settings, batch_size: Math.max(1, Number(event.target.value) || 1)}})} />
           </div>
@@ -329,7 +334,7 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
             <button type="button" disabled={targetsBusy} onClick={() => void loadGenerationTargets().catch(caught => setNotice((caught as ApiClientError).message))}>刷新工作流状态</button>
           </div>}
           <button className="button generate-button" type="submit" disabled={!draft.positive_prompt.trim() || previewBusy}>{previewBusy ? "正在匹配中英标签…" : "匹配并回译中文"}</button>
-          <button className="button" type="button" disabled={!draft.positive_prompt.trim() || generationBusy || !remoteEnabled} onClick={() => void submitDirect()}>{generationBusy ? "正在检查依赖并提交…" : "按原文生图"}</button>
+          <button className="button" type="button" disabled={draft.model_profile === LEGACY_AESTHETIC || !draft.positive_prompt.trim() || generationBusy || !remoteEnabled} onClick={() => void submitDirect()}>{generationBusy ? "正在检查依赖并提交…" : "按原文生图"}</button>
         </div>
       </form>
 

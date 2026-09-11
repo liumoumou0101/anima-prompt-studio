@@ -8,6 +8,7 @@ from anima_prompt_studio.domain.execution_models import WorkflowProfile
 from ..core.lora_resolution import LoraBinding, MappingConflict, ResourceUnavailable, resolve_loras, slot_choices
 from ..core.requirements import dump
 from ..core.workflow_compiler import V3WorkflowCompiler
+from ..core.model_versions import model_matches_workflow
 from ..remote.comfy_client import ComfyUIClient
 from ..storage.runtime_repository import SQLiteRepository
 from .packaged_workflows import workflow_revision
@@ -28,7 +29,7 @@ class LoraCatalog:
         snapshot = self.manager._read("workflow_capabilities:" + remote_id, {})
         current = (snapshot.get("fingerprint") == fingerprint(remote) and not snapshot.get("error")
                    and 0 <= time.time() - snapshot.get("checked_at", 0) < TTL)
-        if not remote.enabled or not remote.known_host_fingerprint:
+        if not remote.enabled or not remote.connection_ready:
             raise ResourceUnavailable("unknown", "请启用连接并确认 SSH 指纹。")
         if not current and refresh:
             try:
@@ -113,7 +114,7 @@ class LoraCatalog:
             profile.runtime_assets["binding_template_revision"] = revision
         if self.manager._read("workflow_disabled:" + workflow_id, False):
             raise ResourceUnavailable("incompatible_workflow", "工作流已停用。")
-        if model_profile not in profile.compatible_model_profiles:
+        if not model_matches_workflow(model_profile, profile):
             raise ResourceUnavailable("incompatible_model", "工作流与当前模型不兼容。")
         saved = self.manager._read(self.key(remote_id, workflow_id), {})
         bindings = [LoraBinding.model_validate(item) for item in saved.get("bindings", [])]

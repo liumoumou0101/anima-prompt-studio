@@ -12,6 +12,7 @@ from anima_prompt_studio.domain.execution_models import (
     WorkflowProfile,
 )
 from anima_prompt_studio.domain.models import PromptJob
+from .model_versions import model_matches_workflow
 
 
 class WorkflowRenderError(ValueError):
@@ -82,7 +83,7 @@ class V3WorkflowCompiler:
             raise WorkflowRenderError(
                 f"工作流 {workflow_profile.display_name} 尚未声明兼容模型，不能安全提交。"
             )
-        if compatible_models and job.model_profile_id not in compatible_models:
+        if compatible_models and not model_matches_workflow(job.model_profile_id, workflow_profile):
             raise WorkflowRenderError(
                 f"工作流 {workflow_profile.display_name} 不支持模型配置 {job.model_profile_id}。"
             )
