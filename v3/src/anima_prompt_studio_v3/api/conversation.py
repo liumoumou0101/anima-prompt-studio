@@ -12,9 +12,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..core.requirements import (
     ContractModel, Mode, PromptEdit, Requirements, WorkbenchError,
-    apply_layer_updates, compile_prompt, compile_state, dump,
+    apply_layer_updates, compile_prompt, compile_state, dump, digest,
 )
 from .workspace_store import WorkspaceRevisionConflictError, WorkspaceStore
+from ..core.scene_design import SCENE_DESIGN_COMPILER_RULES
 
 
 class WorkspaceCommand(ContractModel):
@@ -41,6 +42,7 @@ class TurnOutput(BaseModel):
     positive: str = Field(min_length=1, max_length=20_000)
     negative: str = Field(max_length=20_000)
     warnings: list[str] = Field(default_factory=list, max_length=20)
+    conflicts: list[str] = Field(default_factory=list, max_length=10)
 
 
 REWRITE_SYSTEM = """Compile and revise Anima image requirements.
@@ -63,6 +65,12 @@ When the first user delta describes a new scene, populate the corresponding unlo
 layers so the description becomes persistent requirements, not only prompt text.
 Keep layer content in the user's language; positive and negative use English Danbooru
 space-separated tags or short phrases. Write declared artists directly as @name.
+subject.character_tags, subject.series_tags, subject.general_tags, and style.manual_artist_tags are user-supplied tags, including
+tags absent from the local dictionary. They are read-only and must not appear in
+layer_updates. Use them to understand the scene; the server inserts these exact
+normalized tags and declared artists into positive. Do not translate, invent aliases,
+or expand their costume/appearance unless requested. Prefer descriptions over repeating
+these tags inside prose. Current manual tags replace previously declared manual tags.
 Keep counts, identities, actions, ownership and local exclusions. A bareheaded left man
 and a hat-wearing right man must NOT cause hat to enter the global negative prompt.
 Current requirements are binding; current compiled text preserves reviewed user edits
@@ -107,16 +115,21 @@ class ConversationService:
         canonical = Requirements.model_validate(draft["requirements"]) if draft["requirements"] else Requirements.empty()
         if not request.delta.text and not any((canonical.layers.subject.text, canonical.layers.style.text,
                                                canonical.layers.style.medium, canonical.layers.style.artists,
+                                               canonical.layers.subject.character_tags, canonical.layers.subject.series_tags, canonical.layers.subject.general_tags,
+                                               canonical.layers.style.manual_artist_tags,
                                                canonical.layers.lighting.text, canonical.layers.composition.text,
-                                               canonical.layers.composition.shot)):
+                                               canonical.layers.composition.shot, canonical.layers.lighting.mood,
+                                               any((canonical.layers.composition.design.model_dump().values())) if canonical.layers.composition.design else False)):
             raise WorkbenchError("empty_requirements", "请先填写要画的内容。")
         current_prompt = dump(request.compiled) if request.compiled else (
             {key: draft["compiled"][key] for key in ("positive", "negative")} if draft["compiled"] else None)
+        if current_prompt is not None and (draft.get("compiled") or {}).get("scene_intent"):
+            current_prompt["scene_intent"] = draft["compiled"]["scene_intent"]
         rule = ("FAITHFUL: only translate/organize explicit facts; never invent details."
                 if request.mode == "faithful" else
                 "EXPANSION: modest compatible details only; never add subjects or change style/composition without delta. List additions in warnings.")
         result = await asyncio.wait_for(LLMService.complete(
-            messages=[{"role": "system", "content": REWRITE_SYSTEM + rule},
+            messages=[{"role": "system", "content": REWRITE_SYSTEM + SCENE_DESIGN_COMPILER_RULES + rule},
                       {"role": "user", "content": json.dumps({"requirements": dump(canonical),
                        "compiled": current_prompt, "delta": dump(request.delta), "mode": request.mode}, ensure_ascii=False)}],
             images=None, disable_thinking=True, timeout_s=120, task="rewrite"), timeout=120)
@@ -124,6 +137,15 @@ class ConversationService:
             output = TurnOutput.model_validate_json(result["text"])
         except (ValidationError, KeyError, TypeError):
             raise WorkbenchError("llm_generation_failed", "LLM 未返回有效的修改结果；草稿保持原样。") from None
+        if output.conflicts:
+            raise WorkbenchError("scene_design_conflict", "画面要求需要确认：" + "；".join(output.conflicts))
+        previous_compiled = draft.get("compiled") or {}
+        if (not request.delta.text and current_prompt is not None
+                and previous_compiled.get("exclusions_fingerprint") == digest(dump(canonical.layers.exclusions))):
+            # Recompiling unchanged exclusions is not permission to replace the
+            # reviewed negative prompt. A changed exclusion layer/delta still
+            # follows the existing explicit rewrite path.
+            output.negative = current_prompt["negative"]
         if not request.delta.text and output.touched_layers:
             raise WorkbenchError("invalid_layer_updates", "纯重编译不能改变要求。")
         merged = apply_layer_updates(canonical, output.touched_layers, output.layer_updates)
@@ -149,7 +171,7 @@ class ConversationService:
         saved = self.store.transform(request.workspace_id, expected_revision=request.revision,
                                      operation=lambda _: draft)
         return {**saved, "compile_state": saved["draft"]["compile_state"],
-                "changed_layers": changed, "positive": output.positive, "negative": output.negative,
+                "changed_layers": changed, "positive": draft["compiled"]["positive"], "negative": draft["compiled"]["negative"],
                 "warnings": output.warnings, "workspace_id": saved["id"], "engine": "prompt_assistant_llm"}
 
     def reset(self, request: WorkspaceCommand) -> dict:

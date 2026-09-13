@@ -1,6 +1,8 @@
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {ApiClientError, apiRequest} from "../lib/api";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
+import {AppearanceControls} from "../components/AppearanceControls";
+import "./libraryPages.css";
 type AuthType = "password" | "private_key" | "agent";
 
 type RemoteProfile = {
@@ -225,17 +227,18 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
   }
 
   if (!remoteEnabled) {
-    return <section className="page settings-page"><SettingsHeader count="—" /><EmptyState title="远程设置尚未启用" detail="请从 V3 桌面入口启动，并让它检测到 V2 数据库；V3 会复用其中的云主机、工作流和 Windows 凭据。" /></section>;
+    return <section className="page library-page settings-page"><SettingsHeader count="—" /><AppearanceSettings /><EmptyState title="远程设置尚未启用" detail="请从 V3 桌面入口启动本地服务，再添加本机或云端 ComfyUI 连接。" /></section>;
   }
 
-  return <section className="page settings-page">
+  return <section className="page library-page settings-page">
     <SettingsHeader count={settings?.items.length ?? "—"} />
+    <AppearanceSettings />
     {error && <ErrorState message={error.message} requestId={error.requestId} />}
-    {!settings ? <LoadingState label="正在读取 V2 远程连接配置…" /> : <>
+    {!settings ? <LoadingState label="正在读取生成环境配置…" /> : <>
     <div className="settings-ranking"><h2>画师推荐</h2><p>在工作台展开“画师推荐”，可随时切换排序并选择画师。</p><a href="/workbench">打开工作台</a></div>
     <div className="settings-layout">
       <aside className="settings-side">
-        <div className="settings-side-head"><span>CONNECTIONS</span><button type="button" className="button button--secondary" onClick={startNew}>＋ 新建</button></div>
+        <div className="settings-side-head"><span>生成环境</span><button type="button" className="button button--secondary" onClick={startNew}>＋ 新建</button></div>
         <div className="remote-profile-list">
           {settings.items.map((profile) => <button type="button" key={profile.id} className={`remote-profile-item${profile.id === selectedId ? " is-selected" : ""}`} onClick={() => selectProfile(profile)}>
             <span className={profile.enabled && (profile.connection_ready ?? profile.host_fingerprint_confirmed) ? "status-dot is-ready" : "status-dot"} /><span><strong>{profile.display_name}</strong><small>{profile.connection_type === "local" ? `本机 · ${profile.comfy_endpoint}` : `${profile.ssh_user}@${profile.ssh_host}:${profile.ssh_port} · ${profile.host_fingerprint_confirmed ? "指纹已确认" : "待确认指纹"}`}</small></span>
@@ -285,5 +288,9 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
 }
 
 function SettingsHeader({count}: {count: number | string}) {
-  return <header className="page-header"><div><span className="eyebrow">SETTINGS</span><h1>设置</h1><p>管理连接、认证与应用偏好。模板和文件映射位于工作流页面。</p></div><div className="header-stat"><strong>{count}</strong><span>connections</span></div></header>;
+  return <header className="page-header"><div><h1>设置</h1><p>调整界面外观，管理生成环境与连接。模板和文件映射位于工作流页面。</p></div><div className="header-stat"><strong>{count}</strong><span>个连接</span></div></header>;
+}
+
+function AppearanceSettings() {
+  return <section className="settings-appearance" aria-label="界面外观设置"><header><h2>界面外观</h2><p>两套布局共享同一份创作内容，切换不会修改提示词、模型或生成任务。</p></header><AppearanceControls /></section>;
 }

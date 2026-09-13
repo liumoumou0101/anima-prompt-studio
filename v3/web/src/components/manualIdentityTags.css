@@ -1,0 +1,54 @@
+.manual-identity-tags { min-width: 0; color: var(--text); }
+.manual-identity-tags--compact { padding-block: 8px; border-bottom: 1px solid var(--line); }
+.manual-identity-tags .manual-identity-heading { display: list-item; margin-inline-start: 16px; padding: 0; line-height: 24px; cursor: pointer; }
+.manual-identity-tags .manual-identity-heading > strong { margin-right: 8px; color: var(--text); font-size: 15px; font-weight: 600; }
+.manual-identity-tags .manual-identity-heading > span { color: var(--muted); font-size: 12px; }
+.manual-identity-tags .conversation-muted { margin-block: 8px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.manual-identity-tags .manual-identity-grid { display: grid; gap: 16px; margin-block: 14px; }
+.manual-identity-tags--compact .manual-identity-grid { grid-template-columns: minmax(0, 1fr); gap: 6px; margin-block: 8px; }
+.manual-identity-tags .manual-identity-group { min-width: 0; }
+.manual-identity-tags .manual-identity-notes { display: flex; flex-wrap: wrap; align-items: start; gap: 4px 20px; }
+.manual-identity-tags .manual-identity-notes > details { min-width: 0; max-width: 100%; }
+.manual-identity-tags .manual-identity-notes > details[open] { flex-basis: 100%; }
+.manual-identity-tags .manual-identity-notes summary { padding-block: 4px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.manual-identity-tags output { display: block; max-width: 100%; padding: 10px 12px; color: var(--text); border: 1px solid var(--line); border-radius: 5px; background: var(--panel-raised); overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; }
+.manual-identity-tags .manual-identity-related { margin-top: 10px; padding: 10px; border-left: 3px solid var(--info); background: var(--info-soft); }
+.manual-identity-tags .manual-identity-related button { margin: 3px; }
+
+.manual-identity-tags .identity-tag-field { display: grid; align-content: start; gap: 7px; min-width: 0; }
+.manual-identity-tags .identity-tag-field label { display: grid; gap: 6px; margin: 0; color: var(--text); font-size: 13px; }
+.manual-identity-tags .identity-tag-field :is(textarea, input) { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line-bright); border-radius: 5px; color: var(--text); background: var(--input-bg); font: inherit; font-size: 14px; line-height: 1.6; }
+.manual-identity-tags .identity-tag-field textarea { min-height: 68px; resize: vertical; }
+.manual-identity-tags .identity-tag-field :is(textarea, input)::placeholder { color: var(--placeholder); }
+.manual-identity-tags :is(button, textarea, input, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.manual-identity-tags .identity-tag-field button, .manual-identity-tags .manual-identity-related button { min-height: 30px; max-width: 100%; padding: 4px 7px; border: 1px solid var(--line-bright); border-radius: 4px; color: var(--text); background: var(--panel); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; cursor: pointer; }
+.manual-identity-tags .identity-tag-field button:hover:enabled, .manual-identity-tags .manual-identity-related button:hover:enabled { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+.manual-identity-tags .identity-tag-field button[aria-pressed=true] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.manual-identity-tags .identity-tag-field button:disabled { color: var(--disabled-text); border-color: var(--line); background: var(--disabled-bg); opacity: 1; cursor: not-allowed; }
+.manual-identity-tags .identity-tag-field ul { list-style: none; margin: 0; padding: 0; }
+.manual-identity-tags .identity-tag-field .identity-tag-suggestions { min-width: 0; padding: 8px; border: 1px solid var(--line-bright); border-radius: 5px; background: var(--panel-raised); }
+.manual-identity-tags .identity-tag-suggestions [role=listbox] { max-height: 240px; overflow-y: auto; overscroll-behavior: contain; }
+.manual-identity-tags .identity-tag-suggestions [role=option] { display: grid; gap: 3px; padding: 7px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
+.manual-identity-tags .identity-tag-suggestions [role=option]:is(:hover, [aria-selected=true]) { border-color: var(--accent); background: var(--accent-soft); }
+.manual-identity-tags .identity-tag-suggestions [role=option] button { display: block; padding: 0; min-height: 0; color: var(--text); text-align: left; border: 0; background: transparent; font-size: 13px; }
+.manual-identity-tags .identity-tag-suggestions :is(small, p) { color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.manual-identity-tags .identity-tag-history { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding-block: 6px; color: var(--muted); font-size: 12px; }
+.manual-identity-tags .identity-tag-selected { display: grid; gap: 6px; }
+.manual-identity-tags .identity-tag-selected li { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--accent-soft); color: var(--text); font-size: 13px; }
+.manual-identity-tags .identity-tag-selected li > span { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; }
+.manual-identity-tags .identity-tag-field .identity-tag-alias-toggle { justify-self: start; padding-inline: 0; color: var(--muted); background: transparent; border-color: transparent; }
+.manual-identity-tags .identity-tag-aliases { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-raised); }
+.manual-identity-tags .identity-tag-aliases li { margin-top: 6px; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.manual-identity-tags .identity-tag-field .identity-tag-error { margin: 0; padding: 8px 10px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+
+/* Compact creation controls use three short rows; secondary tools expand on demand. */
+.manual-identity-tags--compact .identity-tag-field--compact { grid-template-columns: 52px minmax(0, 1fr) 30px; gap: 6px 8px; align-items: start; }
+.manual-identity-tags--compact .identity-tag-field--compact > label { grid-column: 1; grid-row: 1; align-self: center; }
+.manual-identity-tags--compact .identity-tag-field--compact > textarea { grid-column: 2; grid-row: 1; min-height: 38px; padding: 7px 10px; line-height: 22px; }
+.manual-identity-tags--compact .identity-tag-field--compact > .identity-tag-alias-toggle { grid-column: 3; grid-row: 1; width: 30px; min-height: 38px; padding: 0; border-color: var(--line); color: var(--muted); font-size: 21px; }
+.manual-identity-tags--compact .identity-tag-field--compact > :is(.identity-tag-selected, .identity-tag-suggestions, .identity-tag-aliases, .identity-tag-error) { grid-column: 2 / -1; }
+.manual-identity-tags--compact .identity-tag-selected { display: flex; flex-wrap: wrap; gap: 5px; }
+.manual-identity-tags--compact .identity-tag-selected li { gap: 4px; padding: 3px 6px; min-width: 0; max-width: 100%; }
+.manual-identity-tags--compact .identity-tag-selected li > span { flex: 1 1 auto; }
+.manual-identity-tags--compact .identity-tag-selected button { min-height: 24px; padding: 2px 5px; background: transparent; border-color: transparent; }
+.manual-identity-tags--compact .manual-identity-notes summary { padding-block: 2px; font-size: 12px; }

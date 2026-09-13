@@ -98,6 +98,7 @@ it("extracts saved prompt text explicitly and blocks unsaved note edits", async 
 
 it("uploads multipart bytes without a JSON content type", async () => {
   await open();
+  fireEvent.click(screen.getByText("添加参考图"));
   fireEvent.change(screen.getByLabelText("图片标题"), {target: {value: "新参考"}});
   fireEvent.change(screen.getByLabelText("参考图片"), {target: {files: [new File(["test"], "a.png", {type: "image/png"})]}});
   fireEvent.click(screen.getByRole("button", {name: "保存参考图"}));

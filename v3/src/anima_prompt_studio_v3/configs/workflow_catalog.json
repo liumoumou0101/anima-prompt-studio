@@ -1,6 +1,6 @@
 {
   "schema": "anima-workflow-catalog/1",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "source": "ANIMA Prompt Studio maintained ComfyUI integration templates",
   "license": "GPL-3.0-only",
   "scope": "Graph definitions only. Model weights and custom nodes are installed separately under their own licenses.",
@@ -49,6 +49,16 @@
       "version": "1.0.0",
       "tier": "baseline",
       "model": "anima_aesthetic_v1_0"
+    },
+    "v3_anima_2_9b_preview_v1": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "anima_2_9b_preview_v1"
+    },
+    "v3_animayume_v1_5_base": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "animayume_v1_5_base"
     }
   }
 }

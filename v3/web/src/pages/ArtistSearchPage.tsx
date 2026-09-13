@@ -4,6 +4,8 @@ import {Link, useSearchParams} from "react-router-dom";
 import {ApiClientError, apiRequest} from "../lib/api";
 import type {ArtistSearchItem, ArtistSearchResponse} from "../lib/types";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
+import {ArtistLibraryThumbnail} from "./ArtistLibraryThumbnail";
+import "./libraryPages.css";
 
 export function ArtistSearchPage() {
   const [params, setParams] = useSearchParams();
@@ -66,10 +68,10 @@ export function ArtistSearchPage() {
 
   if (error && !data) return <div className="page"><ErrorState message={error.message} requestId={error.requestId} onRetry={() => setRunId((value) => value + 1)} /></div>;
 
-  return <div className="page artist-search-page">
+  return <div className="page library-page artist-search-page">
     {loading && !data ? <LoadingState label="正在读取画师关联数据…" /> : data && <>
       <header className="artist-lab-hero">
-        <div><span className="eyebrow">ARTIST CONTEXT LAB</span><h1>画师研究室</h1><p>从画师 tag 出发，查看历史作品中更有代表性的题材与场景线索。</p></div>
+        <div><h1>画师研究室</h1><p>浏览本地样图，寻找适合画面的画师 tag 与题材线索。</p></div>
         <dl aria-label="画师数据概览">
           <div><dt>画师</dt><dd>{formatCount(data.summary.artist_count)}</dd></div>
           <div><dt>关联证据</dt><dd>{formatCount(data.summary.association_count)}</dd></div>
@@ -78,12 +80,13 @@ export function ArtistSearchPage() {
       </header>
 
       <section className="artist-search-console">
-        <div><span className="console-index">01</span><div><strong>输入画师 tag</strong><small>支持 `@name`、canonical 下划线名或空格形式</small></div></div>
+        <div className="artist-search-hint"><strong>查找画师</strong><small>支持 @、下划线或空格名称</small></div>
         <form role="search" onSubmit={submit}><MagnifyingGlass /><input aria-label="搜索画师标签" value={input} onChange={(event) => setInput(event.target.value)} placeholder="例如 @dairi、rurudo…" autoFocus /><button type="submit">分析</button></form>
         <label>排列方式<select aria-label="画师排序" value={sort} onChange={(event) => changeSort(event.target.value)}><option value="popularity">作品量优先</option><option value="name">名称顺序</option></select></label>
       </section>
 
-      <div className="artist-result-meta"><strong>{query ? `“${query}”的匹配结果` : "可研究的画师标签"}</strong><span>共 {formatCount(data.total)} 位 · 共现是题材线索，不是画质评分</span></div>
+      <div className="artist-result-meta"><strong>{query ? `“${query}”的匹配结果` : "画师标签"}</strong><span>共 {formatCount(data.total)} 位</span></div>
+      <p className="library-caption">样图来自使用画师 tag 的模型案例，并非画师原作。共现数据只提供题材线索；未收录样图时会明确标记。</p>
       {items.length ? <section className="artist-card-grid" aria-live="polite">{items.map((artist) => <ArtistCard key={artist.id} artist={artist} />)}</section> : <EmptyState title="没有找到这个画师 tag" detail="请尝试去掉 @、改用 canonical 名称，或缩短关键词。" />}
       {data.has_more && <button type="button" className="group-load-more" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "正在读取下一批…" : `继续浏览剩余 ${data.total - items.length} 位画师`}</button>}
       {error && <div className="group-inline-error">{error.message}<button type="button" onClick={() => void loadMore()}>重试</button></div>}
@@ -93,8 +96,8 @@ export function ArtistSearchPage() {
 
 function ArtistCard({artist}: {artist: ArtistSearchItem}) {
   return <article className="artist-card">
-    <div className="artist-card-monogram">{artist.name.slice(0, 2).toUpperCase()}</div>
-    <div className="artist-card-copy"><span>ARTIST TAG</span><h2>{artist.render_name}</h2><code>{artist.name}</code></div>
+    <ArtistLibraryThumbnail artist={artist.name} />
+    <div className="artist-card-copy"><h2>{artist.render_name}</h2><code>{artist.name}</code></div>
     <dl><div><dt>历史作品</dt><dd>{formatCount(artist.post_count)}</dd></div><div><dt>关联线索</dt><dd>{artist.association_count}</dd></div></dl>
     <div className="artist-preview-tags" aria-label="代表性关联标签">{artist.preview_tags.length ? artist.preview_tags.map((tag) => <span key={tag.name}>{tag.cn_name || tag.render_name}</span>) : <small>暂无非敏感关联标签</small>}</div>
     <Link to={`/artists/${encodeURIComponent(artist.name)}`}>查看适用场景 <ArrowRight /></Link>

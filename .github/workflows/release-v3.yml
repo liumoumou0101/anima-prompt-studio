@@ -41,8 +41,8 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[remote]"
-          python -m pip install -e ".\v3"
+          python -m pip install -e ".[dev,remote]"
+          python -m pip install -e ".\v3[dev]"
           python -m pip install "pyinstaller>=6.10,<7"
 
       - name: Download and verify data pack
@@ -75,11 +75,23 @@ jobs:
         shell: pwsh
         run: python -m pytest -q v3/tests
 
+      - name: Test and build V3 web
+        shell: pwsh
+        working-directory: v3/web
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "V3 web dependency install failed." }
+          npm test -- --maxWorkers=2
+          if ($LASTEXITCODE -ne 0) { throw "V3 web tests failed." }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "V3 web typecheck/build failed." }
+
       - name: Build portable and installer packages
         shell: pwsh
         run: |
           .\packaging\build_windows_v3.ps1 `
             -Python python `
+            -SkipWebBuild `
             -Version "${{ inputs.version }}" `
             -DataPackSource "${{ steps.data_pack.outputs.path }}"
 
@@ -94,7 +106,8 @@ jobs:
           & (Join-Path $installDir "AnimaPromptStudioV3.exe") `
             --data-root (Join-Path $userData "data") `
             --workspace-db (Join-Path $userData "workspaces.db") `
-            --without-v2 --no-browser --exit-after-startup
+            --runtime-database (Join-Path $userData "runtime.db") `
+            --verify-runtime --no-browser --exit-after-startup
           if ($LASTEXITCODE -ne 0) { throw "Installed V3 executable returned $LASTEXITCODE" }
           & (Join-Path $installDir "unins000.exe") /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
           if ($LASTEXITCODE -ne 0) { throw "V3 uninstaller returned $LASTEXITCODE" }

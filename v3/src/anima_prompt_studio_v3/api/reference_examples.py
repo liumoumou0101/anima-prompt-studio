@@ -51,10 +51,11 @@ class GalleryCopy(ContractModel):
 
 class RunCopy(GalleryCopy):
     run_id: str = Field(min_length=1, max_length=200)
+    user_notes: str = Field(default="", max_length=20_000)
 
 
 class StartExample(OfficialCopy):
-    mode: Literal["requirements", "generation"]
+    mode: Literal["requirements", "generation", "prompt"]
     role: PinRole = "whole_scene"
 
 
@@ -91,10 +92,32 @@ def register_reference_routes(app, workspace_db, require_session):
 
     @app.get(prefix, dependencies=dependencies)
     def list_examples(q: str = Query(default="", max_length=200),
-                      origin: Literal["upload", "session_pin", "gallery_keep", "grok_dump", "official"] | None = None,
+                      origin: Literal["upload", "session_pin", "gallery_keep", "grok_dump", "official", "research_import"] | None = None,
+                      model: str | None = Query(default=None, max_length=200),
+                      artist: str | None = Query(default=None, max_length=200),
+                      lora_dependency: Literal["none", "lora", "unknown"] | None = None,
+                      content: Literal["safe", "sensitive", "nsfw", "explicit", "unknown"] | None = None,
                       limit: int = Query(default=40, ge=1, le=100),
                       cursor: str | None = Query(default=None, max_length=2000)):
-        return store.list(q=q, origin=origin, limit=limit, cursor=cursor)
+        return store.list(q=q, origin=origin, limit=limit, cursor=cursor,
+            model=model, artist=artist, lora_dependency=lora_dependency, content=content)
+
+    @app.get(prefix + "/facets", dependencies=dependencies)
+    def reference_facets():
+        return store.facets()
+
+    @app.get(prefix + "/by-artist", dependencies=dependencies)
+    def examples_by_artist(artist: str = Query(min_length=1, max_length=200), limit: int = Query(default=4, ge=1, le=12)):
+        page = store.list(artist=artist, content="safe", limit=limit)
+        items = []
+        for item in page["items"]:
+            metadata = store.catalog_metadata(item)
+            items.append({"id": item["id"], "title": item["title"], "artists": metadata.get("artists", []),
+                "model": metadata.get("checkpoint", ""), "content_level": metadata.get("content_level", "unknown"),
+                "lora_dependency": metadata.get("lora_dependency", "unknown"),
+                "thumbnail_url": f"/api/v3/gallery/reference-examples/{item['id']}/thumbnail",
+                "reference_url": f"/references?example={item['id']}"})
+        return {"items": items}
 
     @app.post(prefix, dependencies=dependencies, status_code=201)
     async def upload_example(request: Request):
@@ -181,7 +204,8 @@ def register_reference_routes(app, workspace_db, require_session):
         verified = deepcopy(verified)
         if isinstance(verified.get("settings"), dict) and isinstance(verified["settings"].get("seed"), int):
             verified["settings"]["seed"] = display_seed(verified["settings"]["seed"])
-        notes = ExampleNotes(external_prompt=f"正向：{verified.get('positive') or ''}\n负向：{verified.get('negative') or ''}"[:20000])
+        notes = ExampleNotes(external_prompt=f"正向：{verified.get('positive') or ''}\n负向：{verified.get('negative') or ''}"[:20000],
+                             user_notes=payload.user_notes)
         return store.create(data, path.stem[:200], ExampleMetadata(notes=notes), origin="session_pin", origin_ref=payload.run_id,
             requirements=provenance.get("requirements"), provenance=verified,
             compat={"model_profiles": [provenance["model_profile"]], "workflow_snapshot_ref": payload.run_id})
@@ -227,6 +251,26 @@ def register_reference_routes(app, workspace_db, require_session):
         source = store.get(example_id, payload.source_version)
         if payload.mode == "generation":
             return create_generation_workspace((source.get("provenance") or {}).get("run_id"), "参考 · " + source["title"])
+        if payload.mode == "prompt":
+            from ..core.runtime_profiles import V3RuntimeProfiles
+            original = source.get("provenance") or {}
+            if not original.get("positive") or not original["positive"].strip():
+                fail("empty_requirements", "此案例没有已记录的原始正向提示词。")
+            profiles = V3RuntimeProfiles()
+            model = original.get("model_profile")
+            if model not in profiles.profiles:
+                model = "anima_aesthetic_v1_1"
+            defaults = profiles.get_model(model)
+            settings = WorkbenchGenerationSettings(steps=defaults.steps, cfg=defaults.cfg,
+                sampler=defaults.sampler, scheduler=defaults.scheduler)
+            draft = WorkspaceDraft(model_profile=model, generation_settings=settings).persistence_payload()
+            record = app.state.workspace_store.create(("提示词参考 · " + source["title"])[:200], draft)
+            def populate_prompt(draft):
+                draft["requirements"] = dump(Requirements.empty())
+                draft["compiled"] = compile_prompt(draft, PromptEdit(positive=original["positive"],
+                    negative=original.get("negative") or ""), source="user")
+                return draft
+            return app.state.workspace_store.transform(record["id"], expected_revision=record["revision"], operation=populate_prompt)
         if not source["requirements_valid"]:
             fail("empty_requirements", "请先编辑或提取参考要求。")
         requirements = apply_pin(Requirements.empty(), Requirements.model_validate(source["requirements"]), payload.role)

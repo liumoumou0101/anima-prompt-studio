@@ -33,8 +33,10 @@ def main(argv: list[str] | None = None) -> int:
         "--runtime-database", "--v2-database",
         dest="v2_database",
         type=Path,
-        help="Runtime database for remote generation; existing V2 schema is supported.",
+        help="Runtime database for remote generation; defaults to runtime.db beside workspace state. Existing V2 schema is supported.",
     )
+    parser.add_argument("--without-runtime", "--without-v2", dest="without_runtime", action="store_true",
+                        help="Explicitly disable generation and connection settings.")
     args = parser.parse_args(argv)
     try:
         reference_db = (
@@ -43,14 +45,17 @@ def main(argv: list[str] | None = None) -> int:
             else args.reference_db.resolve()
         )
         frontend_dist = args.frontend_dist.resolve() if args.frontend_dist is not None else None
-        if args.v2_database is not None:
+        runtime_database = None if args.without_runtime else (
+            args.v2_database or args.workspace_db.parent / "runtime.db"
+        ).resolve()
+        if runtime_database is not None:
             from ..runtime.packaged_workflows import migrate_packaged_workflow_ownership
-            migrate_packaged_workflow_ownership(args.v2_database.resolve())
+            migrate_packaged_workflow_ownership(runtime_database)
         with LocalApiServer(
             reference_db,
             frontend_dist=frontend_dist,
             workspace_db=args.workspace_db.resolve(),
-            v2_database=args.v2_database.resolve() if args.v2_database is not None else None,
+            v2_database=runtime_database,
         ) as server:
             print(
                 json.dumps(

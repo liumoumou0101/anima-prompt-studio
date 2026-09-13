@@ -120,12 +120,14 @@ def test_health_session_exchange_is_one_time_and_bootstrap_is_protected(referenc
         "cutoff_mode": "approximate",
     }
     assert bootstrap.json()["model_profiles"] == [
+        "anima_2_9b_preview_v1",
         "anima_aesthetic_v1_0",
         "anima_aesthetic_v1_1",
         "anima_base_v1",
         "anima_turbo_v1",
         "anima_turbo_v1_1",
         "animayume_v1_0_final",
+        "animayume_v1_5_base",
         "miaomiao_harem_anima_v1_6",
     ]
     assert bootstrap.json()["model_profile_options"][-1] == {
@@ -475,6 +477,7 @@ def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
                 "devices": ["NVIDIA Test GPU"],
                 "queue_running": 1,
                 "queue_pending": 2,
+                "system_stats": {"system": {"comfyui_version": "0.35.0"}},
             })()
 
     monkeypatch.setattr(ssh_tunnel, "SshTunnel", FakeTunnel)
@@ -512,7 +515,7 @@ def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
     assert inspected.status_code == 200
     report = inspected.json()["workflow_inspection"]
     assert report["remote_profile_id"] == "v3-ready"
-    assert len(report["items"]) == 9
+    assert len(report["items"]) == 11
     assert all(item["state"] == "missing_nodes" for item in report["items"])
     assert events[-1] == "close"
 
@@ -534,19 +537,19 @@ def test_workflow_management_requires_session_and_imports_copies(reference_db, t
     headers = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
     report = client.get(path, headers=headers)
     assert report.status_code == 200
-    assert len(report.json()["items"]) == 9
+    assert len(report.json()["items"]) == 11
     assert all(i["state"] == "unchecked" for i in report.json()["items"])
     exported = client.get("/api/v3/workflows/export/23_Turbo_v1.1", headers=headers)
     library = client.get("/api/v3/workflows/catalog", headers=headers)
     assert library.status_code == 200
-    assert len(library.json()["items"]) == 9
+    assert len(library.json()["items"]) == 11
     preview = client.post("/api/v3/workflows/preview", json=exported.json(), headers=headers)
     assert preview.status_code == 200
-    assert len(catalog(database)) == 9
+    assert len(catalog(database)) == 11
     imported = client.post("/api/v3/workflows/import", json=exported.json(), headers=headers)
     assert imported.status_code == 200
     assert imported.json()["id"].startswith("user:")
-    assert len(catalog(database)) == 10
+    assert len(catalog(database)) == 12
     disabled = client.put("/api/v3/workflows/23_Turbo_v1.1/enabled", json={"enabled": False}, headers=headers)
     assert disabled.status_code == 200
     diagnostics = client.get(path + "/diagnostics", headers=headers).text

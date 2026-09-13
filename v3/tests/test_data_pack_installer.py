@@ -187,7 +187,7 @@ def test_api_data_root_resolves_pointer_without_repeating_full_pack_verification
     monkeypatch.setattr(run_api, "LocalApiServer", FakeServer)
     monkeypatch.setattr(run_api.threading, "Event", FakeEvent)
 
-    assert run_api.main(["--data-root", str(tmp_path / "managed")]) == 0
+    assert run_api.main(["--data-root", str(tmp_path / "managed"), "--without-runtime"]) == 0
     assert calls == [False]
 
 

@@ -57,3 +57,20 @@ it("invalidates recommendations when seed tags change and never calls the API wi
 it("only parses explicit tag boundaries and excludes existing artist and LoRA directives", () => {
   expect(artistSeeds("scenery, scenery; (flower:1.1), @a, <lora:x:1>, girl by a window")).toEqual(["scenery", "flower", "girl_by_a_window"]);
 });
+
+it("reads natural prompt phrases asynchronously for review without automatically recommending", async () => {
+  localStorage.setItem("anima-workbench-artist-ranking", "tag_fit");
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({tags: ["scenery", "watercolor_(medium)"], truncated: false})));
+  render(<MemoryRouter><ArtistRecommendations prompt="A watercolor scene overlooking a flower garden." selected={["kept_artist"]} disabled={false} onChange={vi.fn()} /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", {name: "画师推荐（可选）"}));
+  expect(fetchMock).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", {name: "读取当前提示词标签"}));
+  await waitFor(() => expect(screen.getByLabelText("推荐依据标签")).toHaveValue("scenery, watercolor_(medium)"));
+  expect(screen.getByText(/词库短语匹配找到 2 个标签/)).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(String(fetchMock.mock.calls[0][0])).toBe("/api/v3/tags/from-prompt");
+  expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({prompt: "A watercolor scene overlooking a flower garden.", limit: 50});
+  expect(screen.getByRole("button", {name: "移除画师 kept_artist"})).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("推荐依据标签"), {target: {value: "flower, scenery"}});
+  expect(screen.getByLabelText("推荐依据标签")).toHaveValue("flower, scenery");
+});

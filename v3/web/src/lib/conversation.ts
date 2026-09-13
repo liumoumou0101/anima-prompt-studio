@@ -1,14 +1,15 @@
 import type {WorkbenchGenerationSettings, WorkspaceRecord} from "./types";
 import {defaultGenerationSettings} from "./generationSettings";
+import type {SceneChoice, SceneDesign} from "./sceneDesign";
 
 export type LayerName = "subject" | "style" | "lighting" | "composition" | "exclusions";
 export type Mode = "faithful" | "expand";
 export const layerLabels: Record<LayerName, string> = {subject: "主体", style: "风格", lighting: "光影", composition: "构图", exclusions: "排除"};
 export interface RequirementLayers {
-  subject: {text: string; locked: boolean};
-  style: {text: string; medium: string; artists: string[]; locked: boolean};
-  lighting: {text: string; locked: boolean; include_with_style_pin: boolean};
-  composition: {text: string; shot: string; locked: boolean; include_with_style_pin: boolean};
+  subject: {text: string; locked: boolean; character_tags?: string[]; series_tags?: string[]; general_tags?: string[]};
+  style: {text: string; medium: string; artists: string[]; manual_artist_tags?: string[]; locked: boolean};
+  lighting: {text: string; locked: boolean; include_with_style_pin: boolean; mood?: SceneChoice | null};
+  composition: {text: string; shot: string; locked: boolean; include_with_style_pin: boolean; design?: SceneDesign | null};
   exclusions: {global: string[]; scoped: {target: string; concept: string}[]; locked: boolean};
 }
 export interface RequirementLora {
@@ -41,10 +42,33 @@ export function editableRequirements(record: ConversationRecord): RequirementsEd
   const requirement = record.draft.requirements;
   return requirement ? structuredClone({layers: requirement.layers, loras: requirement.loras}) : emptyRequirements();
 }
+export function normalizeIdentityTags(values: string[], artist = false): string[] {
+  return [...new Set(values.map(value => (artist ? value.trim().replace(/^@+\s*/, "") : value.trim())
+    .toLowerCase().replaceAll("_", " ").replace(/\\([()])/g, "$1").replace(/\s+/g, " ").trim()).filter(Boolean))];
+}
 export function cleanRequirements(value: RequirementsEdit): RequirementsEdit {
   const clean = structuredClone(value);
-  clean.layers.style.artists = clean.layers.style.artists.map(item => item.trim()).filter(Boolean);
+  clean.layers.style.artists = normalizeIdentityTags(clean.layers.style.artists, true);
+  const artists = normalizeIdentityTags(clean.layers.style.manual_artist_tags || [], true);
+  if (artists.length) clean.layers.style.manual_artist_tags = artists;
+  else delete clean.layers.style.manual_artist_tags;
+  for (const key of ["character_tags", "series_tags", "general_tags"] as const) {
+    const tags = normalizeIdentityTags(clean.layers.subject[key] || []);
+    if (tags.length) clean.layers.subject[key] = tags;
+    else delete clean.layers.subject[key];
+  }
   clean.layers.exclusions.global = clean.layers.exclusions.global.map(item => item.trim()).filter(Boolean);
+  if (!clean.layers.lighting.mood) delete clean.layers.lighting.mood;
+  const design = Object.fromEntries(Object.entries(clean.layers.composition.design || {}).filter(([, choice]) => choice != null));
+  if (Object.keys(design).length) clean.layers.composition.design = design;
+  else delete clean.layers.composition.design;
+  for (const choice of [...Object.values(clean.layers.composition.design || {}), clean.layers.lighting.mood]) {
+    if (!choice) continue;
+    choice.value = choice.value.trim();
+    choice.source ||= "user";
+    if (choice.target?.trim()) choice.target = choice.target.trim(); else delete choice.target;
+    if (choice.evidence?.trim()) choice.evidence = choice.evidence.trim(); else delete choice.evidence;
+  }
   clean.layers.exclusions.scoped = clean.layers.exclusions.scoped.filter(item => item.target.trim() || item.concept.trim());
   clean.loras.forEach(item => {item.trigger_words = item.trigger_words.map(word => word.trim()).filter(Boolean);});
   return clean;
@@ -59,5 +83,5 @@ export function hasUnsavedInputs(record: ConversationRecord, local: LocalConvers
 }
 export function hasUncompiledInputs(record: ConversationRecord, local: LocalConversation): boolean {
   return record.draft.model_profile !== local.model || record.draft.mode !== local.mode
-    || comparable(editableRequirements(record)) !== comparable(cleanRequirements(local.requirements));
+    || comparable(cleanRequirements(editableRequirements(record))) !== comparable(cleanRequirements(local.requirements));
 }

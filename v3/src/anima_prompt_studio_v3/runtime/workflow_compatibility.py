@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from ..core.model_versions import aesthetic_checkpoint_version
+from ..core.model_versions import aesthetic_checkpoint_version, community_checkpoint_version
 
 
 def infer_workflow_model_profiles(
@@ -21,7 +21,7 @@ def infer_workflow_model_profiles(
     versions = {version for node in workflow.values() if isinstance(node, dict)
                 for key, value in node.get("inputs", {}).items()
                 if key in {"unet_name", "ckpt_name"} and isinstance(value, str)
-                for version in [aesthetic_checkpoint_version(value)] if version}
+                for version in [community_checkpoint_version(value) or aesthetic_checkpoint_version(value)] if version}
     if versions:
         return sorted(versions)
     if name.startswith("23_"):

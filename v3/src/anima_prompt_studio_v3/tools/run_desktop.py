@@ -4,15 +4,54 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 import threading
 import webbrowser
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 from ..api import LocalApiServer
 from ..data import DataContractError, DataPackManager, DataPackManifest
 
 
 COMFY_ACCESS_URL = "http://127.0.0.1:18188"
+PORT_STATE_SCHEMA = "anima-local-api-port/1"
+
+
+def desktop_port_state_path(workspace_db: Path) -> Path:
+    workspace_db = workspace_db.resolve()
+    return workspace_db.with_name(workspace_db.name + ".local-api.json")
+
+
+def read_desktop_port(workspace_db: Path) -> int:
+    try:
+        state = json.loads(desktop_port_state_path(workspace_db).read_text(encoding="utf-8"))
+        if not isinstance(state, dict) or state.get("schema") != PORT_STATE_SCHEMA:
+            return 0
+        port = state.get("port")
+        return port if isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535 else 0
+    except (OSError, ValueError, UnicodeError):
+        return 0
+
+
+def save_desktop_port(workspace_db: Path, port: int) -> None:
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ValueError("保存的本地端口必须为 1–65535 的整数。")
+    state_path = desktop_port_state_path(workspace_db)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=state_path.parent,
+                                         prefix=state_path.name + ".", suffix=".tmp", delete=False) as file:
+            temporary = Path(file.name)
+            json.dump({"schema": PORT_STATE_SCHEMA, "port": port}, file)
+            file.write("\n")
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, state_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def default_app_data_dir() -> Path:
@@ -63,13 +102,19 @@ def run(
     v2_database: Path | None = None,
     open_browser: bool = True,
     wait_event: threading.Event | None = None,
+    verify_runtime: bool = False,
 ) -> int:
+    if verify_runtime and (v2_database is None or v2_database.exists()):
+        raise DataContractError("运行时烟测必须使用尚不存在的独立数据库路径。")
     frontend_dist = frontend_dist.resolve()
     if not (frontend_dist / "index.html").is_file():
         raise DataContractError(f"V3 网页尚未构建：{frontend_dist / 'index.html'}")
     manager = DataPackManager(data_root)
     reference_db = ensure_active_pack(manager, pack_source_root.resolve() if pack_source_root else None)
-    selected_v2_database = v2_database.resolve() if v2_database and v2_database.is_file() else None
+    # A new installation has no legacy database yet. Passing a runtime path
+    # means initialize it; only an explicit None disables generation services.
+    selected_v2_database = v2_database.resolve() if v2_database is not None else None
+    preferred_port = read_desktop_port(workspace_db)
     if selected_v2_database is not None:
         from ..runtime.packaged_workflows import migrate_packaged_workflow_ownership
         migrate_packaged_workflow_ownership(selected_v2_database)
@@ -78,7 +123,17 @@ def run(
         frontend_dist=frontend_dist,
         workspace_db=workspace_db.resolve(),
         v2_database=selected_v2_database,
+        preferred_port=preferred_port,
     ) as server:
+        if preferred_port and server.port != preferred_port:
+            print(f"上次本地端口 {preferred_port} 已被占用或不可用；本地地址已改为 {server.base_url}。"
+                  "浏览器草稿和偏好按地址分别保存。", flush=True)
+        try:
+            save_desktop_port(workspace_db, server.port)
+        except OSError:
+            print("未能保存本地端口记录；下次启动的地址可能变化。", flush=True)
+        if verify_runtime:
+            verify_first_connection(server)
         print(
             json.dumps(
                 {
@@ -100,6 +155,34 @@ def run(
     return 0
 
 
+def verify_first_connection(server: LocalApiServer) -> None:
+    """Exercise real packaged API/auth/settings on an explicitly fresh store."""
+    token = ""
+
+    def request(path: str, payload: dict | None = None) -> dict:
+        headers = {"Origin": server.base_url}
+        if token:
+            headers["X-Anima-Session"] = token
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+        req = Request(server.base_url + path, headers=headers,
+                      data=json.dumps(payload).encode() if payload is not None else None)
+        with urlopen(req, timeout=10) as response:
+            return json.loads(response.read())
+
+    token = request("/api/v3/session/exchange", {"bootstrap_token": server.runtime.bootstrap_token})["session_token"]
+    if not request("/api/v3/bootstrap")["features"]["remote_generation"]:
+        raise RuntimeError("空目录运行时未启用生成服务。")
+    if request("/api/v3/settings/remote-profiles")["items"]:
+        raise RuntimeError("运行时烟测拒绝修改已有连接。")
+    created = request("/api/v3/settings/remote-profiles", {
+        "display_name": "First-install smoke (disabled)", "connection_type": "local", "enabled": False,
+    })
+    if not created.get("id") or created.get("enabled") is not False:
+        raise RuntimeError("新用户首个连接未能创建。")
+    print("空目录运行时烟测通过：已启用生成服务，并通过 API 建立首个禁用的本地连接。", flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     app_data = default_app_data_dir()
     bundled_frontend = bundled_path("anima_prompt_studio_v3/web/dist")
@@ -113,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
                         type=Path, default=app_data / "anima_prompt_studio.db")
     parser.add_argument("--without-runtime", "--without-v2", dest="without_v2", action="store_true")
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--verify-runtime", action="store_true",
+                        help="仅发布烟测：在全新运行库验证 API 创建首个连接，须同时指定 --exit-after-startup --no-browser")
     parser.add_argument("--install-bundled-examples", action="store_true",
                         help="安装内置参考样例到所选工作台目录后退出，不启动浏览器或生图服务")
     parser.add_argument(
@@ -121,6 +206,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Start and stop immediately after readiness checks; intended for release smoke tests.",
     )
     args = parser.parse_args(argv)
+    if args.verify_runtime and (not args.exit_after_startup or not args.no_browser or args.without_v2):
+        parser.error("--verify-runtime 要求 --exit-after-startup --no-browser，并启用运行时。")
     try:
         if args.install_bundled_examples:
             from ..storage.bundled_examples import install_bundled_examples
@@ -144,6 +231,7 @@ def main(argv: list[str] | None = None) -> int:
             v2_database=None if args.without_v2 else args.v2_database,
             open_browser=not args.no_browser,
             wait_event=wait_event,
+            verify_runtime=args.verify_runtime,
         )
     except KeyboardInterrupt:
         return 0

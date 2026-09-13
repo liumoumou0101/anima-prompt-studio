@@ -80,6 +80,8 @@ it("offers every current built-in model when bootstrap profile labels are unavai
     "anima_turbo_v1",
     "anima_turbo_v1_1",
     "animayume_v1_0_final",
+    "anima_2_9b_preview_v1",
+    "animayume_v1_5_base",
     "miaomiao_harem_anima_v1_6",
   ]);
 });

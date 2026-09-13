@@ -228,6 +228,9 @@ def create_api_runtime(
     app.state.workspace_store = WorkspaceStore(workspace_db) if workspace_db is not None else None
     app.state.conversation_service = ConversationService(app.state.workspace_store) if workspace_db is not None else None
     app.state.v2_database = v2_database.resolve() if v2_database is not None else None
+    if app.state.v2_database is not None:
+        from ..storage.runtime_repository import SQLiteRepository
+        SQLiteRepository(app.state.v2_database).close()
     app.state.generation_queue = generation_queue
     app.state.submission_service = None
     if app.state.workspace_store is not None and hasattr(generation_queue, "accept_durable"):
@@ -243,6 +246,15 @@ def create_api_runtime(
     app.state.comfy_access = comfy_access
     profiles = ModelProfileRegistry.built_in()
     generation_bridge = CandidateToPromptJobAdapter() if CandidateToPromptJobAdapter is not None else None
+    # Cookies are not port-scoped. Distinct instance names avoid two local
+    # servers replacing each other's image session; recovery uses no cookies.
+    gallery_cookie = f"anima_v3_gallery_{uuid4().hex}"
+
+    def set_gallery_cookie(response: Response, token: str, *, image_only: bool = False) -> None:
+        image_token = token if image_only else sessions.gallery_token(token)
+        response.set_cookie(gallery_cookie, image_token, max_age=sessions.session_ttl,
+                            httponly=True, samesite="strict", secure=False,
+                            path=f"{API_PREFIX}/gallery/")
 
     @app.middleware("http")
     async def local_request_guard(request: Request, call_next):
@@ -267,9 +279,16 @@ def create_api_runtime(
                 except ValueError:
                     return _error_response(request, 400, "invalid_request", "Content-Length 无效。")
             origin = request.headers.get("origin")
-            if not origin or not _allowed_loopback_origin(origin, hosts):
+            if not origin or not _allowed_loopback_origin(origin, hosts) or not _same_origin(origin, str(request.base_url)):
                 return _error_response(request, 403, "invalid_request", "写请求 Origin 无效。")
         response = await call_next(request)
+        authenticated_token = getattr(request.state, "session_token", None)
+        if authenticated_token:
+            set_gallery_cookie(response, authenticated_token)
+        elif getattr(request.state, "gallery_token", None):
+            set_gallery_cookie(response, request.state.gallery_token, image_only=True)
+        if request.url.path.startswith(f"{API_PREFIX}/session/"):
+            response.headers["Cache-Control"] = "no-store"
         response.headers["X-Request-ID"] = request.state.request_id
         return response
 
@@ -341,9 +360,15 @@ def create_api_runtime(
         request: Request,
         x_anima_session: str | None = Header(default=None),
     ) -> None:
-        token = x_anima_session or request.cookies.get("anima_v3_gallery_session")
-        if not token or not sessions.validate(token):
-            raise ApiError(401, "session_invalid", "会话无效或已过期。")
+        if x_anima_session and sessions.validate(x_anima_session):
+            request.state.session_token = x_anima_session
+            return
+        if not x_anima_session and request.method in {"GET", "HEAD"} and request.url.path.startswith(f"{API_PREFIX}/gallery/"):
+            image_token = request.cookies.get(gallery_cookie)
+            if image_token and sessions.validate_gallery(image_token):
+                request.state.gallery_token = image_token
+                return
+        raise ApiError(401, "session_invalid", "会话无效或已过期。")
 
     def require_reference_db() -> Path:
         if not reference_db.is_file():
@@ -355,9 +380,14 @@ def create_api_runtime(
             raise ApiError(503, "data_pack_incompatible", "参考数据包不兼容。") from exc
         return reference_db
 
+    from .prompt_tags import register_prompt_tag_routes
+    register_prompt_tag_routes(app, require_reference_db, require_session)
+
     if workspace_db is not None:
         from .reference_examples import register_reference_routes
         register_reference_routes(app, workspace_db, require_session)
+        from .identities import register_identity_routes
+        register_identity_routes(app, reference_db, workspace_db, require_session)
 
     def require_workspace_store() -> WorkspaceStore:
         store = app.state.workspace_store
@@ -365,10 +395,13 @@ def create_api_runtime(
             raise ApiError(503, "workspace_store_missing", "工作台状态库尚未配置。", retryable=True)
         return store
 
+    from .scene_design import register_scene_design_routes
+    register_scene_design_routes(app, require_workspace_store, require_session)
+
     def require_v2_settings_database() -> Path:
         database = app.state.v2_database
         if database is None or not database.is_file():
-            raise ApiError(503, "v2_settings_unavailable", "未连接 V2 配置库，无法管理远程连接。", retryable=True)
+            raise ApiError(503, "v2_settings_unavailable", "生成运行库已禁用，无法管理连接。请启用运行时后重新打开应用。", retryable=True)
         return database
 
     def candidate_response(
@@ -443,16 +476,24 @@ def create_api_runtime(
             exchange = sessions.exchange(payload.bootstrap_token)
         except SessionInvalidError as exc:
             raise ApiError(401, "session_invalid", "Bootstrap token 无效、已使用或已过期。") from exc
-        response.set_cookie(
-            "anima_v3_gallery_session",
-            exchange.token,
-            max_age=exchange.expires_in,
-            httponly=True,
-            samesite="strict",
-            secure=False,
-            path=f"{API_PREFIX}/gallery/",
-        )
-        return {"session_token": exchange.token, "expires_in": exchange.expires_in}
+        set_gallery_cookie(response, exchange.token)
+        return {"session_token": exchange.token, "expires_in": exchange.expires_in,
+                "recovery_token": exchange.recovery_token}
+
+    @app.post(f"{API_PREFIX}/session/restore")
+    def restore_session(
+        response: FastAPIResponse,
+        x_anima_recovery: str | None = Header(default=None),
+        x_anima_session: str | None = Header(default=None),
+    ) -> dict[str, object]:
+        try:
+            exchange = sessions.restore(recovery_token=x_anima_recovery or "",
+                                        session_token=x_anima_session or "")
+        except SessionInvalidError as exc:
+            raise ApiError(401, "session_invalid", str(exc)) from exc
+        set_gallery_cookie(response, exchange.token)
+        return {"session_token": exchange.token, "expires_in": exchange.expires_in,
+                "recovery_token": exchange.recovery_token}
 
     @app.get(f"{API_PREFIX}/bootstrap", dependencies=[Depends(require_session)])
     def bootstrap() -> dict[str, object]:
@@ -1905,12 +1946,20 @@ def create_api_runtime(
     def create_workspace(
         payload: WorkspaceCreateRequest,
         store: WorkspaceStore = Depends(require_workspace_store),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> dict[str, object]:
-        return store.create(
-            payload.title,
-            payload.draft.persistence_payload(),
-            payload.candidate_snapshot.model_dump(mode="json") if payload.candidate_snapshot else None,
-        )
+        from .workspace_store import WorkspaceCreateConflictError, WorkspaceIdempotencyKeyError
+        try:
+            return store.create(
+                payload.title,
+                payload.draft.persistence_payload(),
+                payload.candidate_snapshot.model_dump(mode="json") if payload.candidate_snapshot else None,
+                idempotency_key=idempotency_key,
+            )
+        except WorkspaceCreateConflictError as exc:
+            raise ApiError(409, exc.code, str(exc)) from exc
+        except WorkspaceIdempotencyKeyError as exc:
+            raise ApiError(422, "invalid_idempotency_key", str(exc)) from exc
 
     @app.get(f"{API_PREFIX}/workspaces/{{workspace_id}}", dependencies=[Depends(require_session)])
     def get_workspace(
@@ -3751,6 +3800,16 @@ def _allowed_loopback_origin(origin: str, allowed_hosts: set[str]) -> bool:
         and parsed.username is None
         and parsed.password is None
     )
+
+
+def _same_origin(origin: str, base_url: str) -> bool:
+    try:
+        left, right = urlsplit(origin), urlsplit(base_url)
+        return (left.scheme, left.hostname, left.port or 80) == (right.scheme, right.hostname, right.port or 80) and not (
+            left.path or left.query or left.fragment or left.username or left.password
+        )
+    except ValueError:
+        return False
 
 
 def _error_response(

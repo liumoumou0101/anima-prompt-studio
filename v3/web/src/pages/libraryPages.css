@@ -1,0 +1,249 @@
+/* Shared library pages: business state stays mounted across both layouts/themes. */
+.library-page { min-width: 0; color: var(--text); font-size: 14px; line-height: 1.55; }
+.library-page :is(h1, h2, h3, p) { overflow-wrap: anywhere; }
+.library-page :is(.page-header, .library-page-heading) { margin: 0 0 24px; padding: 0 0 20px; border-bottom: 1px solid var(--line); }
+.library-page :is(.page-header, .library-page-heading) h1 { margin: 0 0 6px; font-family: inherit; font-size: 24px; font-weight: 650; line-height: 1.3; letter-spacing: 0; }
+.library-page :is(.page-header, .library-page-heading) p { margin: 0; color: var(--muted); font-size: 14px; }
+.library-page .header-stat { padding: 0 0 0 20px; border-color: var(--line); }
+.library-page .header-stat strong { font-family: inherit; font-size: 24px; color: var(--text); }
+.library-page .header-stat span { color: var(--muted); font-size: 13px; }
+.library-page .library-caption, .library-reference .library-caption { margin: 8px 0 14px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.library-page :is(input, textarea, select), .library-reference :is(input, textarea, select) { color: var(--text); background: var(--input-bg); border-color: var(--line-bright); border-radius: 5px; font: inherit; max-width: 100%; }
+.library-page :is(input, textarea)::placeholder, .library-reference :is(input, textarea)::placeholder { color: var(--soft); }
+.library-page :is(button, a, input, select, textarea, summary):focus-visible, .library-reference :is(button, a, input, select, textarea, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.library-page img, .library-reference img { filter: none; mix-blend-mode: normal; opacity: 1; }
+
+/* Reference browser: images first, with a same-page details column when selected. */
+.library-reference.reference-library { min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; }
+.library-reference > fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.library-reference summary { cursor: pointer; font-size: 14px; font-weight: 600; padding-block: 8px; }
+.library-reference label { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: 13px; }
+.library-reference label:has(input[type=checkbox]) { display: flex; align-items: center; gap: 8px; }
+.library-reference :is(input:not([type=checkbox]), textarea, select) { min-width: 0; width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--line-bright); }
+.library-reference textarea { resize: vertical; min-height: 80px; line-height: 1.65; }
+.library-reference button { min-height: 36px; padding: 7px 12px; border: 1px solid var(--line-bright); border-radius: 5px; color: var(--text); background: var(--panel); font: inherit; cursor: pointer; }
+.library-reference button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.library-reference .reference-toolbar { display: grid; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.library-reference .reference-search-row { display: flex; gap: 10px; align-items: end; }
+.library-reference .reference-search-row label { flex: 1; max-width: 540px; }
+.library-reference .reference-search-row button { min-height: 38px; }
+.library-reference .reference-search-row button:enabled { color: var(--on-accent); border-color: var(--accent); background: var(--accent); }
+.library-reference .reference-search-row button:hover:not(:disabled) { background: var(--accent-hover); }
+.library-reference .reference-filter-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.library-reference .reference-upload { padding-block: 8px; border-bottom: 1px solid var(--line); }
+.library-reference .reference-upload summary { display: list-item; color: var(--accent); }
+.library-reference .reference-upload-form { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(240px, 1.2fr) auto; align-items: end; gap: 12px; padding: 0 0 12px; }
+.library-reference .reference-install-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.library-reference .reference-install-row p { flex: 1; min-width: 220px; margin: 0; color: var(--muted); font-size: 13px; }
+.library-reference .reference-count { margin: 16px 0 12px; color: var(--muted); font-size: 13px; }
+.library-reference .reference-browser { display: grid; gap: 24px; align-items: start; min-width: 0; }
+.library-reference.reference-library-page .reference-browser.has-detail { grid-template-columns: minmax(0, 1fr) minmax(330px, .75fr); }
+.library-reference .reference-results { min-width: 0; }
+.library-reference .reference-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); gap: 18px; margin: 0 0 18px; }
+.library-reference .reference-card { min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 0 0 10px; overflow: hidden; border: 1px solid var(--line); text-align: left; border-radius: 6px; background: var(--panel); }
+.library-reference .reference-card[aria-pressed=true] { border-color: var(--accent); outline: 1px solid var(--accent); }
+.library-reference .reference-card img { display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; object-fit: contain; background: var(--input-bg); }
+.library-reference .reference-card > :is(span, small) { margin-inline: 10px; overflow-wrap: anywhere; }
+.library-reference .reference-card > span { margin-top: 4px; color: var(--text); font-size: 14px; font-weight: 600; line-height: 1.45; }
+.library-reference .reference-card small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.library-reference .reference-detail { min-width: 0; max-width: none; padding: 0 0 24px 24px; border-left: 1px solid var(--line); overflow-wrap: anywhere; }
+.library-reference .reference-detail-heading { display: flex; align-items: start; gap: 12px; justify-content: space-between; margin-bottom: 16px; }
+.library-reference .reference-detail-heading h2 { flex: 1; margin: 0; color: var(--text); font-family: inherit; font-size: 19px; line-height: 1.4; }
+.library-reference .reference-detail-heading button { flex: 0 0 auto; }
+.library-reference .reference-detail > :is(label, details, dl, p, button) { margin-bottom: 12px; }
+.library-reference .reference-detail :is(p, dd) { color: var(--muted); font-size: 13px; line-height: 1.65; }
+.library-reference .reference-detail dt { font-size: 13px; font-weight: 600; }
+.library-reference .reference-detail dd { margin: 3px 0 12px; }
+.library-reference .reference-detail details { padding-block: 8px; border-block: 1px solid var(--line); }
+.library-reference .reference-detail h3 { font-size: 14px; }
+.library-reference .reference-image-open { display: block; width: 100%; padding: 0; border-color: var(--line); background: var(--input-bg); }
+.library-reference .reference-image-open img { display: block; width: 100%; height: min(30vh, 280px); object-fit: contain; }
+.library-reference .reference-start-actions { display: grid; gap: 10px; margin: 16px 0; padding: 16px 0; border-block: 1px solid var(--line); }
+.library-reference .reference-start-actions p { margin: 0; }
+.library-reference .reference-start-actions button:first-of-type:enabled { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.library-reference > [role=status] { color: var(--text); padding: 10px 12px; background: var(--accent-soft); border-left: 3px solid var(--accent); }
+
+/* Artist catalogue uses source images; absent samples remain explicit. */
+.library-page .artist-lab-hero { display: flex; justify-content: space-between; align-items: end; flex-wrap: wrap; gap: 16px 24px; padding: 0 0 20px; border: 0; border-bottom: 1px solid var(--line); background: transparent; }
+.library-page .artist-lab-hero h1 { margin: 0 0 6px; font-family: inherit; font-size: 24px; font-weight: 650; letter-spacing: 0; line-height: 1.3; }
+.library-page .artist-lab-hero p { color: var(--muted); font-size: 14px; }
+.library-page .artist-lab-hero dl { display: flex; gap: 18px; padding: 0; border: 0; background: transparent; }
+.library-page .artist-lab-hero dl div { min-width: 0; padding: 0; border: 0; }
+.library-page .artist-lab-hero dt { color: var(--muted); font-size: 12px; letter-spacing: 0; }
+.library-page .artist-lab-hero dd { color: var(--text); font-family: inherit; font-size: 20px; margin-top: 4px; }
+.library-page .artist-search-console { margin-top: 16px; display: grid; grid-template-columns: auto minmax(200px, 1fr) auto; gap: 16px; padding: 0; border: 0; background: transparent; }
+.library-page .artist-search-hint { display: grid; gap: 2px; padding: 0; }
+.library-page .artist-search-hint strong { font-size: 14px; }
+.library-page .artist-search-hint small { font-size: 12px; color: var(--muted); }
+.library-page .artist-search-console form { min-height: 42px; height: auto; border-color: var(--line-bright); border-radius: 5px; background: var(--input-bg); overflow: hidden; }
+.library-page .artist-search-console form svg { color: var(--muted); }
+.library-page .artist-search-console form input { min-height: 42px; color: var(--text); border: 0; border-radius: 0; background: transparent; }
+.library-page .artist-search-console form button { font-size: 14px; }
+.library-page .artist-search-console form button:enabled { color: var(--on-accent); border-color: var(--accent); background: var(--accent); }
+.library-page .artist-search-console > label { font-size: 12px; color: var(--muted); }
+.library-page .artist-search-console select { min-height: 38px; color: var(--text); background: var(--input-bg); border-color: var(--line-bright); }
+.library-page .artist-result-meta { margin-top: 24px; margin-bottom: 0; gap: 12px; }
+.library-page .artist-result-meta strong { font-family: inherit; font-size: 16px; }
+.library-page .artist-result-meta span { font-size: 13px; color: var(--muted); }
+.library-page .artist-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); align-items: start; gap: 20px; }
+.library-page .artist-card { display: grid; grid-template-rows: auto auto auto 1fr auto; padding: 0; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--panel); box-shadow: none; transform: none; }
+.library-page .artist-card:hover { border-color: var(--line-bright); transform: none; }
+.library-page .artist-library-thumbnail { grid-area: auto; min-width: 0; background: var(--input-bg); border-bottom: 1px solid var(--line); }
+.library-page .artist-library-thumbnail > a { display: grid; padding: 0; height: 100%; color: var(--text); }
+.library-page .artist-library-thumbnail img { display: block; width: 100%; height: 210px; object-fit: contain; }
+.library-page .artist-library-thumbnail > a > span { padding: 7px 12px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); background: var(--panel); overflow-wrap: anywhere; }
+.library-page .artist-thumbnail-empty { min-height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 16px; color: var(--muted); }
+.library-page .artist-thumbnail-empty small { font-size: 12px; color: var(--soft); }
+.library-page .artist-card-copy { padding: 14px 14px 0; }
+.library-page .artist-card-copy h2 { margin: 0 0 4px; font-family: inherit; font-size: 17px; line-height: 1.4; color: var(--text); white-space: normal; overflow-wrap: anywhere; }
+.library-page .artist-card-copy code { color: var(--muted); font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
+.library-page .artist-card > dl { margin: 12px 14px; padding: 0; gap: 20px; border: 0; }
+.library-page .artist-card dt { color: var(--muted); font-size: 12px; }
+.library-page .artist-card dd { color: var(--text); font: inherit; }
+.library-page .artist-preview-tags { padding: 0 14px 12px; margin: 0; }
+.library-page .artist-preview-tags :is(span, small) { color: var(--muted); background: transparent; font-size: 12px; border-color: var(--line); }
+.library-page .artist-card > a { padding: 10px 14px; margin: 0; border-top: 1px solid var(--line); color: var(--accent); background: transparent; font-size: 13px; }
+.library-page .artist-profile-hero { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 0 0 20px; border: 0; border-bottom: 1px solid var(--line); background: transparent; }
+.library-page .artist-profile-copy { flex: 1 1 300px; min-width: 0; }
+.library-page .artist-profile-hero h1 { font-family: inherit; font-size: 24px; line-height: 1.35; margin: 0 0 4px; }
+.library-page .artist-profile-hero code { color: var(--muted); font-size: 13px; }
+.library-page .artist-profile-hero p { color: var(--muted); font-size: 13px; }
+.library-page .artist-profile-hero dl { border-color: var(--line); padding-inline: 16px; gap: 12px; }
+.library-page .artist-profile-hero dt { color: var(--muted); font-size: 12px; }
+.library-page .artist-profile-hero dd { color: var(--text); font-family: inherit; font-size: 16px; }
+.library-page .artist-profile-hero > button { font-size: 13px; color: var(--text); border-color: var(--line-bright); border-radius: 5px; background: var(--panel); }
+.library-page .artist-profile-hero > button:last-child:enabled { color: var(--on-accent); border-color: var(--accent); background: var(--accent); }
+.library-page .artist-detail-samples { padding-block: 20px; border-bottom: 1px solid var(--line); }
+.library-page .artist-detail-samples summary { cursor: pointer; font-weight: 600; }
+.library-page .artist-detail-samples p { font-size: 13px; color: var(--muted); margin: 8px 0 16px; }
+.library-page .artist-detail-samples .reference-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 0; }
+.library-page .artist-detail-samples .reference-cards a { display: grid; min-width: 0; gap: 6px; color: var(--text); }
+.library-page .artist-detail-samples .reference-cards img { width: 100%; height: 210px; object-fit: contain; background: var(--input-bg); border-radius: 5px; }
+.library-page .artist-detail-samples small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.library-page :is(.artist-signature-strip, .artist-context-controls) { padding: 16px 0; border: 0; border-bottom: 1px solid var(--line); background: transparent; }
+.library-page .artist-signature-strip header strong { font-family: inherit; font-size: 16px; }
+.library-page .artist-signature-strip header small { color: var(--muted); font-size: 12px; }
+.library-page .artist-signature-strip > div { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.library-page .artist-signature-strip button { color: var(--text); background: var(--panel); border-color: var(--line-bright); border-radius: 5px; }
+.library-page .artist-signature-strip button span { font-size: 13px; }
+.library-page .artist-signature-strip button small { color: var(--muted); font-size: 12px; }
+.library-page .artist-dimension-tabs button { color: var(--muted); background: var(--panel); font-size: 13px; border-radius: 5px; }
+.library-page .artist-dimension-tabs small { color: var(--muted); background: var(--input-bg); font-size: 11px; }
+.library-page .artist-context-toolbar { gap: 12px; border-color: var(--line); }
+.library-page .artist-context-toolbar label { color: var(--muted); font-size: 13px; }
+.library-page .artist-context-toolbar label:first-child { background: var(--input-bg); border-color: var(--line-bright); border-radius: 5px; }
+.library-page .artist-context-toolbar input { color: var(--text); background: transparent; font-size: 14px; }
+.library-page .artist-context-toolbar select { color: var(--text); background: var(--input-bg); font-size: 13px; border-color: var(--line-bright); }
+.library-page .artist-context-controls > p { color: var(--muted); font-size: 12px; }
+.library-page .artist-context-controls > p strong { color: var(--text); }
+.library-page .artist-context-grid { grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 12px; }
+.library-page .artist-context-card { background: var(--panel); border-color: var(--line); border-radius: 5px; }
+.library-page .artist-context-card h2 { font-family: inherit; font-size: 17px; white-space: normal; }
+.library-page .artist-context-card code { font-size: 12px; color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
+.library-page .context-card-label > span:first-child { color: var(--muted); font-size: 12px; letter-spacing: 0; }
+.library-page .artist-context-card > button { background: var(--panel-raised); border-color: var(--line-bright); color: var(--text); }
+.library-page .artist-context-card :is(dt, dd) { font-size: 12px; color: var(--muted); }
+.library-page .artist-context-card dl div { border-color: var(--line); }
+.library-page .context-score { background: var(--line); }
+.library-page .context-score span { background: var(--accent); }
+.library-page :is(.artist-signature-strip button[aria-pressed=true]:enabled, .artist-dimension-tabs button.is-active:enabled, .artist-context-card.is-selected) { color: var(--text); background: var(--accent-soft); border-color: var(--accent); }
+.library-page .artist-context-card > button[aria-pressed=true]:enabled { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+/* Tag shelves stay compact and retain previews, typed baskets and keyboard controls. */
+.library-page .search-console { padding: 12px 0 16px; border: 0; border-bottom: 1px solid var(--line); background: transparent; box-shadow: none; }
+.library-page .search-box { min-height: 44px; height: auto; border-radius: 5px; background: var(--input-bg); }
+.library-page .search-box input { min-height: 44px; font-size: 14px; background: transparent; }
+.library-page .category-tabs button { min-height: 34px; font-size: 13px; }
+.library-page :is(.featured-shelf, .market-shelf, .group-directory) { padding: 16px 0; border: 0; border-bottom: 1px solid var(--line); background: transparent; }
+.library-page :is(.featured-shelf, .tag-card)::after { display: none; }
+.library-page :is(.featured-shelf, .market-shelf, .group-directory) h2 { margin: 0 0 5px; font-family: inherit; font-size: 18px; }
+.library-page :is(.featured-shelf, .market-shelf, .group-directory) p { font-size: 13px; }
+.library-page .featured-shelf > header { margin-bottom: 14px; }
+.library-page .featured-shelf > header > strong { font-family: inherit; font-size: 22px; color: var(--muted); }
+.library-page .shelf-number { color: var(--soft); font: inherit; padding-top: 1px; }
+.library-page .market-shelves { gap: 24px; }
+.library-page .market-tag { border-radius: 5px; }
+.library-page .market-tag-preview strong { font-size: 14px; }
+.library-page .shelf-index { position: static; flex-wrap: wrap; padding: 8px 0; border: 0; background: transparent; overflow: visible; }
+.library-page .group-directory-header { padding-bottom: 12px; gap: 16px; }
+.library-page .group-directory-header > strong { font-size: 20px; color: var(--muted); }
+.library-page .group-directory-item { border-radius: 5px; }
+.library-page .tag-card { min-height: 130px; padding: 14px; border-radius: 5px; }
+.library-page .tag-card:hover, .library-page .market-tag:hover { transform: none; }
+.library-page .tag-card-name { margin-top: 12px; }
+.library-page .tag-card-name strong { font-family: inherit; font-size: 17px; white-space: normal; }
+.library-page .tag-basket { border-radius: 6px; box-shadow: 0 6px 18px color-mix(in srgb, var(--text) 10%, transparent); }
+.library-page .tag-basket :is(strong, small, button) { font-size: 13px; }
+.library-page .tag-preview-panel header > span { font-size: 13px; letter-spacing: 0; }
+
+/* Appearance preferences remain independent of saved connections and credentials. */
+.library-page .settings-appearance { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(0, 1.2fr); align-items: start; gap: 24px; padding: 0 0 24px; margin-bottom: 24px; border-bottom: 1px solid var(--line); }
+.library-page .settings-appearance h2 { margin: 0 0 6px; font-family: inherit; font-size: 18px; }
+.library-page .settings-appearance p { margin: 0; color: var(--muted); font-size: 13px; }
+.library-page .settings-ranking { padding: 0 0 20px; border: 0; border-bottom: 1px solid var(--line); background: transparent; }
+.library-page .settings-ranking h2 { margin: 0; font-family: inherit; font-size: 18px; }
+.library-page .settings-ranking p { font-size: 13px; }
+.library-page .settings-layout { grid-template-columns: minmax(220px, .6fr) minmax(0, 1.4fr); border: 0; border-block: 1px solid var(--line); background: transparent; }
+.library-page .settings-side { min-height: 0; border-color: var(--line); background: transparent; }
+.library-page .settings-side-head { padding: 18px 16px; }
+.library-page .settings-side-head > span { color: var(--muted); font-size: 13px; letter-spacing: 0; }
+.library-page .settings-form { padding: 20px 24px; }
+.library-page .settings-form-head h2 { font-family: inherit; font-size: 20px; }
+.library-page .settings-form-head p { font-size: 13px; }
+.library-page .settings-security { background: var(--panel); border-color: var(--line); }
+.library-page .remote-profile-item { color: var(--text); background: transparent; border-color: var(--line); }
+.library-page .remote-profile-item.is-selected { background: var(--accent-soft); border-color: var(--accent); }
+.library-page .remote-profile-item :is(strong, small) { color: var(--text); font-size: 13px; }
+.library-page .remote-profile-item small { color: var(--muted); }
+
+/* Disabled controls remain legible and distinct from selected/primary actions. */
+.library-page :is(button, input, textarea, select):disabled,
+.library-reference :is(button, input, textarea, select):disabled { color: var(--disabled-text); background: var(--disabled-bg); border-color: var(--line); opacity: 1; cursor: not-allowed; }
+.library-page :is(input, textarea)[readonly],
+.library-reference :is(input, textarea)[readonly] { color: var(--text); background: var(--panel-raised); }
+
+[data-layout=editorial] .library-page { max-width: 1480px; margin-inline: auto; }
+[data-layout=editorial] .library-page .artist-card-grid { grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); }
+[data-layout=editorial] .library-page .artist-card { grid-template-columns: minmax(130px, .7fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr auto; grid-template-areas: "preview title" "preview meta" "preview tags" "preview action"; }
+[data-layout=editorial] .library-page .artist-library-thumbnail { grid-area: preview; border-bottom: 0; border-right: 1px solid var(--line); }
+[data-layout=editorial] .library-page .artist-library-thumbnail img { height: 100%; max-height: 300px; min-height: 190px; }
+[data-layout=editorial] .library-page .artist-card-copy { grid-area: title; }
+[data-layout=editorial] .library-page .artist-card > dl { grid-area: meta; }
+[data-layout=editorial] .library-page .artist-preview-tags { grid-area: tags; }
+[data-layout=editorial] .library-page .artist-card > a { grid-area: action; }
+[data-layout=editorial] .library-reference .reference-card { border-radius: 2px; }
+
+@media (max-width: 1100px) {
+  .library-reference.reference-library-page .reference-browser.has-detail { grid-template-columns: minmax(0, 1fr) minmax(300px, .9fr); }
+  .library-reference .reference-filter-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .library-reference .reference-cards { grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr)); gap: 12px; }
+  .library-page .artist-search-console { grid-template-columns: minmax(0, 1fr) auto; }
+  .library-page .artist-search-hint { display: none; }
+  .library-page .artist-context-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .library-page .artist-context-toolbar label:first-child { grid-column: 1 / -1; }
+  .library-page .settings-appearance { grid-template-columns: 1fr; gap: 16px; }
+  .library-page .tag-basket { grid-template-columns: 1fr; gap: 10px; }
+}
+@media (max-width: 820px) {
+  .library-reference.reference-library-page .reference-browser.has-detail { grid-template-columns: 1fr; }
+  .library-reference .reference-detail { border-left: 0; border-top: 1px solid var(--line); padding: 20px 0; }
+  .library-reference .reference-upload-form { grid-template-columns: 1fr; }
+  .library-reference .reference-filter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .library-page .artist-detail-samples .reference-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .library-page .settings-layout { grid-template-columns: 1fr; }
+  .library-page .settings-form { padding: 20px 0; }
+  .library-page .settings-side { border-right: 0; border-bottom: 1px solid var(--line); }
+}
+@media (max-width: 520px) {
+  .library-page :is(.artist-lab-hero, .artist-profile-hero) { align-items: start; }
+  .library-page .artist-lab-hero dl { flex-wrap: wrap; }
+  .library-page .artist-search-console { grid-template-columns: 1fr; }
+  .library-page .artist-search-console > label { max-width: 180px; }
+  .library-reference .reference-filter-row { grid-template-columns: 1fr; }
+  .library-reference .reference-search-row { flex-wrap: wrap; }
+  .library-reference .reference-search-row label { flex-basis: 100%; }
+  .library-page .artist-context-toolbar { grid-template-columns: 1fr; }
+  .library-page .artist-signature-strip header { align-items: start; flex-direction: column; gap: 6px; }
+  .library-page .tag-basket-actions { flex-wrap: wrap; }
+  [data-layout=editorial] .library-page .artist-card { grid-template-columns: minmax(110px, .7fr) minmax(0, 1fr); }
+}

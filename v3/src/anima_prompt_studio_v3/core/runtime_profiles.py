@@ -32,6 +32,8 @@ class V3RuntimeProfiles:
                 RuntimeProfile("anima_turbo_v1", 10, 1, "er_sde", "simple"),
                 RuntimeProfile("anima_turbo_v1_1", 10, 1, "er_sde", "simple"),
                 RuntimeProfile("animayume_v1_0_final", 30, 5.5, "euler_ancestral", "normal"),
+                RuntimeProfile("anima_2_9b_preview_v1", 30, 4.0, "euler", "sgm_uniform"),
+                RuntimeProfile("animayume_v1_5_base", 30, 5.5, "euler_ancestral", "normal"),
                 RuntimeProfile("miaomiao_harem_anima_v1_6", 30, 4.5, "euler", "normal"),
             )
         }

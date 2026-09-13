@@ -137,6 +137,23 @@ def build_workflow_recipe_contract(workflow: WorkflowProfile) -> dict[str, objec
             )
         ]
         stages = [{"id": "base", "display_name": "蒸馏生成", **template.model_dump(mode="json")}]
+    elif "anima_2_9b_preview_v1" in model_profiles:
+        default_recipe_id = "anima29_creator"
+        creator = RecipeParameters(steps=30, cfg=4.0, sampler="euler", scheduler="sgm_uniform")
+        recipes = [
+            _recipe("anima29_creator", "作者参数基线", "baseline", creator, "Euler + sgm_uniform，30 步、CFG 4；原生 40 层，无需额外 LoRA。", "model_guidance"),
+            _recipe("anima29_50_steps", "50 步细节对照", "detail_study", creator.model_copy(update={"steps": 50}), "作者建议用 50 步探索细节；更慢，不保证每个提示词都更好。", "model_guidance"),
+            _recipe("anima29_beta", "Beta 调度对照", "creative", creator.model_copy(update={"scheduler": "beta"}), "作者列出的另一调度器，使用相同 Seed 比较构图和细节。", "model_guidance"),
+        ]
+        stages = [{"id": "base", "display_name": "Anima 2.9B 单阶段", **creator.model_dump(mode="json")}]
+    elif "animayume_v1_5_base" in model_profiles:
+        default_recipe_id = "yume15_creator"
+        creator = RecipeParameters(steps=30, cfg=5.5, sampler="euler_ancestral", scheduler="normal")
+        recipes = [
+            _recipe("yume15_creator", "作者参数基线", "baseline", creator, "Euler a + normal，30 步、CFG 5.5；无需额外 LoRA，旧版 LoRA 须另行验证。", "model_guidance"),
+            _recipe("yume15_40_steps", "40 步细节对照", "detail_study", creator.model_copy(update={"steps": 40}), "作者推荐步数区间上沿；保持其余参数不变做对照，不保证质量提升。", "model_guidance"),
+        ]
+        stages = [{"id": "base", "display_name": "AnimaYume 1.5 单阶段", **creator.model_dump(mode="json")}]
     elif is_yume:
         default_recipe_id = "yume_creator"
         creator = RecipeParameters(steps=30, cfg=5.5, sampler="euler_ancestral", scheduler="normal")

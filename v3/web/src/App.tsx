@@ -22,10 +22,11 @@ import {ArtistDetailPage} from "./pages/ArtistDetailPage";
 export default function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapResponse | null>(null);
   const [error, setError] = useState<ApiClientError | null>(null);
+  const [startupAttempt, setStartupAttempt] = useState(0);
 
   useEffect(() => {
     initializeApp().then(setBootstrap).catch((caught) => setError(caught as ApiClientError));
-  }, []);
+  }, [startupAttempt]);
 
   useEffect(() => {
     if (!bootstrap?.features.gallery) return;
@@ -74,7 +75,10 @@ export default function App() {
     return () => { canceled = true; window.clearTimeout(timer); };
   }, [bootstrap]);
 
-  if (error) return <StartupFrame><ErrorState message={error.message} requestId={error.requestId} /></StartupFrame>;
+  if (error) return <StartupFrame><ErrorState message={error.message} requestId={error.requestId} onRetry={() => {
+    setError(null);
+    setStartupAttempt(value => value + 1);
+  }} /></StartupFrame>;
   if (!bootstrap) return <StartupFrame><LoadingState label="正在建立本地安全会话…" /></StartupFrame>;
   return (
     <BrowserRouter>

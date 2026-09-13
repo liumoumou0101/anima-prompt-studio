@@ -30,11 +30,11 @@ def capabilities(manager, remote_id, replacement=None):
                         choices.append(value)
     if replacement:
         info["UNETLoader"]["input"]["required"]["unet_name"] = [[replacement]]
-    manager._write("workflow_capabilities:" + remote_id, {"checked_at": time.time(), "fingerprint": fingerprint(manager.remote(remote_id)), "object_info": info})
+    manager._write("workflow_capabilities:" + remote_id, {"checked_at": time.time(), "fingerprint": fingerprint(manager.remote(remote_id)), "object_info": info, "comfyui_version": "0.35.0"})
 
 
 def test_empty_database_uses_resources_without_seeding(manager):
-    assert len(catalog(manager.database)) == 9
+    assert len(catalog(manager.database)) == 11
     repo = SQLiteRepository(manager.database)
     assert repo.list_workflow_profiles() == []
     repo.close()
@@ -46,13 +46,13 @@ def test_empty_database_uses_resources_without_seeding(manager):
 def test_local_library_and_preview_need_no_server(tmp_path):
     manager = WorkflowCatalog(tmp_path / "offline.db")
     library = manager.library()
-    assert len(library["items"]) == 9
+    assert len(library["items"]) == 11
     assert all(item["revision"] and item["nodes"] for item in library["items"])
     document = manager.export_profile("23_Turbo_v1.1")
     document["profile"]["compatible_model_profiles"] = []
     preview = manager.preview_import(document)
     assert preview["profile"]["compatible_model_profiles"] == []
-    assert len(manager.library()["items"]) == 9
+    assert len(manager.library()["items"]) == 11
     with pytest.raises(ValueError, match="兼容模型"):
         manager.import_profile(preview)
     preview["profile"]["compatible_model_profiles"] = ["anima_turbo_v1_1"]
@@ -120,6 +120,29 @@ def test_auto_inspection_does_not_bypass_missing_assets(manager, monkeypatch):
     monkeypatch.setattr(manager, "inspect", lambda remote, credentials: capabilities(manager, remote, "different.safetensors"))
     with pytest.raises(ValueError):
         manager.resolve_for_submission("server-a", "23_Turbo_v1.1", None)
+
+
+@pytest.mark.parametrize("version,state", [("0.25.0", "invalid_inputs"), (None, "stale"), ("0.35.0", "ready")])
+def test_expanded_anima_checks_server_version_before_submission(manager, monkeypatch, version, state):
+    capabilities(manager, "server-a")
+    snapshot = manager._read("workflow_capabilities:server-a")
+    snapshot["comfyui_version"] = version
+    manager._write("workflow_capabilities:server-a", snapshot)
+    report = {item["workflow_id"]: item for item in manager.report("server-a")["items"]}
+    workflow_id = "v3_anima_2_9b_preview_v1"
+    assert report[workflow_id]["state"] == state
+    assert report["v3_animayume_v1_5_base"]["state"] == "ready"
+    refreshed = []
+    def inspect(remote_id, credentials):
+        refreshed.append(remote_id)
+        capabilities(manager, remote_id)
+    monkeypatch.setattr(manager, "inspect", inspect)
+    if state == "invalid_inputs":
+        with pytest.raises(ValueError, match="0.33.1"):
+            manager.resolve_for_submission("server-a", workflow_id, None)
+    else:
+        assert manager.resolve_for_submission("server-a", workflow_id, None).id == workflow_id
+    assert refreshed == (["server-a"] if version is None else [])
 
 
 def test_auto_inspection_failure_is_safe_and_retryable(manager, monkeypatch):
@@ -261,7 +284,7 @@ def test_archived_version_restores_as_independent_user_copy(manager):
     assert len(versions) == 1
     restored = manager.restore_version("23_Turbo_v1.1", versions[0]["revision"])
     assert restored["id"].startswith("user:")
-    assert len(catalog(manager.database)) == 10
+    assert len(catalog(manager.database)) == 12
 
 
 def test_simple_api_import_and_invalid_graph(manager):

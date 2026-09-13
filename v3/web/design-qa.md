@@ -1,52 +1,49 @@
-# Workbench UI design QA
+# Four-appearance workbench design QA — 2026-09-12
 
-## Conversational workbench — 2026-09-10
+final result: passed
 
-- Fourth batch: official cards support notes/copy; reference requirements can be manually edited; mapping uses server-provided resource digests, slots, filenames, and CAS revisions. Selected frontend suite: 23 passed. The legacy direct-prompt test now selects its fixture's compatible model and waits for workflow details before submitting.
-- `/qa/reference.html` is a separate offline fixture for the requirements editor and mapping panel; all writes are rejected. Inspected expanded editor and selected slot/file at the default desktop viewport and 390 × 844; content width 375 px at 390 px, no horizontal overflow. Fixed checkbox/text alignment. Native browser selection verified that saving stays disabled until a file is selected. Browser and development server were closed afterward.
+## Visual truth and comparison scope
 
-- Reference library added: byte upload, title/notes, explicit vision analysis, overwrite and LoRA preview, pin/unpin, soft removal, and collection from run results. Four additional tests cover explicit pin, blocking unsent workspace edits, opt-in external notes, multipart headers, and 204 deletion.
-- Expanded reference upload area checked at the default desktop viewport and 390 × 844; no horizontal overflow (document width 375 px). Temporary browser viewport and Vite server were restored/stopped after inspection. This visual check covered the empty library/upload area; populated detail behavior is covered by interaction tests, not a screenshot sign-off.
-- LLM configuration is accessible from the conversation page and exposes vision support and ingest thinking settings. Production build and the 19 selected conversation/reference/legacy rewrite/direct tests pass; older unrelated WorkbenchPage failures are still excluded.
+Source directory: `C:/Users/MSN/.codex/generated_images/01a09066-e406-7140-8751-697ff98c5783/`.
 
-- New opt-in route: `/workbench/conversation`; the default workbench remains behind the disabled feature flag.
-- Offline fixture: run Vite and open `/qa/conversation.html`. It intercepts all requests locally and rejects every write; it never calls a model or generates images. The fixture is not a production build entry.
-- Inspected the normal desktop viewport and a 390 × 844 viewport using the in-app browser. The two-column layout stacks on narrow screens; measured document width was 375 px within the 390 px viewport, without horizontal overflow. Restored the viewport after inspection.
-- Verified readable receipts, separate rewrite and generate actions, persistent prompt editors, collapsed requirements/resources/settings, and visible locked-layer and readiness labels.
-- Five automated interaction tests cover explicit-only generation, current-token submission, revision conflicts, lost response retries, tentative mode failure, and local draft restoration (some tests cover multiple behaviors).
-- Build verification uses a fresh output directory or `--emptyOutDir false` because clearing an existing output directory currently terminates the Windows native process. Initial CSS suspicion was disproved by the same failure on the unchanged baseline; the page uses the normal CSS import.
+- Studio light: `exec-0c06b537-c878-4579-98e7-36a206012aea.png`.
+- Studio dark: `exec-fe6f0fc6-c301-49fa-92c1-8eff02a86a69.png`.
+- Editorial light: `exec-c2abd623-dd9d-4e16-836d-65b25581a8a9.png`.
+- Editorial dark: `exec-29e68dfc-cffa-43fe-a322-819c838211e0.png`.
 
-## Visual truth and captured state
+Implementation evidence: `H:/soft/提示词工具2/docs/v3/audits/2026-09-12-ui/`. The final four files are `{studio,editorial}-{light,dark}-1440-final.png`; two laptop captures are `studio-1280-final.png` and `editorial-1280-final.png`. Combined source/implementation evidence: the four `*-final-comparison.jpg` files. A focused scene-controls/prompt comparison is saved as `focused-controls.jpg` (density iteration before the final action bar).
 
-- Original long-page reference: `C:\Users\10937\AppData\Local\Temp\codex-clipboard-9778ecf2-98b5-4830-833a-e60be2d39a51.png`
-- Pre-refinement 2K captures: `C:\Users\10937\AppData\Local\Temp\anima-workbench-ui-audit-2026-09-03\01-editor-2k.png`, `02-understanding-2k.png`, and `03-candidates-2k.png`.
-- Pre-refinement laptop capture: `C:\Users\10937\AppData\Local\Temp\anima-workbench-ui-audit-2026-09-03\04-candidates-laptop.png`.
-- Final captures: `C:\Users\10937\AppData\Local\Temp\anima-workbench-ui-qa-2026-09-03\`.
-- Side-by-side comparisons: `compare-01-editor-2k.png` through `compare-04-candidates-laptop.png` in the final capture directory.
-- Captured state: natural-language input compiled locally with two validated candidate lanes; no remote generation was submitted.
+Source images measure 1487×1058 pixels. Main implementation captures measure 1425×1013 pixels for a requested 1440×1024 CSS viewport (browser capture excludes viewport chrome/scrollbar edges). Source images are contained to the implementation image size for combined comparisons; no stretching or pixel-level equality claims. The reference and implementation were opened together in the same review input, and an independent reviewer inspected all four pairs plus the 1280 captures.
 
-## Refinement findings and fixes
+State: an existing conversation with one completed-image fixture, editable prompt, empty optional identity selection, five scene controls, and explicit actions. Final captures also show a local unsent change and selected shot to verify disabled generation. The concept uses imaginary multi-image Frieren content; the offline fixture uses a locally collected meadow reference and a single image, explicitly labelled as a layout sample. Different content, absence of fabricated character portraits and additional runtime controls are intentional, based on the implementation constraints in `docs/v3/UI_REDESIGN_20260912.md`. This is an implementation of the selected layouts and interaction requirements, not evidence of image-generation fidelity.
 
-- P1 — 2K underused the available desktop width. The workbench-only page now grows to 1840 px; its usable flow increased from about 1086 px to 1502 px while keeping the global navigation and local outline visually separate.
-- P1 — picture understanding was a single deeply nested stack. At 2K it now uses a balanced 55/45 plan-and-evidence split, with confirmed facts grouped under the editable plan. The checked section height dropped from about 1792 px to 1278 px.
-- P1 — validation and remote-generation summaries consumed two full rows before candidates. They now share one compact summary row on FHD and 2K, and stack safely on the laptop viewport.
-- P2 — candidate cards were narrow and tall at 2K. They changed from about 537 × 738 px to 744 × 663 px, with tighter prompt spacing and aligned footers while preserving the two-column comparison.
-- P2 — the page-local outline used 7–9 px metadata. Its labels, metadata, badges, and guidance now use clearer 8–11 px sizing and higher secondary-text contrast.
-- P2 — generation controls did not use 2K width efficiently. They use five columns at 2560 px, remain three columns at 1920 px and 1280 px, and preserve all existing controls and values.
-- The existing dark palette, typography, focus treatment, disclosure behavior, and candidate-lane colors are preserved. No generation, API, workflow, preset, or state logic was changed.
+## Findings and iteration history
 
-## Desktop resolution checks
+- P1 fixed: the interrupted implementation had new layout markup but old hardcoded black/purple workbench CSS. Replaced the workbench presentation and connected shared tokens throughout controls and states.
+- P2 fixed: the optional identity editor used tall multi-line fields and pushed the prompt far below the fold (`01-studio-before-density-fix.png`). It now uses three compact rows when expanded, folds to one line when empty, and preserves mounted fields and their values.
+- P2 fixed after first full comparison: model information and all three main actions were below the desktop viewport (`*-1440.png`, `*-1280.png`). Final screenshots show a fixed desktop bar containing model/size/count, readiness, Update Prompt, Save, and Generate. In a 1280×800 CSS viewport its bottom is 784px; at 1440×1024 it is 1008px. Narrow screens place the same controls in normal flow. No duplicated business actions were introduced.
+- P2 fixed: selecting Generation Settings opened a distant section without showing it. It now opens and scrolls to the actual parameter section. The action-bar shortcut also reopens a manually collapsed section. Evidence: `editorial-390-settings.png`; regression tests retain prompt-node identity, manual text and negative text.
+- Post-fix review: no remaining actionable P0/P1/P2 visual issue found in the captured scope. Keyboard Tab from the gaze selector focuses the target input above the bar: input bottom 413.9px, bar top 701.6px at 1280×800. Inputs use scroll margins; page bottom padding keeps final content reachable.
 
-- Standard 2K, 2560 × 1440: 1840 px workbench page, 1704 px local layout, 1502 px content flow, five-column generation controls, two-column picture understanding, 744 px candidate cards, and no horizontal overflow.
-- Standard FHD, 1920 × 1080: 1673 px workbench page, 1335 px content flow, 184 px local outline, three-column generation controls, stacked picture understanding, 660 px candidate cards, and no horizontal overflow.
-- Current laptop effective viewport, 1280 × 800: 1033 px workbench page, 738 px content flow, 176 px local outline, three-column generation controls, stacked picture understanding, two 362 px candidate cards, and no horizontal overflow.
-- Tablet and mobile layouts remain outside this acceptance scope and were not used as release criteria.
+## Required fidelity surfaces
 
-## Interaction and code checks
+- Fonts/typography: shared Chinese-capable Segoe UI / Microsoft YaHei UI / PingFang SC sans-serif; main prompt 14px in studio and 16px in editorial, with generous line height. Editorial's Latin brand uses Georgia while Chinese body remains sans-serif as required. Metadata uses smaller secondary text. No oversized English decoration remains.
+- Spacing/layout rhythm: side navigation and paired editing/result regions in studio; top navigation and prompt-priority composition in editorial. Shared actions remain available at desktop size. The five-control schema and explicit source review intentionally require more vertical space than the illustrative mock. Single-column reflow preserves all controls.
+- Colors/tokens: warm light panels, neutral charcoal night panels, green and terracotta accents. Automated palette checks cover text, semantic colors, primary-button text, control boundaries and focus for all four combinations. No purple backgrounds remain in the workbench. Disabled controls remain readable.
+- Image quality/assets: real imported/reference thumbnails are used; images retain aspect ratio and have no theme filter (`filter: none` in all four combinations). A single result is shown as one result, without fake thumbnail variants or generated identity portraits. Icons come from the established Phosphor library.
+- Copy/content: Chinese operational labels retain separate meanings for advice, adopting a suggestion, updating prompts, saving and generating. Requirements, pending input and unavailable generation remain explicit. Unknown model parameters are not supplied by the visual layer.
 
-- Local outline navigation updates the active item and moves between editor, understanding, candidates, and artist regions.
-- Candidate disclosure closes and reopens without losing the compiled result.
-- Browser console reported zero warnings and zero errors in the checked flow.
-- `npm test -- --run`: 45 tests passed.
-- `npm run build`: passed; the existing Vite advisory for a JavaScript chunk larger than 500 kB remains unchanged.
-- Final result: passed.
+## Interactions and validation
+
+- Four-mode switching retained unsent text, manually edited prompt, selected shot and image. Layout changes keep the same route/component nodes, maintain reading anchors when scrolled and do not steal focus; theme changes do not add scrolling.
+- Scene controls change local drafts; an offline advice failure preserves inputs. Unit/integration coverage includes stale results, target ownership, locked layers, sources, clear/undo and conflict handling.
+- Actual local production app was opened after rebuilding and restarting the API. Its existing conversation list and reference thumbnails loaded; reference light/dark rendering was checked (`references-dark-1440.png`). Captured production/browser error and warning logs were empty in the checked flow.
+- Requested viewports and measured document widths: 1440→1425px; 1280→1265px; 720→705px; 390→375px. No horizontal document overflow found. 720×512 is a reflow-width check; the in-app browser did not respond to zoom keyboard shortcuts, so actual browser 200% zoom is still unverified.
+- Backend full suite: 609 passed. Frontend full suite before the final parameter-navigation/action-bar changes: 33 files, 208 passed. Final affected workbench/shell/appearance suites: 55 passed; the current frontend contains 209 tests. TypeScript and production build passed.
+- Build command: `npm run build -- --emptyOutDir false`. Regular output-directory cleanup hit the previously documented Windows native-process exit; preserving dist succeeds. The existing bundle-size advisory remains.
+
+## Follow-up polish and limits
+
+P3: studio at 1280×800 still requires scrolling to read the full prompt; the action bar makes the key actions immediately accessible. Repeated title/selector/state metadata could be compressed further, and the bar could show the recipe name alongside the model.
+
+No new real LLM or GPU request was made. Visual/state checks do not prove natural-language semantic correctness or model image quality. Actual 200% browser zoom and a new Windows installer roundtrip remain outside this verified pass. Existing alpha.3 release packages have not been rebuilt with this UI.

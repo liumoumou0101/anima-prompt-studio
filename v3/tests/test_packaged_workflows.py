@@ -9,7 +9,7 @@ from anima_prompt_studio_v3.adapters.v2 import ensure_packaged_workflow_profiles
 def test_packaged_community_workflows_seed_a_new_v2_database(tmp_path: Path) -> None:
     database = tmp_path / "v2.db"
 
-    assert ensure_packaged_workflow_profiles(database) == 9
+    assert ensure_packaged_workflow_profiles(database) == 11
     assert ensure_packaged_workflow_profiles(database) == 0
 
     repository = SQLiteRepository(database)
@@ -72,7 +72,7 @@ def test_unknown_existing_record_is_not_claimed(tmp_path):
         repository.save_workflow_profile(original.model_copy(update={"notes": "legacy custom"}))
     finally:
         repository.close()
-    assert module.ensure_packaged_workflow_profiles(database) == 8
+    assert module.ensure_packaged_workflow_profiles(database) == 10
     repository = SQLiteRepository(database)
     try:
         assert repository.get_workflow_profile(original.id).notes == "legacy custom"

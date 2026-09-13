@@ -11,6 +11,8 @@ beforeEach(() => {
     ["anima_aesthetic_v1_1", "stable_baseline", 35, 4.5, "euler", "normal"],
     ["anima_turbo_v1_1", "turbo_v11_baseline", 10, 1, "er_sde", "simple"],
     ["animayume_v1_0_final", "yume_creator", 30, 5.5, "euler_ancestral", "normal"],
+    ["anima_2_9b_preview_v1", "anima29_creator", 30, 4, "euler", "sgm_uniform"],
+    ["animayume_v1_5_base", "yume15_creator", 30, 5.5, "euler_ancestral", "normal"],
   ].map(([model, recipe, steps, cfg, sampler, scheduler]) => ({
     remote_profile_id: "cloud", remote_display_name: "cloud", workflow_profile_id: model,
     workflow_display_name: model, compatible_model_profiles: [model], workflow_kind: "txt2img_basic",
@@ -42,4 +44,13 @@ it.each([["direct", DirectPromptPage], ["classic", WorkbenchPage]] as const)("ch
   fireEvent.change(screen.getByLabelText("模型配置"), {target:{value:"animayume_v1_0_final"}});
   await waitFor(() => expect(screen.getByLabelText("CFG")).toHaveValue(5.5));
   expect(screen.getByLabelText("采样步数 Steps")).toHaveValue(30);
+  fireEvent.change(screen.getByLabelText("模型配置"), {target:{value:"anima_2_9b_preview_v1"}});
+  await waitFor(() => expect(screen.getByLabelText("远程工作流")).toHaveValue("anima_2_9b_preview_v1"));
+  expect(screen.getByLabelText("CFG")).toHaveValue(4);
+  expect(screen.getByLabelText("调度器 Scheduler")).toHaveValue("sgm_uniform");
+  fireEvent.change(screen.getByLabelText("CFG"), {target:{value:"7"}});
+  fireEvent.change(screen.getByLabelText("模型配置"), {target:{value:"animayume_v1_5_base"}});
+  await waitFor(() => expect(screen.getByLabelText("远程工作流")).toHaveValue("animayume_v1_5_base"));
+  expect(screen.getByLabelText("CFG")).toHaveValue(5.5);
+  expect(screen.getByLabelText("调度器 Scheduler")).toHaveValue("normal");
 });

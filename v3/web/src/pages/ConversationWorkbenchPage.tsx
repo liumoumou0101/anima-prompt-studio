@@ -1,15 +1,21 @@
 import {ImagePreview} from "../components/ImagePreview";
 import {ArtistRecommendations} from "../components/ArtistRecommendations";
+import {SceneDesignControls} from "../components/SceneDesignControls";
+import {sceneFields, sceneChoice} from "../lib/sceneDesign";
+import {ManualIdentityTags} from "../components/ManualIdentityTags";
+import {GenerationAssessment} from "../components/GenerationAssessment";
 import {loadGallery} from "../lib/galleryStore";
 import type {GalleryAsset} from "../lib/types";
 import {useEffect, useRef, useState} from "react";
 import {Link, useSearchParams} from "react-router-dom";
 import {ChatCircleDots, Check, Copy, GearSix, ImageSquare, PaperPlaneRight, Plus, SlidersHorizontal, Sparkle} from "@phosphor-icons/react";
 import {apiRequest, ApiClientError} from "../lib/api";
-import {seedInput, applyGenerationRecipe, defaultGenerationSettings, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
+import {seedInput, applyGenerationRecipe, changeGenerationModel, defaultGenerationSettings, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
+import {defaultTarget} from "../lib/workflowTargets";
 import {modelProfileChoices, LEGACY_AESTHETIC, resolveLegacyAesthetic} from "../lib/modelProfiles";
 import {negativeGuidance, appendNegative} from "../lib/negativeGuidance";
-import {cleanRequirements, editableRequirements, hasUncompiledInputs, hasUnsavedInputs, layerLabels} from "../lib/conversation";
+import {cleanRequirements, editableRequirements, emptyRequirements, hasUncompiledInputs, hasUnsavedInputs, layerLabels} from "../lib/conversation";
+import {applySelectedContent, consumeTransfer, readTransfer, undoSelectedContent, type ContentTransfer, type SelectedContent} from "../lib/contentTransfer";
 import "./conversationWorkbench.css";
 import {LlmSettingsPanel} from "../components/LlmSettingsPanel";
 import {LoraMappingPanel, type ResourceIdentity} from "./LoraMappingPanel";
@@ -33,6 +39,11 @@ function localFrom(record: ConversationRecord): LocalConversation {
 export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}: {modelProfiles?: ModelProfileOption[]; remoteEnabled?: boolean}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedWorkspace = searchParams.get("workspace");
+  const requestedTransfer = searchParams.get("transfer");
+  const [initialLoaded, setInitialLoaded] = useState(false);
+  const transferAttempt = useRef("");
+  const [transferRetry, setTransferRetry] = useState(0);
+  const [transferNotice, setTransferNotice] = useState<{workspace: string; added: SelectedContent[]} | null>(null);
   const [record, setRecord] = useState<ConversationRecord | null>(null);
   const current = useRef<ConversationRecord | null>(null);
   const [local, setLocal] = useState<LocalConversation | null>(null);
@@ -42,6 +53,13 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
   const [error, setError] = useState("");
   const [showLlmSettings, setShowLlmSettings] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<"prompt" | "requirements" | "settings">("prompt");
+  useEffect(() => {
+    if (inspectorTab !== "settings") return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("panel-settings")?.scrollIntoView?.({block: "start", behavior: "instant"});
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [inspectorTab]);
   const [idea, setIdea] = useState("");
   const [copied, setCopied] = useState("");
   const [comparison, setComparison] = useState<{before: {positive: string; negative: string}; after: {positive: string; negative: string}} | null>(null);
@@ -81,7 +99,7 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
     setBusy("打开工作台"); setError("");
     try {
       const next = await apiRequest<ConversationRecord>(`/api/v3/workspaces/${encodeURIComponent(id)}`);
-      if (!mounted.current || sequence !== opening.current) return;
+      if (!mounted.current || sequence !== opening.current) return false;
       const recovered = read<LocalConversation>(draftKey(id));
       adopt(next);
       setWorkspaces(items => items.some(item => item.id === next.id) ? items : [next, ...items]);
@@ -94,30 +112,81 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
       setRun(null); setRecentRuns([]); setAvailability(null); setComparison(null);
       write(ACTIVE, id);
       if (requestedWorkspace && requestedWorkspace !== id) clearWorkspaceLink();
-    } catch (caught) {if (mounted.current && sequence === opening.current) setError((caught as Error).message);}
+      return true;
+    } catch (caught) {if (mounted.current && sequence === opening.current) setError((caught as Error).message); return false;}
     finally {if (mounted.current && sequence === opening.current) setBusy("");}
   }
 
   useEffect(() => {
     mounted.current = true;
-    void apiRequest<WorkspaceListResponse>("/api/v3/workspaces?limit=50").then(result => {
+    setInitialLoaded(false);
+    void apiRequest<WorkspaceListResponse>("/api/v3/workspaces?limit=50").then(async result => {
       if (!mounted.current) return;
       setWorkspaces(result.items);
       const id = requestedWorkspace || read<string>(ACTIVE);
-      if (id && current.current?.id !== id) void open(id);
+      const opened = !id || current.current?.id === id || await open(id);
+      if (mounted.current && opened) setInitialLoaded(true);
     }).catch(caught => {if (mounted.current) setError((caught as Error).message);});
     if (remoteEnabled) void apiRequest<GenerationTargetListResponse>("/api/v3/generation-targets").then(result => {
       if (mounted.current) setTargets(result.items);
     }).catch(caught => {if (mounted.current) setError((caught as Error).message);});
     return () => {mounted.current = false; opening.current++;};
-  }, [remoteEnabled, requestedWorkspace]);
+  }, [remoteEnabled, requestedWorkspace, transferRetry]);
+
+  useEffect(() => {
+    if (!requestedTransfer || !initialLoaded || busy || pending || conflict || transferAttempt.current === requestedTransfer) return;
+    transferAttempt.current = requestedTransfer;
+    try {
+      const transfer = readTransfer(requestedTransfer);
+      if (transfer) void receiveContent(transfer);
+      else {clearTransferLink(); setError("这批内容已带入或已过期，请在画面要求中查看，或重新选择。");}
+    } catch (caught) {setError((caught as Error).message);}
+  }, [requestedTransfer, initialLoaded, busy, pending, conflict, transferRetry]);
+
+  function clearTransferLink() {
+    setSearchParams(previous => {const next = new URLSearchParams(previous); next.delete("transfer"); return next;}, {replace: true});
+  }
+  async function receiveContent(transfer: ContentTransfer) {
+    await act("带入已选内容", async () => {
+      let next = record, value = local;
+      if (transfer.destination === "new" || !next || !value) {
+        // Validate the selection before creating a server record.
+        const initial = applySelectedContent(emptyRequirements(), transfer.items);
+        const creationKey = `anima-content-transfer-create:${transfer.id}`;
+        const body = read<string>(creationKey) || JSON.stringify({
+          title: transfer.items.map(item => item.name).join("、").slice(0, 40), draft: {
+            model_profile: local?.model || profiles.find(p => p.id === "anima_aesthetic_v1_1")?.id || profiles[0].id,
+            requirements_edit: initial.requirements, generation_settings: local?.settings || defaultGenerationSettings()}});
+        localStorage.setItem(creationKey, JSON.stringify(body));
+        next = await apiRequest<ConversationRecord>("/api/v3/workspaces", {method: "POST", body,
+          headers: {"Idempotency-Key": transfer.id}});
+        value = localFrom(next);
+        // The server already saved these tags; retain the additions for undo.
+        setTransferNotice({workspace: next.id, added: initial.added});
+        adopt(next); write(ACTIVE, next.id); setWorkspaces(items => [next!, ...items]);
+        setPending(null); setRun(null); setRecentRuns([]); setComparison(null); setAvailability(null);
+        if (requestedWorkspace) clearWorkspaceLink();
+      } else {
+        const result = applySelectedContent(value.requirements, transfer.items);
+        value = {...value, requirements: result.requirements};
+        // Do not consume the transfer unless its draft can be recovered after reload.
+        localStorage.setItem(draftKey(next.id), JSON.stringify(value));
+        setLocal(value); setTransferNotice({workspace: next.id, added: result.added});
+      }
+      consumeTransfer(transfer.id); remove(`anima-content-transfer-create:${transfer.id}`); clearTransferLink(); setInspectorTab("requirements");
+    });
+  }
 
   const dirty = Boolean(record && local && hasUnsavedInputs(record, local));
   const compileInputsChanged = Boolean(record && local && hasUncompiledInputs(record, local));
   const needsCompile = compileInputsChanged || record?.draft.compile_state !== "fresh";
   const canCompileRequirements = Boolean(local && [local.requirements.layers.subject.text, local.requirements.layers.style.text,
+    ...(local.requirements.layers.subject.character_tags || []), ...(local.requirements.layers.subject.series_tags || []),
+    ...(local.requirements.layers.subject.general_tags || []),
+    ...(local.requirements.layers.style.manual_artist_tags || []),
     local.requirements.layers.style.medium, ...local.requirements.layers.style.artists, local.requirements.layers.lighting.text,
-    local.requirements.layers.composition.text, local.requirements.layers.composition.shot].some(value => value.trim()));
+    local.requirements.layers.composition.text, local.requirements.layers.composition.shot,
+    ...sceneFields.map(field => sceneChoice(local.requirements, field)?.value || "")].some(value => value.trim()));
   const target = local && local.model !== LEGACY_AESTHETIC ? targets.find(item => item.remote_profile_id === local.settings.remote_profile_id
     && item.workflow_profile_id === local.settings.workflow_profile_id && item.compatible_model_profiles.includes(local.model)) : undefined;
 
@@ -153,7 +222,13 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
 
   function edit(patch: Partial<LocalConversation>) {
     if (!local || !record) return;
-    const value = {...local, ...patch}; setLocal(value); write(draftKey(record.id), value);
+    const value = {...local, ...patch};
+    if (patch.model && patch.model !== local.model) {
+      const compatible = targets.filter(item => item.compatible_model_profiles.includes(patch.model!));
+      const next = defaultTarget(compatible.filter(item => item.remote_profile_id === local.settings.remote_profile_id)) || defaultTarget(compatible);
+      value.settings = changeGenerationModel(local.settings, next);
+    }
+    setLocal(value); write(draftKey(record.id), value);
   }
   function clearWorkspaceLink() {
     setSearchParams(previous => {const next = new URLSearchParams(previous); next.delete("workspace"); return next;}, {replace: true});
@@ -261,7 +336,7 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
   }
 
   return <section className="conversation-workbench">
-    <header className="conversation-heading"><div><p className="eyebrow">ANIMA STUDIO <span> / </span> WORKBENCH</p><h1>会话创作 <span className="conversation-preview-label">预览</span></h1><p>把想法写下来，让画面逐步成形。</p></div>
+    <header className="conversation-heading"><div className="conversation-title"><h1>{record?.title || "开始创作"}</h1>{record && <span className="conversation-save-state">{dirty || local?.delta.trim() || promptChanged ? "草稿已保留" : "已保存"}</span>}</div>
       <div className="conversation-actions conversation-toolbar">
         <button aria-expanded={showLlmSettings} aria-controls="conversation-llm-settings" disabled={Boolean(busy)} onClick={() => setShowLlmSettings(value => !value)}><GearSix size={17} aria-hidden="true" />LLM 设置</button>
         <button className="conversation-new" disabled={Boolean(busy)} onClick={() => void create()}><Plus size={16} aria-hidden="true" />新会话</button>
@@ -272,6 +347,11 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
     {showLlmSettings && <div id="conversation-llm-settings"><LlmSettingsPanel /></div>}
     {error && <p role="alert" className="conversation-error">{error}</p>}
     {busy && <p role="status">{busy}…</p>}
+    {requestedTransfer && error && <button disabled={Boolean(busy)} onClick={() => {transferAttempt.current = ""; setInitialLoaded(false); setTransferRetry(value => value + 1);}}>重试带入</button>}
+    {record && local && transferNotice?.workspace === record.id && <p role="status">{transferNotice.added.length ? `已加入 ${transferNotice.added.length} 个标签，原有草稿已保留。` : "所选标签已在当前要求中，没有重复添加。"}
+      {transferNotice.added.length > 0 && <button disabled={Boolean(busy || pending || conflict)} onClick={() => {
+        edit({requirements: undoSelectedContent(local.requirements, transferNotice.added)}); setTransferNotice(null);
+      }}>撤销本次带入</button>}</p>}
     {!local || !record ? <section className="conversation-empty"><Sparkle size={30} aria-hidden="true" /><h2>这次，想画些什么？</h2><p>人物、动作、场景或一种氛围，从你最在意的部分开始。</p>
       <label htmlFor="conversation-idea" className="conversation-sr-only">创作想法</label><textarea id="conversation-idea" rows={4} value={idea} maxLength={4000} onChange={event => setIdea(event.target.value)} placeholder="例如：栗色长发的女孩坐在窗边，双手捧着咖啡杯，窗外樱花盛开。" />
       <div className="conversation-starters">{[{title: "日常人物", text: "栗色长发的女孩坐在窗边，双手捧着咖啡杯，清透赛璐璐风格。"}, {title: "幻想场景", text: "身穿白金盔甲的骑士站在空中花园，披着蓝色披风，远处是浮空城堡。"}, {title: "水彩插画", text: "戴尖帽的魔女双手捧着小白花，站在有蕨类和萤火虫的森林，透明水彩风格。"}].map(item => <button key={item.title} disabled={Boolean(busy)} onClick={() => setIdea(item.text)}>{item.title}</button>)}</div>
@@ -288,48 +368,78 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
         <li><strong>3 · 生成条件</strong><span>{dirty && !compileInputsChanged ? "参数待保存，无需重新编译" : target ? `${local.settings.width} × ${local.settings.height} · ${local.settings.batch_size} 张` : "尚未选择执行目标"}</span></li>
       </ol>
       <fieldset disabled={Boolean(busy) || Boolean(pending)} className="conversation-layout">
-        <section className="conversation-dialogue">
-          <div className="conversation-panel-heading"><div><ChatCircleDots size={20} aria-hidden="true" /><h2>创作对话</h2></div><span>{record.draft.conversation_events.length} 次修改</span></div>
-          <div className="conversation-receipts" aria-label="修改记录">{!record.draft.conversation_events.length && <div className="conversation-dialogue-empty"><ChatCircleDots size={30} aria-hidden="true" /><h3>先描述画面，再慢慢完善</h3><p>追加新的想法，或只修改光线、服装等细节。需要保持不变的内容，可在右侧锁定。</p></div>}
-            {record.draft.conversation_events.map((event, index) => <article key={event.id}><div className="conversation-event-meta">修改 {index + 1}</div><p className="conversation-user">{event.delta || "重新编译当前要求"}</p>
-              <p>已更新：{event.changed_layers.map(name => layerLabels[name]).join("、") || "提示词"}</p>{event.warnings.map((warning, i) => <p key={i} className="conversation-warning">{warning}</p>)}</article>)}</div>
+        <section className="conversation-editor" aria-label="创作编辑区" data-appearance-anchor="editor">
+          <div className="conversation-edit-top">
           <div className="conversation-composer"><label htmlFor="conversation-delta">{record.draft.requirements ? "继续追加要求" : "描述你想画的内容"}</label>
-            <textarea id="conversation-delta" rows={4} maxLength={4000} value={local.delta} onChange={event => edit({delta: event.target.value})} placeholder="描述人物、动作、场景，或这次希望改变的地方" />
+            <textarea id="conversation-delta" rows={2} maxLength={4000} value={local.delta} onChange={event => edit({delta: event.target.value})} placeholder="描述人物、动作、场景，或这次希望改变的地方" />
             <div className="conversation-actions"><label>改写方式<select value={local.mode} onChange={event => edit({mode: event.target.value as LocalConversation["mode"]})}><option value="faithful">忠实还原</option><option value="expand">适度扩写</option></select></label>
-              <button className="conversation-primary" disabled={conflict || !local.delta.trim()} onClick={() => void turn(false)}><PaperPlaneRight size={16} aria-hidden="true" />发送修改</button>
-              </div><p className="conversation-composer-note">只更新提示词，不会自动生成图片。</p></div>
-        </section>
-        <aside className="conversation-inspector"><div className="conversation-panel-heading"><div><SlidersHorizontal size={20} aria-hidden="true" /><h2>画面工作区</h2></div><span className={`conversation-badge ${!dirty && record.draft.compile_state === "fresh" ? "is-ready" : ""}`}>{dirty ? (compileInputsChanged ? "要求尚未保存" : "参数尚未保存") : promptChanged ? "提示词已手改" : {fresh: "已编译", stale: "需要重新编译", missing: "等待编译"}[record.draft.compile_state]}</span></div>
-          <div className="conversation-tabs" role="tablist" aria-label="画面工作区">{tabs.map((item, index) => <button key={item.id} id={`tab-${item.id}`} role="tab" aria-selected={inspectorTab === item.id} aria-controls={`panel-${item.id}`} tabIndex={inspectorTab === item.id ? 0 : -1} onClick={() => setInspectorTab(item.id)} onKeyDown={event => {
-            const next = event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : null;
-            if (next !== null) {event.preventDefault(); setInspectorTab(tabs[next].id); document.getElementById(`tab-${tabs[next].id}`)?.focus();}
-          }}>{item.label}</button>)}</div>
-          <div id="panel-prompt" role="tabpanel" aria-labelledby="tab-prompt" hidden={inspectorTab !== "prompt"} className="conversation-tab-panel">
+              <Link to="/references">从参考借用</Link>
+              </div></div>
+          <ManualIdentityTags key={record.id} compact modelProfileId={local.model} characters={local.requirements.layers.subject.character_tags || []} series={local.requirements.layers.subject.series_tags || []}
+            artists={local.requirements.layers.style.manual_artist_tags || []} onCharacters={character_tags => layer("subject", {character_tags})}
+            onSeries={series_tags => layer("subject", {series_tags})} onArtists={manual_artist_tags => layer("style", {manual_artist_tags})} />
+            <SceneDesignControls requirements={local.requirements} onChange={requirements => edit({requirements})}
+              workspaceId={record.id} workspaceRevision={record.revision} delta={local.delta}
+              positive={local.positive} negative={local.negative} disabled={Boolean(busy || pending || conflict)} />
+          </div>
+          <div className="conversation-inspector">
+            <div className="conversation-tabs" role="tablist" aria-label="画面工作区">{tabs.map((item, index) => <button key={item.id} id={`tab-${item.id}`} role="tab" aria-selected={inspectorTab === item.id} aria-controls={`panel-${item.id}`} tabIndex={inspectorTab === item.id ? 0 : -1} onClick={() => setInspectorTab(item.id)} onKeyDown={event => {
+              const next = event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : null;
+              if (next !== null) {event.preventDefault(); setInspectorTab(tabs[next].id); document.getElementById(`tab-${tabs[next].id}`)?.focus();}
+            }}>{item.label}</button>)}</div>
+          <div id="panel-prompt" role="tabpanel" aria-labelledby="tab-prompt" hidden={inspectorTab === "requirements"} className="conversation-tab-panel">
           <div className="conversation-field-heading"><label htmlFor="conversation-positive">正向提示词</label><button className="conversation-copy" aria-label="复制正向提示词" disabled={!local.positive} onClick={() => void copyPrompt("positive")}>{copied === "positive" ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}复制</button></div>
-          <textarea id="conversation-positive" className="conversation-prompt" rows={9} maxLength={20000} value={local.positive} placeholder="生成后的英文提示词会显示在这里，也可以直接编辑。" onChange={event => {setCopied(""); edit({positive: event.target.value});}} />
+          <textarea id="conversation-positive" className="conversation-prompt" rows={7} maxLength={20000} value={local.positive} placeholder="生成后的英文提示词会显示在这里，也可以直接编辑。" onChange={event => {setCopied(""); edit({positive: event.target.value});}} />
+          <details className="conversation-negative"><summary>负向提示词 <span>{local.negative.trim() ? "已填写" : "未使用"}</span></summary>
           <div className="conversation-field-heading"><label htmlFor="conversation-negative">负向提示词</label><button className="conversation-copy" aria-label="复制负向提示词" disabled={!local.negative} onClick={() => void copyPrompt("negative")}>{copied === "negative" ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}复制</button></div>
           <textarea id="conversation-negative" className="conversation-prompt" rows={2} maxLength={20000} value={local.negative} placeholder="需要避免的画面内容" onChange={event => {setCopied(""); edit({negative: event.target.value});}} />
           <p className="conversation-muted">{negativeGuidance(local.model).note} <a href={negativeGuidance(local.model).source || "https://huggingface.co/circlestone-labs/Anima"} target="_blank" rel="noreferrer">模型作者说明</a></p>
           {negativeGuidance(local.model).text && <button onClick={() => edit({negative: appendNegative(local.negative, negativeGuidance(local.model).text)})}>补充模型负向建议</button>}
+          </details>
           <p className="conversation-muted">正负提示词可直接修改；点击生成时一并保存。</p>
-          <button className="conversation-recompile" disabled={conflict || !canCompileRequirements || !needsCompile || Boolean(local.delta.trim())} onClick={() => void turn(true)}><Sparkle size={16} aria-hidden="true" />重新编译</button>
+
           {comparison && <details className="conversation-prompt-comparison"><summary>查看本次提示词变化</summary><p className="conversation-muted">这里只展示最近一次整理前后的文本，后续手动编辑保留在上方输入框。</p><div>
             <section><h3>整理前</h3><h4>正向</h4><pre>{comparison.before.positive || "空"}</pre><h4>负向</h4><pre>{comparison.before.negative || "空"}</pre></section>
             <section><h3>整理后</h3><h4>正向</h4><pre>{comparison.after.positive || "空"}</pre><h4>负向</h4><pre>{comparison.after.negative || "空"}</pre></section>
           </div></details>}
           <span role="status" className="conversation-sr-only">{copied ? "提示词已复制" : ""}</span></div>
           <div id="panel-requirements" role="tabpanel" aria-labelledby="tab-requirements" hidden={inspectorTab !== "requirements"} className="conversation-tab-panel">
+
+          <div aria-label="明确选择的普通标签"><strong>已选普通标签 · {(local.requirements.layers.subject.general_tags || []).length} / 64</strong>
+            {(local.requirements.layers.subject.general_tags || []).map(tag => <span key={tag}> {tag} <button aria-label={`移除普通标签 ${tag}`} onClick={() => layer("subject", {general_tags: local.requirements.layers.subject.general_tags!.filter(value => value !== tag)})}>移除</button></span>)}
+          </div>
           <p className="conversation-muted">锁定的内容会在后续改写中保留。已锁定 {Object.values(local.requirements.layers).filter(item => item.locked).length} 层。</p>
             {(Object.keys(layerLabels) as LayerName[]).map(name => <div className="conversation-layer" key={name}><div className="conversation-actions"><strong>{layerLabels[name]}</strong><label><input type="checkbox" aria-label={`锁定${layerLabels[name]}要求`} checked={local.requirements.layers[name].locked} onChange={event => layer(name, {locked: event.target.checked})} />锁定改写</label></div>
               {name !== "exclusions" ? <textarea aria-label={`${layerLabels[name]}要求`} rows={2} value={local.requirements.layers[name].text} onChange={event => layer(name, {text: event.target.value})} /> : <>
                 <label>全局排除（每行一项）<textarea value={local.requirements.layers.exclusions.global.join("\n")} onChange={event => layer("exclusions", {global: event.target.value.split("\n")})} /></label>
                 {local.requirements.layers.exclusions.scoped.map((item, i) => <div className="conversation-actions" key={i}><input aria-label={`排除对象 ${i + 1}`} value={item.target} onChange={event => layer("exclusions", {scoped: local.requirements.layers.exclusions.scoped.map((entry, index) => index === i ? {...entry, target: event.target.value} : entry)})} /><input aria-label={`排除内容 ${i + 1}`} value={item.concept} onChange={event => layer("exclusions", {scoped: local.requirements.layers.exclusions.scoped.map((entry, index) => index === i ? {...entry, concept: event.target.value} : entry)})} /><button onClick={() => layer("exclusions", {scoped: local.requirements.layers.exclusions.scoped.filter((_, index) => index !== i)})}>移除</button></div>)}
                 <button onClick={() => layer("exclusions", {scoped: [...local.requirements.layers.exclusions.scoped, {target: "", concept: ""}]})}>添加局部排除</button></>}
-              {name === "style" && <><label>媒介<input value={local.requirements.layers.style.medium} onChange={event => layer("style", {medium: event.target.value})} /></label><label>画师（每行一个，不含 @）<textarea value={local.requirements.layers.style.artists.join("\n")} onChange={event => layer("style", {artists: event.target.value.split("\n")})} /></label></>}
+              {name === "style" && <label>媒介<input value={local.requirements.layers.style.medium} onChange={event => layer("style", {medium: event.target.value})} /></label>}
               {name === "composition" && <label>景别<input value={local.requirements.layers.composition.shot} onChange={event => layer("composition", {shot: event.target.value})} /></label>}
             </div>)}
           </div>
-          <div id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden={inspectorTab !== "settings"} className="conversation-tab-panel">
+            <div className="conversation-update-row">
+              <span>{local.delta.trim() ? "有待整理的修改" : needsCompile ? "要求已改变" : "可直接编辑提示词"}</span>
+            </div>
+          </div>
+          <details className="conversation-history"><summary><ChatCircleDots size={17} aria-hidden="true" />修改记录 <span>{record.draft.conversation_events.length}</span></summary>
+            <div className="conversation-receipts" aria-label="修改记录">{!record.draft.conversation_events.length && <p>整理后的修改记录会保留在这里。</p>}
+              {record.draft.conversation_events.map((event, index) => <article key={event.id}><div className="conversation-event-meta">修改 {index + 1}</div><p className="conversation-user">{event.delta || "重新编译当前要求"}</p>
+                <p>已更新：{event.changed_layers.map(name => layerLabels[name]).join("、") || "提示词"}</p>{event.warnings.map((warning, i) => <p key={i} className="conversation-warning">{warning}</p>)}</article>)}
+            </div>
+          </details>
+        </section>
+      <section ref={resultsPanel} className="conversation-results" aria-label="本会话的生成结果" data-appearance-anchor="results">
+        <header><div><h2>当前结果</h2></div><Link to="/generate">全部任务</Link></header>
+        {recentRuns.length ? <><label>查看生成批次<select disabled={Boolean(busy || pending)} value={run?.id || ""} onChange={event => setRun(recentRuns.find(item => item.id === event.target.value) || null)}>
+          {recentRuns.map(item => <option key={item.id} value={item.id}>{item.created_at ? new Date(item.created_at).toLocaleString() : item.id.slice(0, 8)} · {item.status_message} · {item.artifact_count} 张</option>)}
+        </select></label>{run && <><div className="conversation-result-heading"><p role="status">{run.status_message}</p>
+          <button disabled={Boolean(busy || pending)} onClick={() => void continueRun(run)}>沿用本次条件，新建会话</button></div>
+          {run.error?.message && <p role="alert">{run.error.message}</p>}
+          <RunPreview key={run.id} run={run} showStatus={false} /></>}</> : <div className="conversation-results-empty"><ImageSquare size={42} weight="thin" aria-hidden="true" /><h3>让画面在这里成形</h3><p>整理想法、确认提示词，再生成第一张图片。</p><Link to="/references">浏览参考案例</Link></div>}
+      </section>
+        <section className="conversation-conditions" aria-label="生成条件" data-appearance-anchor="conditions">
+          <div className="conversation-settings-choices">
 
           <label>模型<select disabled={Boolean(record.draft.generation_source)} value={local.model} onChange={event => edit({model: event.target.value})}>{local.model === LEGACY_AESTHETIC && <option value={LEGACY_AESTHETIC} disabled>旧美学配置：请选择 v1.0 或 v1.1</option>}{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.label}</option>)}</select></label>
             <label>执行目标<select disabled={Boolean(record.draft.generation_source)} value={target ? `${target.remote_profile_id}::${target.workflow_profile_id}` : ""} onChange={event => {
@@ -341,6 +451,10 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
               {!target?.generation_recipes?.some(item => item.id === local.settings.preset_id) && <option value={local.settings.preset_id}>{local.settings.preset_id === "custom" ? "自定义参数" : "当前参数"}</option>}
               {target?.generation_recipes?.map(item => <option value={item.id} key={item.id}>{item.display_name}</option>)}
             </select></label>
+
+          </div>
+          <details id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" className="conversation-advanced" open={inspectorTab === "settings" ? true : undefined}>
+            <summary><SlidersHorizontal size={17} aria-hidden="true" />尺寸、采样与 LoRA <span>{local.settings.width} × {local.settings.height} · {local.settings.batch_size} 张</span></summary>
             <div className="conversation-settings-grid">{(["width", "height", "steps", "cfg", "seed", "batch_size"] as const).map(name => <label key={name}>{({width: "宽度", height: "高度", steps: "步数", cfg: "CFG", seed: "种子（-1 随机）", batch_size: "张数"})[name]}<input type={name === "seed" ? "text" : "number"} inputMode={name === "seed" ? "numeric" : undefined} step={name === "cfg" ? 0.1 : 1} value={local.settings[name]} onChange={event => edit({settings: markGenerationCustom(local.settings, {...(name === "width" || name === "height" ? {aspect: "custom" as const} : {}), [name]: name === "seed" ? seedInput(event.target.value) : Number(event.target.value)})})} /></label>)}
               {(["sampler", "scheduler"] as const).map(name => <label key={name}>{name === "sampler" ? "采样器" : "调度器"}<input list={`conversation-${name}-options`} value={local.settings[name]} onChange={event => edit({settings: markGenerationCustom(local.settings, {[name]: event.target.value})})} /><datalist id={`conversation-${name}-options`}>{target?.parameter_capabilities?.[name]?.options.map(value => <option key={value} value={value} />)}</datalist></label>)}
             </div>
@@ -352,20 +466,28 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
             <button onClick={() => edit({requirements: {...local.requirements, loras: local.requirements.loras.filter((_, n) => n !== i)}})}>移除 LoRA</button></div>)}
             <button onClick={() => edit({requirements: {...local.requirements, loras: [...local.requirements.loras, {logical_id: `lora-${local.requirements.loras.length + 1}`, file_name: "", weight: 1, trigger_words: [], required: true, source: {kind: "user"}}]}})}>添加 LoRA</button>
           </details>
-          </div>
-          <div className="conversation-generation-footer">
-          <button disabled={!dirty || conflict} onClick={() => void act("保存要求与设置", async () => {await save();})}>保存要求与设置</button>
-          {(needsCompile || local.delta.trim()) && <button className="conversation-primary" disabled={conflict || (!canCompileRequirements && !local.delta.trim())} onClick={() => void turn(!local.delta.trim())}>{local.delta.trim() ? "整理新想法，更新提示词" : "保存并编译提示词"}</button>}
+
+          </details>
           {dirty && !compileInputsChanged && <p className="conversation-muted">只改尺寸、种子或采样参数时，保存即可保留现有提示词。</p>}
-          <p role="status" id="conversation-generation-reason" className="conversation-muted">{generationReason || "目标与资源可用，可以生成"}</p>
           {!target && <div className="conversation-target-help">{record.draft.generation_source ? <Link to="/workflows">检查原执行环境</Link> : <><button onClick={() => setInspectorTab("settings")}>选择生成目标</button><Link to="/settings">管理服务器</Link></>}</div>}
           {target && Boolean(availability?.resource_requirements?.length) && <LoraMappingPanel
             key={`${target.remote_profile_id}:${target.workflow_profile_id}:${JSON.stringify(availability?.resource_requirements)}`}
             remote={target.remote_profile_id} workflow={target.workflow_profile_id} resources={availability!.resource_requirements!}
             disabled={Boolean(busy || pending || conflict || dirty)} onSaved={() => setMappingEpoch(value => value + 1)} />}
-          <button className="conversation-generate" aria-describedby="conversation-generation-reason" disabled={Boolean(generationReason)} onClick={() => void generate()}><ImageSquare size={19} aria-hidden="true" />生成图片</button>
+          <div className="conversation-generation-footer">
+            <div className="conversation-dock-summary">
+              <button type="button" className="conversation-dock-conditions" aria-label="查看生成条件" onClick={() => {setInspectorTab("settings"); const panel = document.getElementById("panel-settings") as HTMLDetailsElement | null; if (panel) {panel.open = true; panel.scrollIntoView?.({block: "start", behavior: "instant"});}}}>
+                <SlidersHorizontal size={16} aria-hidden="true" /><span>{profiles.find(profile => profile.id === local.model)?.label || local.model} · {local.settings.width} × {local.settings.height} · {local.settings.batch_size} 张</span>
+              </button>
+              <p role="status" id="conversation-generation-reason" className="conversation-muted">{generationReason || "目标与资源可用，可以生成"}</p>
+            </div>
+            <div className="conversation-dock-actions">
+              <button className="conversation-update" disabled={conflict || (!canCompileRequirements && !local.delta.trim()) || (!needsCompile && !local.delta.trim())} onClick={() => void turn(!local.delta.trim())}><PaperPlaneRight size={16} aria-hidden="true" />更新提示词</button>
+              <button disabled={!dirty || conflict} onClick={() => void act("保存要求与设置", async () => {await save();})}>保存要求与设置</button>
+              <button className="conversation-generate" aria-describedby="conversation-generation-reason" disabled={Boolean(generationReason)} onClick={() => void generate()}><ImageSquare size={19} aria-hidden="true" />生成图片</button>
+            </div>
           </div>
-        </aside>
+        </section>
       </fieldset>
       <ArtistRecommendations key={record.id} prompt={local.positive} selected={local.requirements.layers.style.artists}
         disabled={Boolean(busy || pending || conflict)} onChange={artists => layer("style", {artists})} />
@@ -375,16 +497,6 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
         {record.draft.generation_source && <><p>沿用原任务工作流快照。模型与执行目标已锁定；提示词和参数仍可调整。</p>
           <button disabled={Boolean(busy || pending || conflict || dirty || local.delta.trim()) || local.positive !== (record.draft.compiled?.positive || "") || local.negative !== (record.draft.compiled?.negative || "")}
             onClick={() => void act("解除生成来源", async () => adopt(await apiRequest<ConversationRecord>("/api/v3/workbench/generation-source", {method: "DELETE", body: JSON.stringify({workspace_id: record.id, revision: record.revision})})))}>解除原工作流快照，改用当前模板</button></>}
-      </section>
-      <section ref={resultsPanel} className="conversation-results" aria-label="本会话的生成结果">
-        <header><div><h2>生成结果</h2><p>显示最多 20 次任务，进行中的任务优先。历史图片使用当时的生成条件。</p></div><Link to="/generate">管理全部任务 →</Link></header>
-        {recentRuns.length ? <><label>查看生成批次<select disabled={Boolean(busy || pending)} value={run?.id || ""} onChange={event => setRun(recentRuns.find(item => item.id === event.target.value) || null)}>
-          {recentRuns.map(item => <option key={item.id} value={item.id}>{item.created_at ? new Date(item.created_at).toLocaleString() : item.id.slice(0, 8)} · {item.status_message} · {item.artifact_count} 张</option>)}
-        </select></label>{run && <><div className="conversation-result-heading"><p role="status">{run.status_message}</p>
-          <button disabled={Boolean(busy || pending)} onClick={() => void continueRun(run)}>沿用本次条件，新建会话</button></div>
-          {run.error?.message && <p role="alert">{run.error.message}</p>}
-          <p className="conversation-muted">新会话继承该任务的提示词、参数、LoRA 和工作流快照；当前未发送内容保留，不会自动出图。</p>
-          <RunPreview key={run.id} run={run} showStatus={false} /></>}</> : <p className="conversation-results-empty">生成后，图片和任务状态会留在这里。先确认提示词和参数，再点击“生成图片”。</p>}
       </section>
     </>}
   </section>;
@@ -424,7 +536,8 @@ export function RunPreview({run, showStatus = true}: {run: GenerationRunRecord; 
       <button disabled={saving || !item.path} onClick={async () => {setSaving(true); setMessage(""); try {
         const example = await apiRequest<{id: string}>("/api/v3/reference-examples/from-run", {method: "POST", body: JSON.stringify({run_id: run.id, path: item.path})});
         setReferenceId(example.id); setMessage("已存入参考案例库。");
-      } catch (error) {setMessage((error as Error).message);} finally {setSaving(false);}}}>收藏为参考</button></div>)}
+      } catch (error) {setMessage((error as Error).message);} finally {setSaving(false);}}}>收藏为参考</button>
+      {item.path && <GenerationAssessment key={`${run.id}:${item.path}`} runId={run.id} path={item.path} />}</div>)}
     {previewIndex >= 0 && <ImagePreview index={previewIndex} onClose={() => setPreviewIndex(-1)} images={previewItems.map(item => {
       const asset = metadata.find(asset => asset.path === item.path);
       return {src: item.content_url!, alt: asset?.name || item.path?.split(/[\\/]/).pop() || "生成结果",

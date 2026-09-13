@@ -52,6 +52,33 @@ it("links the selected server to the independent workflow resource page", async 
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
+it("keeps appearance available without a connection and preserves connection drafts across all four modes", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({items: [], workflows: [], credential_store_available: true})));
+  const empty = render(<SettingsPage remoteEnabled={false} />);
+  expect(screen.getByLabelText("界面布局")).toBeEnabled();
+  expect(screen.getByLabelText("明暗主题")).toBeEnabled();
+  expect(fetchMock).not.toHaveBeenCalled();
+  empty.unmount();
+  render(<SettingsPage remoteEnabled />);
+  const name = await screen.findByLabelText("显示名称");
+  fireEvent.change(name, {target: {value: "未保存的云主机名称"}});
+  fireEvent.change(screen.getByLabelText("SSH 密码"), {target: {value: "unsaved-test-password"}});
+  const layout = screen.getByLabelText("界面布局") as HTMLSelectElement;
+  const theme = screen.getByLabelText("明暗主题") as HTMLSelectElement;
+  const previous = {layout: layout.value, theme: theme.value};
+  for (const value of ["studio", "editorial"]) {
+    fireEvent.change(layout, {target: {value}});
+    for (const mode of ["light", "dark"]) {
+      fireEvent.change(theme, {target: {value: mode}});
+      expect(name).toHaveValue("未保存的云主机名称");
+      expect(screen.getByLabelText("SSH 密码")).toHaveValue("unsaved-test-password");
+    }
+  }
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  fireEvent.change(layout, {target: {value: previous.layout}});
+  fireEvent.change(theme, {target: {value: previous.theme}});
+});
+
 it("confirms a new host fingerprint and tests SSH plus ComfyUI entirely in V3", async () => {
   const ready = {...profile, host_fingerprint_confirmed: true};
   const settings = (item = profile) => ({items: [item], workflows: [], credential_store_available: true});
@@ -104,7 +131,9 @@ it("opens the selected remote ComfyUI through the managed local tunnel", async (
     .mockResolvedValueOnce(new Response(JSON.stringify(access), {status: 200}));
 
   render(<SettingsPage remoteEnabled />);
-  fireEvent.click(await screen.findByRole("button", {name: "打开 ComfyUI 网页"}));
+  const openButton = await screen.findByRole("button", {name: "打开 ComfyUI 网页"});
+  await waitFor(() => expect(openButton).toBeEnabled());
+  fireEvent.click(openButton);
 
   expect(await screen.findByText(/ComfyUI 维护入口已连接/)).toHaveTextContent(access.local_url);
   expect(fetchMock.mock.calls[1][0]).toBe("/api/v3/settings/remote-profiles/remote-new/open-comfy");

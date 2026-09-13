@@ -8,9 +8,9 @@ from pathlib import Path
 import tempfile
 import time
 
-from anima_prompt_studio.repositories import SQLiteRepository
+from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 from anima_prompt_studio.domain.models import PromptJob, GenerationParams
-from anima_prompt_studio.services.config_service import ConfigService
+from anima_prompt_studio_v3.core.runtime_profiles import V3RuntimeProfiles
 from anima_prompt_studio_v3.adapters.v2.workflow_catalog import WorkflowCatalog, catalog
 from anima_prompt_studio_v3.adapters.v2.generation_queue import build_v2_generation_queue
 from anima_prompt_studio_v3.adapters.v2.generation import V2PreparedGeneration
@@ -23,6 +23,7 @@ def main():
     parser.add_argument("--remote-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--auto-inspect-on-submit", action="store_true")
+    parser.add_argument("--workflow", action="append", help="Only test these workflow IDs; repeat to select multiple")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     repo = SQLiteRepository(args.database)
@@ -41,11 +42,17 @@ def main():
         if not args.auto_inspect_on_submit:
             manager.inspect(remote.id)
         report = manager.report(remote.id)
+        if args.workflow:
+            unknown = set(args.workflow) - {item["workflow_id"] for item in report["items"]}
+            if unknown:
+                raise ValueError(f"Unknown workflows: {sorted(unknown)}")
         print("Cached devices before submission:", report["devices"], flush=True)
         results = []
         queue = build_v2_generation_queue(database)
         try:
             for item in report["items"]:
+                if args.workflow and item["workflow_id"] not in args.workflow:
+                    continue
                 if item["origin"] != "official" or item["experimental"]:
                     continue
                 if item["state"] != "ready" and not args.auto_inspect_on_submit:
@@ -66,7 +73,7 @@ def main():
                     generation_params=GenerationParams(width=640, height=832, batch_size=1, seed=20260905, **default["parameters"]))
                 if model == "anima_turbo_v1_1":
                     job.negative_prompt = ""
-                prepared = V2PreparedGeneration(job, ConfigService().get_model(model).checkpoint_logical_name)
+                prepared = V2PreparedGeneration(job, V3RuntimeProfiles().get_model(model).checkpoint_logical_name)
                 start = time.monotonic()
                 run = queue.submit(prepared, remote_profile_id=remote.id, workflow_profile_id=workflow.id, idempotency_key=job.id)
                 print("Submitted", workflow.id, flush=True)

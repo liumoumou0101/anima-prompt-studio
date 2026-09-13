@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
+from .scene_design import SceneChoice, SceneDesign, SceneField, declared_scene_choices
 
 
 Mode = Literal["faithful", "expand"]
@@ -62,15 +63,49 @@ class TextLayer(TextContent):
     locked: bool = False
 
 
+class SubjectLayer(TextLayer):
+    character_tags: list[ShortText] = Field(default_factory=list, max_length=32)
+    series_tags: list[ShortText] = Field(default_factory=list, max_length=32)
+    general_tags: list[ShortText] = Field(default_factory=list, max_length=64)
+
+    @field_validator("character_tags", "series_tags", "general_tags")
+    @classmethod
+    def manual_tags(cls, values: list[str]) -> list[str]:
+        from .manual_tags import normalize_tag
+        result = []
+        for value in values:
+            if any(char in value for char in (",", "\n", "\r", "@", "<", ">")):
+                raise ValueError("请每项填写一个 tag；画师请使用画师栏。")
+            tag = normalize_tag(value)
+            if tag not in result:
+                result.append(tag)
+        return result
+
+
 class StyleLayer(StyleContent):
     text: str = Field(default="", max_length=10_000)
     medium: str = Field(default="", max_length=200)
     artists: list[ShortText] = Field(default_factory=list, max_length=32)
+    manual_artist_tags: list[ShortText] = Field(default_factory=list, max_length=32)
     locked: bool = False
+
+    @field_validator("manual_artist_tags")
+    @classmethod
+    def manual_artists(cls, values: list[str]) -> list[str]:
+        from .manual_tags import normalize_tag
+        result = []
+        for value in values:
+            tag = normalize_tag(value, artist=True)
+            if not tag or any(char in tag for char in (",", "@", "<", ">")) or any(char in value for char in ("\n", "\r")):
+                raise ValueError("画师请每项填写一个 tag，可带 @ 前缀。")
+            if tag not in result:
+                result.append(tag)
+        return result
 
 
 class LightingLayer(TextLayer):
     include_with_style_pin: bool = False
+    mood: SceneChoice | None = None
 
 
 class CompositionLayer(CompositionContent):
@@ -78,6 +113,7 @@ class CompositionLayer(CompositionContent):
     shot: str = Field(default="", max_length=200)
     locked: bool = False
     include_with_style_pin: bool = False
+    design: SceneDesign | None = None
 
 
 class ExclusionsLayer(ExclusionsContent):
@@ -87,7 +123,7 @@ class ExclusionsLayer(ExclusionsContent):
 
 
 class RequirementLayers(ContractModel):
-    subject: TextLayer
+    subject: SubjectLayer
     style: StyleLayer
     lighting: LightingLayer
     composition: CompositionLayer
@@ -95,7 +131,7 @@ class RequirementLayers(ContractModel):
 
     @classmethod
     def empty(cls) -> RequirementLayers:
-        return cls(subject=TextLayer(), style=StyleLayer(), lighting=LightingLayer(),
+        return cls(subject=SubjectLayer(), style=StyleLayer(), lighting=LightingLayer(),
                    composition=CompositionLayer(), exclusions=ExclusionsLayer())
 
 
@@ -146,6 +182,9 @@ class CompiledPrompt(PromptEdit):
     inputs_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     prompt_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     compiler_contract: Literal["anima-rewrite/1"] = COMPILER_CONTRACT
+    manual_tags: list[str] = Field(default_factory=list, max_length=192)
+    scene_intent: dict[SceneField, SceneChoice] = Field(default_factory=dict, max_length=5)
+    exclusions_fingerprint: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class ReferenceCompat(ContractModel):
@@ -221,6 +260,21 @@ def inputs_fingerprint(draft: dict[str, Any]) -> str:
     requirements = dump(Requirements.model_validate(raw)) if raw is not None else None
     if requirements is not None:
         requirements.pop("revision")
+        # Adding empty manual fields must not invalidate historical compiled
+        # prompts or frozen submission fingerprints.
+        for key in ("character_tags", "series_tags", "general_tags"):
+            if not requirements["layers"]["subject"].get(key):
+                requirements["layers"]["subject"].pop(key, None)
+        if not requirements["layers"]["style"].get("manual_artist_tags"):
+            requirements["layers"]["style"].pop("manual_artist_tags", None)
+        if not requirements["layers"]["lighting"].get("mood"):
+            requirements["layers"]["lighting"].pop("mood", None)
+        composition = requirements["layers"]["composition"]
+        design = {key: value for key, value in (composition.get("design") or {}).items() if value is not None}
+        if design:
+            composition["design"] = design
+        else:
+            composition.pop("design", None)
     return digest({"requirements": requirements, "mode": draft.get("mode", "faithful"),
                    "model_profile": draft.get("model_profile", "anima_aesthetic_v1"),
                    "compiler_contract": COMPILER_CONTRACT})
@@ -234,7 +288,15 @@ def compile_state(draft: dict[str, Any]) -> Literal["missing", "fresh", "stale"]
 
 
 def compile_prompt(draft: dict[str, Any], prompt: PromptEdit, *, source: Literal["llm", "user"]) -> dict:
+    from .manual_tags import declared_tags, render_manual_tags
+    previous = (draft.get("compiled") or {}).get("manual_tags", [])
+    tags = declared_tags(draft.get("requirements")) if source == "llm" else previous
+    if source == "llm" and (tags or previous):
+        prompt = PromptEdit(positive=render_manual_tags(prompt.positive, tags, previous), negative=prompt.negative)
     return dump(CompiledPrompt(**dump(prompt), mode=draft.get("mode", "faithful"), source=source,
+                               manual_tags=tags,
+                               scene_intent=declared_scene_choices(draft.get("requirements")),
+                               exclusions_fingerprint=digest((draft.get("requirements") or {}).get("layers", {}).get("exclusions")),
                                compiled_token=f"cmp_{uuid4().hex}",
                                inputs_fingerprint=inputs_fingerprint(draft),
                                prompt_fingerprint=digest(dump(prompt))))

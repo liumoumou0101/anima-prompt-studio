@@ -8,6 +8,7 @@ from hashlib import sha256
 from io import BytesIO
 import json
 from pathlib import Path
+import re
 import sqlite3
 from uuid import uuid4
 import warnings
@@ -170,9 +171,12 @@ class ExampleStore:
         return self.get(example_id)
 
     def create(self, data: bytes, title: str, metadata: ExampleMetadata, *, content_type=None,
-               origin="upload", origin_ref=None, requirements=None, compat=None, provenance=None):
+               origin="upload", origin_ref=None, requirements=None, compat=None, provenance=None,
+               example_id=None):
         media = inspect_image(data, content_type)
-        example_id = "ex_" + uuid4().hex
+        example_id = example_id or "ex_" + uuid4().hex
+        if re.fullmatch(r"ex_[a-f0-9]{32,64}", example_id) is None:
+            fail("invalid_request", "参考图标识无效。")
         folder = self.root / example_id
         folder.mkdir()
         target = folder / ("original." + media.pop("extension"))
@@ -236,13 +240,22 @@ class ExampleStore:
             db.execute("UPDATE examples SET revision=revision+1,deleted_at=?,updated_at=? WHERE id=?", (now(), now(), example_id))
             self.changed(db)
 
-    def list(self, *, q="", origin=None, limit=40, cursor=None):
+    @staticmethod
+    def catalog_metadata(item):
+        provenance = item.get("provenance") or {}
+        return provenance.get("reference_metadata") or {}
+
+    def list(self, *, q="", origin=None, limit=40, cursor=None,
+             model=None, artist=None, lora_dependency=None, content=None):
         pack = self.official.current()
         pack_stamp = None if pack is None else sha256(json.dumps(dump(pack[1]), sort_keys=True).encode()).hexdigest()
         official = [] if pack is None or origin not in (None, "official") else [self.official.record(pack[0], pack[1], item)
-            for item in pack[2] if q.casefold() in item.title.casefold()]
+            for item in pack[2] if q.casefold() in item.title.casefold() and not model and not artist
+            and lora_dependency in (None, "unknown") and content in (None, "unknown")]
         official.sort(key=lambda item: item["id"])
         pack_status = {"ready": False} if pack is None else {"ready": True, "id": pack[1].pack_id, "count": len(pack[2])}
+        normalized_artist = artist.strip().lstrip("@").casefold().replace(" ", "_") if artist else None
+        filters = [q, origin, model, normalized_artist, lora_dependency, content]
         with self.connect() as db:
             db.execute("BEGIN")
             version = db.execute("SELECT revision FROM example_catalog_revision WHERE id=1").fetchone()[0]
@@ -250,9 +263,9 @@ class ExampleStore:
             if cursor:
                 try:
                     decoded = json.loads(base64.urlsafe_b64decode(cursor))
-                    if len(decoded) != 5 or decoded[:3] != [version, q, origin] or decoded[4] != pack_stamp or type(decoded[3]) is not int or decoded[3] < 0:
+                    if len(decoded) != 4 or decoded[:2] != [version, filters] or decoded[3] != pack_stamp or type(decoded[2]) is not int or decoded[2] < 0:
                         raise ValueError()
-                    offset = decoded[3]
+                    offset = decoded[2]
                 except (ValueError, IndexError, KeyError, TypeError):
                     fail("reference_version_conflict", "参考库或查询已变化，请重新加载列表。")
             # JSON fields stay server-owned; query parameters are bound, never SQL fragments.
@@ -260,15 +273,36 @@ class ExampleStore:
             rows = db.execute("""SELECT * FROM examples WHERE deleted_at IS NULL
                 AND instr(lower(json_extract(payload_json,'$.title') || ' ' ||
                     coalesce(json_extract(payload_json,'$.notes.user_notes'),'') || ' ' ||
-                    coalesce(json_extract(payload_json,'$.notes.external_prompt'),'')),lower(?)) > 0
+                    coalesce(json_extract(payload_json,'$.notes.external_prompt'),'') || ' ' ||
+                    coalesce(json_extract(payload_json,'$.provenance.reference_metadata'),'')),lower(?)) > 0
                 AND (? IS NULL OR json_extract(payload_json,'$.origin')=?)
-                ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?""", (q, origin, origin, max(0,limit + 1-len(selected)), max(0,offset-len(official)))).fetchall()
+                AND (? IS NULL OR json_extract(payload_json,'$.provenance.model_profile')=?
+                     OR json_extract(payload_json,'$.provenance.reference_metadata.checkpoint')=?)
+                AND (? IS NULL OR EXISTS (SELECT 1 FROM json_each(json_extract(payload_json,
+                     '$.provenance.reference_metadata.artists')) WHERE value=?))
+                AND (? IS NULL OR coalesce(json_extract(payload_json,
+                     '$.provenance.reference_metadata.lora_dependency'),'unknown')=?)
+                AND (? IS NULL OR coalesce(json_extract(payload_json,
+                     '$.provenance.reference_metadata.content_level'),'unknown')=?)
+                ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?""", (q, origin, origin, model, model, model,
+                    normalized_artist, normalized_artist, lora_dependency, lora_dependency, content, content,
+                    max(0,limit + 1-len(selected)), max(0,offset-len(official)))).fetchall()
             for item in selected:
                 item.pop("media_path")
                 self.official_notes(db, item)
             selected += [self.record(row) for row in rows]
-            next_cursor = base64.urlsafe_b64encode(json.dumps([version,q,origin,offset+limit,pack_stamp]).encode()).decode() if len(selected) > limit else None
+            next_cursor = base64.urlsafe_b64encode(json.dumps([version,filters,offset+limit,pack_stamp]).encode()).decode() if len(selected) > limit else None
             return {"items": selected[:limit], "next_cursor": next_cursor, "official_pack": pack_status}
+
+    def facets(self):
+        with self.connect() as db:
+            rows = db.execute("SELECT payload_json FROM examples WHERE deleted_at IS NULL").fetchall()
+        records = [json.loads(row[0]) for row in rows]
+        values = [self.catalog_metadata(item) for item in records]
+        models = {self.catalog_metadata(item).get("checkpoint") or (item.get("provenance") or {}).get("model_profile") for item in records}
+        return {"models": sorted(model for model in models if model),
+                "artists": sorted({artist for item in values for artist in item.get("artists", [])}),
+                "count": len(values)}
 
     def content(self, example_id):
         if example_id.startswith("off_"):

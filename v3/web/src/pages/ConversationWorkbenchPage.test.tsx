@@ -2,6 +2,7 @@ import {cleanup, fireEvent, render, screen, waitFor} from "@testing-library/reac
 import {MemoryRouter} from "react-router-dom";
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {ConversationWorkbenchPage} from "./ConversationWorkbenchPage";
+import {transferUrl} from "../lib/contentTransfer";
 import {emptyRequirements, hasUncompiledInputs} from "../lib/conversation";
 import type {ConversationRecord} from "../lib/conversation";
 import {defaultGenerationSettings} from "../lib/generationSettings";
@@ -28,10 +29,11 @@ beforeEach(() => {
     if (url.startsWith("/api/v3/workspaces?")) response = {items: [workspace]};
     else if (url === "/api/v3/workspaces" && init?.method === "POST") {
       workspace = {...workspace, id: "workspace_new", revision: 1, title: body.title,
-        draft: {...workspace.draft, ...body.draft, requirements: null, compiled: null, compile_state: "missing", conversation_events: []}};
+        draft: {...workspace.draft, ...body.draft, requirements: body.draft.requirements_edit ? {...body.draft.requirements_edit, contract: "anima-requirements/1", revision: 1} : null, compiled: null, compile_state: "missing", conversation_events: []}};
       response = workspace;
     }
     else if (url.endsWith("/generation-targets")) response = {items: [target]};
+    else if (url.includes("/identities/preferences?")) response = {recent: [], favorites: [], aliases: []};
     else if (url.includes("/workbench/availability")) response = {availability: "ready"};
     else if (url.endsWith("/direct-prompt/runs")) {
       if (failure === "network") throw new TypeError("offline");
@@ -62,8 +64,27 @@ beforeEach(() => {
 afterEach(() => {cleanup(); vi.restoreAllMocks();});
 async function mount() {
   render(<MemoryRouter><ConversationWorkbenchPage remoteEnabled /></MemoryRouter>);
-  await waitFor(() => expect(screen.getByRole("button", {name: "生成图片"})).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole("button", {name: "生成图片"})).toBeEnabled(), {timeout: 3000});
 }
+
+it("saves manual identity tags and preserves them in the local workspace draft", async () => {
+  await mount();
+  fireEvent.click(screen.getByRole("tab", {name: "画面要求"}));
+  fireEvent.click(screen.getByText("角色、作品与画师", {selector: "summary strong"}));
+  await waitFor(() => expect(screen.getByLabelText("角色 tag（每行一个）").closest("details")).toHaveAttribute("open"));
+  fireEvent.change(screen.getByLabelText("角色 tag（每行一个）"), {target: {value: "Unknown_Hero_(Game)"}});
+  fireEvent.change(screen.getByLabelText("作品 tag（动画／游戏，每行一个）"), {target: {value: "Example_Game"}});
+  fireEvent.change(screen.getByLabelText("画师 tag（每行一个，可带 @）"), {target: {value: "@Sample_Artist"}});
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("cat");
+  fireEvent.click(screen.getByRole("button", {name: "保存要求与设置"}));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].body.draft).toMatchObject({requirements_edit: {layers: {
+    subject: {character_tags: ["unknown hero (game)"], series_tags: ["example game"]},
+    style: {manual_artist_tags: ["sample artist"]},
+  }}});
+  expect(JSON.parse(localStorage.getItem("anima-conversation-draft:workspace_test")!).requirements.layers.subject.character_tags).toEqual(["unknown hero (game)"]);
+  expect(screen.getByRole("button", {name: "生成图片"})).toBeDisabled();
+});
 
 it("saves a pasted large seed without rounding", async () => {
   await mount();
@@ -73,6 +94,30 @@ it("saves a pasted large seed without rounding", async () => {
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0].body.draft).toMatchObject({generation_settings: {seed: "8798399215689017476"}});
   expect(screen.getByLabelText("种子（-1 随机）")).toHaveValue("8798399215689017476");
+});
+
+it("uses each community workflow's parameters after switching model and target", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  const community = [
+    ["anima_2_9b_preview_v1", "anima29_creator", 4, "euler", "sgm_uniform"],
+    ["animayume_v1_5_base", "yume15_creator", 5.5, "euler_ancestral", "normal"],
+  ].map(([model, recipe, cfg, sampler, scheduler]) => ({...target, workflow_profile_id: model,
+    compatible_model_profiles: [model], default_recipe_id: recipe,
+    generation_recipes: [{id: recipe, display_name: recipe, parameters: {steps: 30, cfg, sampler, scheduler}}]}));
+  vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith("/generation-targets")
+    ? new Response(JSON.stringify({items: [target, ...community]})) : original(input, init));
+  await mount();
+  fireEvent.click(screen.getByRole("tab", {name: "生成设置"}));
+  for (const item of community) {
+    fireEvent.change(screen.getByLabelText("CFG"), {target: {value: "7"}});
+    fireEvent.change(screen.getByLabelText("模型"), {target: {value: item.compatible_model_profiles[0]}});
+    expect(screen.getByLabelText("执行目标")).toHaveValue(`cloud::${item.workflow_profile_id}`);
+    expect(screen.getByLabelText("CFG")).toHaveValue(item.generation_recipes[0].parameters.cfg);
+    expect(screen.getByLabelText("采样器")).toHaveValue(item.generation_recipes[0].parameters.sampler);
+    expect(screen.getByLabelText("调度器")).toHaveValue(item.generation_recipes[0].parameters.scheduler);
+    expect(screen.getByLabelText("步数")).toHaveValue(30);
+    expect(screen.getByLabelText("负向提示词")).toHaveValue("");
+  }
 });
 
 it("opens a case workspace from its link and preserves the previous local draft", async () => {
@@ -112,7 +157,8 @@ it("rewrites without generating, then explicitly submits the current token and e
   await mount();
   fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "下雨"}});
   expect(screen.getByRole("button", {name: "生成图片"})).toBeDisabled();
-  fireEvent.click(screen.getByRole("button", {name: "发送修改"}));
+  fireEvent.click(screen.getByRole("button", {name: "更新提示词"}));
+  for (const name of ["更新提示词", "保存要求与设置", "生成图片"]) expect(screen.getByRole("button", {name})).toBeDisabled();
   await screen.findByText("已更新：光影");
   expect(writes.some(item => item.url.includes("/direct-prompt/"))).toBe(false);
   fireEvent.change(screen.getByLabelText("正向提示词"), {target: {value: "hand edited cat"}});
@@ -134,13 +180,13 @@ it("marks requirement edits unsaved and preserves them on revision conflict", as
   fireEvent.click(screen.getByRole("button", {name: "保存要求与设置"}));
   await screen.findByText("服务端已有更新，你未提交的输入仍在这里。");
   expect(screen.getByLabelText("主体要求")).toHaveValue("本地的狐狸");
-  expect(screen.getByRole("button", {name: "生成图片"})).toBeDisabled();
+  for (const name of ["更新提示词", "保存要求与设置", "生成图片"]) expect(screen.getByRole("button", {name})).toBeDisabled();
 });
 
 it("opens older workspaces with absent generation settings without a false unsaved warning", async () => {
   workspace.draft.generation_settings = undefined;
   render(<MemoryRouter><ConversationWorkbenchPage /></MemoryRouter>);
-  await screen.findByText("已编译");
+  await screen.findByText("已就绪，可继续调整");
   expect(screen.getByRole("button", {name: "保存要求与设置"})).toBeDisabled();
   expect(screen.queryByText("要求尚未保存")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("tab", {name: "生成设置"}));
@@ -163,6 +209,32 @@ it("keeps edited prompts across keyboard tab navigation and copies the current t
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("edited coffee scene"));
     expect(writes).toHaveLength(0);
   } finally {vi.unstubAllGlobals();}
+});
+
+it("opens and scrolls to generation settings while retaining the same edited prompt node", async () => {
+  await mount();
+  const prompt = screen.getByLabelText("正向提示词");
+  fireEvent.change(prompt, {target: {value: "my prompt before checking settings"}});
+  const settings = document.getElementById("panel-settings") as HTMLDetailsElement;
+  const scrollIntoView = vi.fn(); settings.scrollIntoView = scrollIntoView;
+  fireEvent.click(screen.getByRole("tab", {name: "生成设置"}));
+  await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
+  expect(settings).toHaveAttribute("open");
+  expect(scrollIntoView.mock.calls[0][0]).toMatchObject({block: "start"});
+  expect(screen.getByLabelText("正向提示词")).toBe(prompt);
+  expect(prompt).toHaveValue("my prompt before checking settings");
+  expect(screen.getByLabelText("负向提示词")).toHaveValue("");
+  // Reopening from the dock must also work after the user collapses the same
+  // settings panel without changing its selected inspector tab.
+  fireEvent.click(settings.querySelector("summary")!);
+  expect(settings).not.toHaveAttribute("open");
+  scrollIntoView.mockClear();
+  fireEvent.click(screen.getByRole("button", {name: "查看生成条件"}));
+  await waitFor(() => expect(settings).toHaveAttribute("open"));
+  expect(scrollIntoView).toHaveBeenCalledOnce();
+  expect(screen.getByLabelText("正向提示词")).toBe(prompt);
+  expect(prompt).toHaveValue("my prompt before checking settings");
+  expect(writes).toHaveLength(0);
 });
 
 it("carries a starting idea into a new local draft without an LLM or generation call", async () => {
@@ -196,6 +268,7 @@ it("retains the exact idempotency key and payload after a lost acceptance respon
   fireEvent.click(screen.getByRole("button", {name: "生成图片"}));
   await screen.findByText("查询本次提交");
   await waitFor(() => expect(screen.getByRole("button", {name: "查询本次提交"})).toBeEnabled());
+  for (const name of ["更新提示词", "保存要求与设置", "生成图片"]) expect(screen.getByRole("button", {name})).toBeDisabled();
   failure = "";
   fireEvent.click(screen.getByRole("button", {name: "查询本次提交"}));
   await screen.findAllByText("已接受");
@@ -208,7 +281,7 @@ it("retains the exact idempotency key and payload after a lost acceptance respon
 it("keeps a tentative mode local if the model fails", async () => {
   await mount(); failure = "turn";
   fireEvent.change(screen.getByLabelText("改写方式"), {target: {value: "expand"}});
-  fireEvent.click(screen.getByRole("button", {name: "重新编译"}));
+  fireEvent.click(screen.getByRole("button", {name: "更新提示词"}));
   await screen.findByText("模型分析失败");
   expect(writes).toHaveLength(1);
   expect(writes[0].body.mode).toBe("expand");
@@ -229,7 +302,7 @@ it("saves changed requirements then compiles once and shows reviewed prompt chan
   await mount();
   fireEvent.click(screen.getByRole("tab", {name: "画面要求"}));
   fireEvent.change(screen.getByLabelText("主体要求"), {target: {value: "雨中的猫"}});
-  fireEvent.click(screen.getByRole("button", {name: "保存并编译提示词"}));
+  fireEvent.click(screen.getByRole("button", {name: "更新提示词"}));
   await screen.findByText("查看本次提示词变化");
   expect(writes.map(item => item.url)).toEqual(["/api/v3/workspaces/workspace_test", "/api/v3/workbench/turns"]);
   expect(writes[1].body.revision).toBe(4);
@@ -245,7 +318,7 @@ it("keeps local requirements and delta when save-and-compile fails", async () =>
   fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "柔和灯光"}});
   fireEvent.click(screen.getByRole("tab", {name: "画面要求"}));
   fireEvent.change(screen.getByLabelText("主体要求"), {target: {value: "雨中的猫"}});
-  fireEvent.click(screen.getByRole("button", {name: "整理新想法，更新提示词"}));
+  fireEvent.click(screen.getByRole("button", {name: "更新提示词"}));
   await screen.findByText("模型分析失败");
   expect(screen.getByLabelText("主体要求")).toHaveValue("雨中的猫");
   expect(screen.getByLabelText("继续追加要求")).toHaveValue("柔和灯光");
@@ -254,8 +327,9 @@ it("keeps local requirements and delta when save-and-compile fails", async () =>
 
 it("does not offer unnecessary recompilation for a fresh prompt", async () => {
   await mount();
-  expect(screen.getByRole("button", {name: "重新编译"})).toBeDisabled();
-  expect(screen.queryByRole("button", {name: "保存并编译提示词"})).not.toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "更新提示词"})).toBeDisabled();
+  expect(screen.getAllByRole("button", {name: "更新提示词"})).toHaveLength(1);
+  expect(writes).toHaveLength(0);
 });
 
 
@@ -289,7 +363,7 @@ it("can compile manually entered requirements in a new empty workspace", async (
   await screen.findByRole("tab", {name: "画面要求"});
   fireEvent.click(screen.getByRole("tab", {name: "画面要求"}));
   fireEvent.change(screen.getByLabelText("主体要求"), {target: {value: "一只猫"}});
-  fireEvent.click(screen.getByRole("button", {name: "保存并编译提示词"}));
+  fireEvent.click(screen.getByRole("button", {name: "更新提示词"}));
   await screen.findByText("查看本次提示词变化");
   expect(writes.map(item => item.url)).toEqual(["/api/v3/workspaces/workspace_test", "/api/v3/workbench/turns"]);
 });
@@ -311,4 +385,72 @@ it("adds a recommended artist only to local requirements without rewriting or ge
   expect(screen.getByLabelText("继续追加要求")).toHaveValue("保留未发送内容");
   expect(JSON.parse(localStorage.getItem("anima-conversation-draft:workspace_test")!).requirements.layers.style.artists).toEqual(["artist_test"]);
   expect(writes).toHaveLength(0);
+});
+
+it("receives typed tags once while retaining unsent edits, and undo leaves later edits intact", async () => {
+  localStorage.setItem("anima-conversation-draft:workspace_test", JSON.stringify({
+    baseRevision: 3, delta: "尚未发送的想法", mode: "faithful", requirements: workspace.draft.requirements,
+    positive: "my edited cat", negative: "my negative", model: "anima_base_v1", settings: workspace.draft.generation_settings,
+  }));
+  const url = transferUrl([{name: "hatsune_miku", category: "character"}, {name: "blue_sky", category: "general"}]);
+  const view = render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage remoteEnabled /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole("button", {name: "撤销本次带入"}));
+  expect(screen.getByLabelText("继续追加要求")).toHaveValue("尚未发送的想法");
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("my edited cat");
+  const draft = JSON.parse(localStorage.getItem("anima-conversation-draft:workspace_test")!);
+  expect(draft.requirements.layers.subject.character_tags).toBeUndefined();
+  expect(draft.requirements.layers.subject.general_tags).toBeUndefined();
+  expect(writes).toHaveLength(0);
+  view.unmount();
+  render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage remoteEnabled /></MemoryRouter>);
+  await screen.findByText(/这批内容已带入或已过期/);
+  expect(screen.queryByRole("button", {name: "撤销本次带入"})).not.toBeInTheDocument();
+});
+it("creates a new typed selection workspace without overwriting the prior draft or calling a model", async () => {
+  const oldDraft = JSON.stringify({delta: "旧草稿保留"});
+  // An unrelated draft remains untouched when choosing a new destination.
+  localStorage.setItem("anima-conversation-draft:unrelated", oldDraft);
+  const url = transferUrl([{name: "hatsune_miku", category: "character"}, {name: "vocaloid", category: "copyright"}, {name: "@sample_artist", category: "artist"}], "new");
+  render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage remoteEnabled /></MemoryRouter>);
+  await screen.findByRole("button", {name: "撤销本次带入"});
+  const created = writes.find(item => item.url === "/api/v3/workspaces");
+  expect(created?.body.draft).toMatchObject({requirements_edit: {layers: {subject: {character_tags: ["hatsune miku"], series_tags: ["vocaloid"]}, style: {manual_artist_tags: ["sample artist"]}}}});
+  expect(localStorage.getItem("anima-conversation-draft:unrelated")).toBe(oldDraft);
+  expect(writes.every(item => !item.url.includes("/turns") && !item.url.includes("/runs"))).toBe(true);
+});
+
+it("does not consume current-destination tags when the existing workspace cannot be loaded", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let unavailable = true;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    if (unavailable && String(input).endsWith("/workspaces/workspace_test")) throw new TypeError("offline");
+    return original(input, init);
+  });
+  const url = transferUrl([{name: "hatsune_miku", category: "character"}]);
+  render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage remoteEnabled /></MemoryRouter>);
+  await screen.findByRole("button", {name: "重试带入"});
+  expect(writes).toHaveLength(0);
+  expect(localStorage.getItem("anima-content-transfer:" + new URL(url, "http://localhost").searchParams.get("transfer"))).not.toBeNull();
+  unavailable = false;
+  fireEvent.click(screen.getByRole("button", {name: "重试带入"}));
+  await screen.findByRole("button", {name: "撤销本次带入"});
+  expect(writes).toHaveLength(0);
+});
+it("retries a lost create response with the same frozen body and idempotency key", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let lost = true;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const response = await original(input, init);
+    if (String(input) === "/api/v3/workspaces" && init?.method === "POST" && lost) {lost = false; throw new TypeError("lost response");}
+    return response;
+  });
+  const url = transferUrl([{name: "hatsune_miku", category: "character"}], "new");
+  render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage remoteEnabled /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole("button", {name: "重试带入"}));
+  await screen.findByRole("button", {name: "撤销本次带入"});
+  const created = writes.filter(item => item.url === "/api/v3/workspaces");
+  expect(created).toHaveLength(2);
+  expect(created[0].key).toBeTruthy();
+  expect(created[0].key).toBe(created[1].key);
+  expect(created[0].body).toEqual(created[1].body);
 });

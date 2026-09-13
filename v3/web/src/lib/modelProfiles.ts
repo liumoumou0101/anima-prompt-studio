@@ -9,6 +9,8 @@ export const BUILT_IN_MODEL_PROFILES: ModelProfileOption[] = [
   {id: "anima_turbo_v1", display_name: "ANIMA Turbo", variant: "turbo"},
   {id: "anima_turbo_v1_1", display_name: "ANIMA Turbo v1.1", variant: "turbo"},
   {id: "animayume_v1_0_final", display_name: "AnimaYume v1.0 Final", variant: "community"},
+  {id: "anima_2_9b_preview_v1", display_name: "Anima 2.9B Preview v1", variant: "community"},
+  {id: "animayume_v1_5_base", display_name: "AnimaYume v1.5 Base", variant: "community"},
   {id: "miaomiao_harem_anima_v1_6", display_name: "MiaoMiao Harem ANIMA v1.6", variant: "community"},
 ];
 

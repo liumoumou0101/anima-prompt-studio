@@ -4,6 +4,7 @@ import json
 import math
 import re
 import sqlite3
+import unicodedata
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
@@ -101,7 +102,7 @@ class ReferenceDataStore:
         return self.metadata("pack_id") or ""
 
     def search(self, query: str, *, categories: set[str] | None = None, limit: int = 50) -> list[dict[str, Any]]:
-        tokens = re.findall(r"[0-9a-zA-Z_\u3400-\u9fff]+", query.lower())
+        tokens = _search_tokens(query)
         if not tokens or limit <= 0:
             return []
         match = " AND ".join(f'"{token}"*' for token in tokens)
@@ -111,14 +112,24 @@ class ReferenceDataStore:
             ordered = sorted(categories)
             category_sql = " AND t.category_name IN (" + ",".join("?" for _ in ordered) + ")"
             parameters.extend(ordered)
-        parameters.append(min(limit * 4, 1000))
+        normalized = _identity_name(query)
+        prefix = normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        parameters.extend([normalized, normalized, normalized,
+                           _canonical(query), prefix, prefix, prefix, min(limit * 4, 1000)])
         rows = self.connection.execute(
             """SELECT t.id,t.name,t.render_name,t.cn_name,t.category,t.category_name,
                       t.post_count,t.nsfw,t.deprecated,bm25(tag_search) AS search_rank
                FROM tag_search s JOIN tags t ON t.name=s.canonical
                WHERE tag_search MATCH ? AND t.deprecated=0"""
             + category_sql
-            + " ORDER BY search_rank,t.post_count DESC LIMIT ?",
+            + """ ORDER BY CASE
+                  WHEN LOWER(REPLACE(t.name,'_',' '))=? OR LOWER(REPLACE(t.render_name,'_',' '))=?
+                    OR LOWER(COALESCE(t.cn_name,''))=? THEN 0
+                  WHEN EXISTS (SELECT 1 FROM tag_aliases a WHERE a.tag_id=t.id AND a.alias=? AND a.status='active') THEN 1
+                  WHEN LOWER(REPLACE(t.name,'_',' ')) LIKE ? ESCAPE '\\'
+                    OR LOWER(REPLACE(t.render_name,'_',' ')) LIKE ? ESCAPE '\\'
+                    OR LOWER(COALESCE(t.cn_name,'')) LIKE ? ESCAPE '\\' THEN 2
+                  ELSE 3 END, search_rank,t.post_count DESC LIMIT ?""",
             parameters,
         ).fetchall()
         result: list[dict[str, Any]] = []
@@ -131,6 +142,68 @@ class ReferenceDataStore:
             if len(result) >= limit:
                 break
         return result
+
+    def search_identities(self, query: str, *, category: str, limit: int = 12) -> list[dict[str, Any]]:
+        """Names and active aliases precede loose FTS/co-occurrence vocabulary.
+
+        cn_terms includes associated concepts, so it is deliberately not treated as
+        a verified alternate name. This does not infer model training knowledge.
+        """
+        if category not in {"character", "copyright", "artist"} or limit <= 0:
+            return []
+        normalized = _identity_name(query.lstrip("@"))
+        if not normalized:
+            return []
+        pattern = normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        if category == "artist":
+            # Production packs keep artists separately; they need not exist in tags/FTS.
+            result = {}
+            for row in self.search_artists(normalized, limit=limit)["items"]:
+                name = _identity_name(row["name"])
+                rank = 0 if name == normalized else 10 if name.startswith(normalized) else 20
+                result[row["name"]] = {**row, "cn_name": None, "category_name": "artist",
+                    "match_kind": "canonical" if rank < 20 else "name_contains", "match_rank": rank,
+                    "match_text": row["name"], "match_source": "data_pack"}
+            for row in self.connection.execute("""SELECT art.*,a.alias,a.source FROM artists art
+                JOIN tags t ON t.name=art.name JOIN tag_aliases a ON a.tag_id=t.id AND a.status='active'
+                WHERE LOWER(REPLACE(a.alias,'_',' ')) LIKE ? ESCAPE '\\'""", (pattern,)):
+                rank = 1 if _identity_name(row["alias"]) == normalized else 11
+                if row["name"] in result and result[row["name"]]["match_rank"] <= rank:
+                    continue
+                result[row["name"]] = {"id": row["id"], "name": row["name"], "render_name": row["render_name"],
+                    "cn_name": None, "post_count": row["post_count"], "category_name": "artist",
+                    "match_kind": "alias", "match_rank": rank, "match_text": row["alias"], "match_source": row["source"]}
+            return sorted(result.values(), key=lambda item: (item["match_rank"], -item["post_count"], item["name"]))[:limit]
+        rows = self.connection.execute(
+            """SELECT t.*, a.alias AS matched_alias, a.source AS alias_source
+               FROM tags t LEFT JOIN tag_aliases a ON a.tag_id=t.id AND a.status='active'
+               WHERE t.category_name=? AND t.deprecated=0 AND (
+                 LOWER(REPLACE(t.name,'_',' ')) LIKE ? ESCAPE '\\' OR
+                 LOWER(REPLACE(t.render_name,'_',' ')) LIKE ? ESCAPE '\\' OR
+                 LOWER(COALESCE(t.cn_name,'')) LIKE ? ESCAPE '\\' OR
+                 LOWER(REPLACE(a.alias,'_',' ')) LIKE ? ESCAPE '\\')""",
+            (category, pattern, pattern, pattern, pattern),
+        ).fetchall()
+        scored: dict[str, tuple[int, dict[str, Any]]] = {}
+        for row in rows:
+            choices = [(row["name"], "canonical", "data_pack"),
+                       (row["render_name"], "render_name", "data_pack"),
+                       (row["cn_name"], "cn_name", "data_pack"),
+                       (row["matched_alias"], "alias", row["alias_source"] or "data_pack")]
+            for value, kind, source in choices:
+                value_normalized = _identity_name(str(value or ""))
+                if not value_normalized.startswith(normalized):
+                    continue
+                rank = (0 if value_normalized == normalized else 10) + (1 if kind == "alias" else 0)
+                previous = scored.get(row["name"])
+                if previous is None or rank < previous[0]:
+                    scored[row["name"]] = (rank, {**_tag_summary(row), "match_kind": kind,
+                        "match_text": value, "match_source": source, "match_rank": rank})
+        for item in self.search(query, categories={category}, limit=max(24, limit * 2)):
+            scored.setdefault(item["name"], (30, {**item, "match_kind": "related_term",
+                "match_text": query, "match_source": "data_pack", "match_rank": 30}))
+        return [item for _, item in sorted(scored.values(),
+            key=lambda pair: (pair[0], -pair[1]["post_count"], pair[1]["name"]))[:limit]]
 
     def popular_tags(
         self,
@@ -295,7 +368,7 @@ class ReferenceDataStore:
     ) -> dict[str, Any]:
         filters = ["t.deprecated=0", "t.id NOT IN (SELECT tag_id FROM tag_group_members)"]
         parameters: list[Any] = []
-        tokens = re.findall(r"[0-9a-zA-Z_\u3400-\u9fff]+", query.lower())
+        tokens = _search_tokens(query)
         source = "FROM tags t"
         if query.strip():
             if not tokens:
@@ -713,6 +786,15 @@ def _select_artist_ranking(
 
 def _canonical(value: str) -> str:
     return value.strip().lower().replace(" ", "_")
+
+
+def _search_tokens(value: str) -> list[str]:
+    # Unicode words include kana and Hangul; the old Latin/CJK-only regex erased them.
+    return re.findall(r"\w+", unicodedata.normalize("NFKC", value).casefold())
+
+
+def _identity_name(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", value).casefold().replace("_", " ").split())
 
 
 def _artist_context_dimensions(category_name: str, groups: list[dict[str, Any]]) -> list[str]:

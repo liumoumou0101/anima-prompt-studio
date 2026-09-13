@@ -172,12 +172,14 @@ def test_builtin_profiles_are_packaged_and_variant_safe() -> None:
     registry = ModelProfileRegistry.built_in()
 
     assert [profile.id for profile in registry.all()] == [
+        "anima_2_9b_preview_v1",
         "anima_aesthetic_v1_0",
         "anima_aesthetic_v1_1",
         "anima_base_v1",
         "anima_turbo_v1",
         "anima_turbo_v1_1",
         "animayume_v1_0_final",
+        "animayume_v1_5_base",
         "miaomiao_harem_anima_v1_6",
     ]
     assert registry.get("anima_base_v1").positive_prefix == ("score_7",)

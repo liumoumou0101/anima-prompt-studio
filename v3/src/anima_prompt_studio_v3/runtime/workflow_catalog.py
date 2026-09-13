@@ -16,7 +16,7 @@ from anima_prompt_studio_v3.remote.credential_store import CredentialStore
 from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
 from anima_prompt_studio_v3.remote.local_connection import LocalComfyConnection
 from ..core.workflow_compiler import V3WorkflowCompiler as WorkflowRenderer
-from ..core.model_versions import workflow_models
+from ..core.model_versions import workflow_models, requires_expanded_anima, expanded_anima_version_error
 from .packaged_workflows import packaged_workflow_profiles, workflow_revision, workflow_catalog_manifest
 
 ASSET_INPUTS = {"unet_name", "ckpt_name", "clip_name", "clip_name1", "clip_name2", "vae_name", "lora_name"}
@@ -224,6 +224,7 @@ class WorkflowCatalog:
             self._write("workflow_capabilities:" + remote_id, {
                 "fingerprint": stamp, "checked_at": time.time(), "object_info": info,
                 "devices": environment.devices, "error": None,
+                "comfyui_version": environment.system_stats.get("system", {}).get("comfyui_version"),
             })
         except Exception:
             if not cancel or not cancel.is_set():
@@ -290,8 +291,16 @@ class WorkflowCatalog:
                 invalid = client.validate_workflow_inputs(resolved.api_workflow)
                 errors += ["缺少节点：" + name for name in missing] + invalid
             item_state = state
+            if state == "ready" and requires_expanded_anima(resolved):
+                version = snapshot.get("comfyui_version")
+                version_error = expanded_anima_version_error(version)
+                if version_error:
+                    errors.append(version_error)
+                    # Old snapshots predate version checks; refresh before submission.
+                    item_state = "invalid_inputs" if version else "stale"
             if state == "ready" and errors:
-                item_state = "missing_nodes" if missing else "invalid_inputs"
+                if item_state != "stale":
+                    item_state = "missing_nodes" if missing else "invalid_inputs"
             if state != "ready":
                 errors.append({"unchecked": "请先检测模型与工作流", "stale": "检测已过期或连接配置变化，请重新检测", "connection_failed": "连接检测失败，请重试"}.get(state, state))
             if repository.get_setting("workflow_disabled:" + profile.id, False):

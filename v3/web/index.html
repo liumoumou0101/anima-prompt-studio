@@ -3,8 +3,26 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#11131a" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f5f6f2" />
+    <script>
+      // Apply the same validated preference before styles or React can paint.
+      (() => {
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem("anima-appearance-v1") || "null"); } catch {}
+        const layout = saved?.layout === "editorial" ? "editorial" : "studio";
+        let dark = saved?.theme === "dark";
+        if (saved?.theme === "system") {
+          try { dark = matchMedia("(prefers-color-scheme: dark)").matches; } catch {}
+        }
+        const root = document.documentElement;
+        root.dataset.layout = layout;
+        root.dataset.theme = dark ? "dark" : "light";
+        root.style.colorScheme = dark ? "dark" : "light";
+        root.style.backgroundColor = dark ? "#181a1b" : layout === "editorial" ? "#f8f7f4" : "#f5f6f2";
+        document.querySelector('meta[name="theme-color"]').content = root.style.backgroundColor;
+      })();
+    </script>
     <title>ANIMA Prompt Studio</title>
   </head>
   <body>

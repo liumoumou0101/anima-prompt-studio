@@ -2,13 +2,20 @@
 from datetime import datetime, timezone
 
 from .packaged_workflows import workflow_revision
+from ..core.model_versions import requires_expanded_anima, expanded_anima_version_error
 
 
 def inspect_workflows(client, profiles):
     items = []
+    profiles = list(profiles)
+    version = None
+    if any(requires_expanded_anima(p) for p in profiles):
+        version = client.validate_environment().system_stats.get("system", {}).get("comfyui_version")
     for profile in profiles:
         missing = client.validate_workflow_nodes(profile.api_workflow)
         invalid = client.validate_workflow_inputs(profile.api_workflow)
+        if requires_expanded_anima(profile) and (error := expanded_anima_version_error(version)):
+            invalid.append(error)
         items.append({
             "workflow_id": profile.id,
             "display_name": profile.display_name,

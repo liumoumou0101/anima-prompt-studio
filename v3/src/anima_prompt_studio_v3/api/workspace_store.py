@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hashlib
 import json
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any, Callable
 from uuid import uuid4
@@ -18,6 +20,16 @@ class WorkspaceRevisionConflictError(RuntimeError):
     def __init__(self, current_revision: int) -> None:
         self.current_revision = current_revision
         super().__init__(f"工作台版本冲突；当前 revision={current_revision}。")
+
+
+class WorkspaceIdempotencyKeyError(ValueError):
+    pass
+
+
+class WorkspaceCreateConflictError(ValueError):
+    def __init__(self, message: str, *, code: str = "idempotency_conflict") -> None:
+        self.code = code
+        super().__init__(message)
 
 
 class WorkspaceStore:
@@ -41,6 +53,11 @@ class WorkspaceStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_workspaces_active_updated
                 ON workspaces(deleted_at, updated_at DESC);
+                CREATE TABLE IF NOT EXISTS workspace_creations (
+                    idempotency_key TEXT PRIMARY KEY,
+                    payload_hash TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL UNIQUE REFERENCES workspaces(id)
+                );
                 """
             )
             columns = {row[1] for row in connection.execute("PRAGMA table_info(workspaces)")}
@@ -62,18 +79,45 @@ class WorkspaceStore:
         title: str,
         draft: dict[str, Any],
         candidate_snapshot: dict[str, Any] | None = None,
+        *,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        now = _utc_now()
-        workspace_id = f"workspace_{uuid4().hex}"
-        serialized = _serialize_draft(apply_workspace_edit(None, draft))
-        serialized_snapshot = _serialize_snapshot(candidate_snapshot)
+        if idempotency_key is not None and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", idempotency_key) is None:
+            raise WorkspaceIdempotencyKeyError("Idempotency-Key 须为 1–128 个字母、数字或 . _ : -，并以字母或数字开头。")
+        # Hash the caller's input, not the projected record containing server
+        # defaults or generated fields. Equivalent JSON key order is harmless.
+        payload_hash = hashlib.sha256(_serialize_draft({
+            "title": title, "draft": draft, "candidate_snapshot": candidate_snapshot,
+        }).encode("utf-8")).hexdigest() if idempotency_key is not None else None
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if idempotency_key is not None:
+                previous = connection.execute(
+                    "SELECT payload_hash,workspace_id FROM workspace_creations WHERE idempotency_key=?",
+                    (idempotency_key,),
+                ).fetchone()
+                if previous is not None:
+                    if previous["payload_hash"] != payload_hash:
+                        raise WorkspaceCreateConflictError("同一幂等键不能用于不同的新建会话请求。")
+                    existing = connection.execute("SELECT * FROM workspaces WHERE id=?", (previous["workspace_id"],)).fetchone()
+                    if existing is None or existing["deleted_at"] is not None:
+                        raise WorkspaceCreateConflictError("原请求创建的工作台已删除，不能重放；请重新发起操作。",
+                                                           code="workspace_idempotency_target_deleted")
+                    return self._record(existing)
+            now = _utc_now()
+            workspace_id = f"workspace_{uuid4().hex}"
+            serialized = _serialize_draft(apply_workspace_edit(None, draft))
+            serialized_snapshot = _serialize_snapshot(candidate_snapshot)
             connection.execute(
                 """INSERT INTO workspaces(id,title,draft_json,candidate_snapshot_json,revision,created_at,updated_at)
                    VALUES(?,?,?,?,?,?,?)""",
                 (workspace_id, title, serialized, serialized_snapshot, 1, now, now),
             )
-        return self.get(workspace_id)
+            if idempotency_key is not None:
+                connection.execute("INSERT INTO workspace_creations(idempotency_key,payload_hash,workspace_id) VALUES(?,?,?)",
+                                   (idempotency_key, payload_hash, workspace_id))
+            created = connection.execute("SELECT * FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+            return self._record(created)
 
     def get(self, workspace_id: str) -> dict[str, Any]:
         with self._connect() as connection:

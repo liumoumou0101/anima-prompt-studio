@@ -23,6 +23,11 @@ export function negativeGuidance(model: string): {text: string; note: string; so
     text: "", note: "AnimaYume 1.0 Final：作者说明训练未使用质量评分标签，暂未找到该版本明确的负向配方。请按需求手工填写，不自动套用 Base 的 score_*。",
     source: "https://civitai.com/models/2385278?modelVersionId=3065644",
   };
+  if (model === "anima_2_9b_preview_v1" || model === "animayume_v1_5_base") return {
+    text: "worst quality, low quality, blurry, jpeg artifacts",
+    note: "这是本项目安装验收使用的可选负向起点，不是作者规定的最佳配方；不自动加入 score_*，也可保持空白。新模型无需基础 LoRA，旧 Anima LoRA 须另行验证兼容性。",
+    source: model === "anima_2_9b_preview_v1" ? "https://huggingface.co/Gazingstars123/Anima-2.9B" : "https://huggingface.co/duongve/AnimaYume",
+  };
   return {text: "", note: "该模型的作者负向建议尚待核验，可先手工填写需要避免的内容。"};
 }
 

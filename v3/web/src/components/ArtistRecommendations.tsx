@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from "react";
 import {Link} from "react-router-dom";
 import {apiRequest} from "../lib/api";
 import type {ArtistRanking, ArtistSuggestion} from "../lib/types";
+import {ArtistReferencePreview} from "./ArtistReferencePreview";
 
 export const artistRankings: {id: ArtistRanking; label: string; detail: string}[] = [
   {id: "tag_fit", label: "题材贴合", detail: "按标签关联强度排序，专项作者会靠前。"},
@@ -30,6 +31,8 @@ function ArtistPanel({prompt, selected, disabled, onChange}: Props) {
   const [ranking, setRanking] = useState<ArtistRanking>(() => savedRanking() || "tag_fit");
   const [items, setItems] = useState<ArtistSuggestion[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [readNote, setReadNote] = useState("");
   const [error, setError] = useState("");
   const touched = useRef(false);
   const queried = useRef(false);
@@ -42,10 +45,29 @@ function ArtistPanel({prompt, selected, disabled, onChange}: Props) {
   }, []);
   const tags = artistSeeds(input);
   const valid = tags.length > 0 && tags.length <= 50 && tags.every(tag => tag.length <= 200);
-  function invalidate(value: string) {request.current?.abort(); setBusy(false); setItems(null); setError(""); setInput(value);}
+  function invalidate(value: string) {request.current?.abort(); setBusy(false); setReading(false); setItems(null); setError(""); setReadNote(""); setInput(value);}
+  async function readPromptTags() {
+    invalidate(input); queried.current = false;
+    const controller = new AbortController(); request.current = controller;
+    const snapshot = prompt; setReading(true);
+    try {
+      const result = await apiRequest<{tags: string[]; truncated: boolean}>("/api/v3/tags/from-prompt", {
+        method: "POST", signal: controller.signal, body: JSON.stringify({prompt: snapshot, limit: 50})});
+      if (!controller.signal.aborted) {
+        setInput(result.tags.join(", ")); setSourcePrompt(snapshot);
+        setReadNote(result.tags.length ? `词库短语匹配找到 ${result.tags.length} 个标签${result.truncated ? "（已截取前 50 个）" : ""}。请核对后手动刷新推荐。`
+          : "词库短语匹配未找到已收录标签，请手动补充；这不代表提示词无效。");
+      }
+    } catch (caught) {
+      if (!controller.signal.aborted) {
+        setInput(artistSeeds(snapshot).slice(0, 50).join(", ")); setSourcePrompt(snapshot);
+        setReadNote(`本地词库识别暂不可用，已回退为逗号或换行分隔。请手动核对标签。${(caught as Error).message}`);
+      }
+    } finally {if (!controller.signal.aborted) setReading(false);}
+  }
   async function recommend(mode = ranking) {
     touched.current = true; queried.current = true;
-    request.current?.abort(); const controller = new AbortController(); request.current = controller;
+    request.current?.abort(); setReading(false); const controller = new AbortController(); request.current = controller;
     setBusy(true); setError(""); setItems(null);
     try {
       const result = await apiRequest<{items: ArtistSuggestion[]}>("/api/v3/artists/recommend", {method: "POST", signal: controller.signal,
@@ -62,12 +84,13 @@ function ArtistPanel({prompt, selected, disabled, onChange}: Props) {
   return <div id="conversation-artist-panel">
     <p className="conversation-muted">按本地标签共现数据推荐，不调用翻译模型或 LLM。排序反映题材关联，不是画质评分。</p>
     <label>推荐依据标签<textarea rows={2} value={input} maxLength={10000} onChange={event => invalidate(event.target.value)} placeholder="例如 watercolor (medium), scenery, flower；用逗号分隔" /></label>
-    <div className="conversation-actions"><button onClick={() => {invalidate(artistSeeds(prompt).slice(0, 50).join(", ")); setSourcePrompt(prompt);}}>读取当前提示词标签</button><span>{tags.length} / 50 个标签</span></div>
-    <p className="conversation-muted">只读取逗号或换行分隔的标签，最多 50 个；完整自然语言句子可能无法匹配，请手动调整。</p>
+    <div className="conversation-actions"><button disabled={reading} onClick={() => void readPromptTags()}>{reading ? "正在识别词库标签…" : "读取当前提示词标签"}</button><span>{tags.length} / 50 个标签</span></div>
+    <p className="conversation-muted">读取按钮按本地词库的标准名与正式别名匹配短语，最多 50 个，不做语义推断；忽略画师和 LoRA 指令。识别结果可手动编辑，再刷新画师推荐。</p>
+    {readNote && <p role="status">{readNote}</p>}
     {sourcePrompt !== prompt && <p className="conversation-warning">提示词已变化，推荐依据仍保留；可重新读取标签。</p>}
     <label>推荐模式<select value={ranking} onChange={event => switchRanking(event.target.value as ArtistRanking)}>{artistRankings.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
     <p className="conversation-muted">{artistRankings.find(item => item.id === ranking)?.detail} 切换模式不改变已选画师。</p>
-    <button disabled={!valid || busy} onClick={() => void recommend()}>{busy ? "正在读取推荐…" : "刷新画师推荐"}</button>
+    <button disabled={!valid || busy || reading} onClick={() => void recommend()}>{busy ? "正在读取推荐…" : "刷新画师推荐"}</button>
     {!valid && <p>请填写 1～50 个标签，每个不超过 200 字。</p>}
     {error && <p role="alert">{error}</p>}
     {items && !items.length && <p role="status">没有匹配的画师。请使用数据包中已有的题材标签，或尝试其他推荐模式。</p>}
@@ -75,6 +98,7 @@ function ArtistPanel({prompt, selected, disabled, onChange}: Props) {
       const added = selected.some(name => canonical(name) === canonical(item.name));
       return <article key={item.name}><Link to={`/artists/${encodeURIComponent(item.name)}`}>{item.render_name}</Link>
         <p>匹配：{item.sources.join("、")}</p><small>历史作品 {item.post_count.toLocaleString()} · 命中 {item.hit_count} 个标签</small>
+        <ArtistReferencePreview artist={item.name} />
         <button disabled={disabled || added || selected.length >= 32} onClick={() => onChange([...selected, item.name])}>{added ? "已加入" : "加入画面要求"}</button></article>;
     })}</div>
     <div aria-label="已选画师"><strong>已选画师 · {selected.length} / 32</strong>{selected.length ? selected.map((name, index) => <span key={`${name}-${index}`} className="conversation-artist-selected">@{name}<button aria-label={`移除画师 ${name}`} disabled={disabled} onClick={() => onChange(selected.filter((_, i) => i !== index))}>移除</button></span>) : <p>还没有选择画师。</p>}</div>
