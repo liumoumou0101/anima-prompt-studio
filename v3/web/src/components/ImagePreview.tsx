@@ -1,4 +1,5 @@
 import {useState} from "react";
+import {useBodyScrollLock} from "../lib/useBodyScrollLock";
 import Lightbox from "yet-another-react-lightbox";
 import Zoom from "yet-another-react-lightbox/plugins/zoom";
 import "yet-another-react-lightbox/styles.css";
@@ -10,9 +11,11 @@ export type PreviewImage = {src: string; alt: string; width?: number; height?: n
 export function ImagePreview({images, index, onClose}: {images: PreviewImage[]; index: number; onClose: () => void}) {
   const [current, setCurrent] = useState(index);
   const [details, setDetails] = useState(false);
+  useBodyScrollLock(index >= 0 && images.length > 0);
   if (index < 0 || !images.length) return null;
   const item = images[Math.max(0, Math.min(current, images.length - 1))];
   return <Lightbox open close={onClose} index={index} slides={images} plugins={[Zoom]}
+    noScroll={{disabled: true}}
     carousel={{finite: true, preload: 1}} zoom={{scrollToZoom: true}}
     on={{view: ({index: next}) => setCurrent(next)}}
     labels={{Close: "关闭预览", Previous: "上一张", Next: "下一张", "Zoom in": "放大", "Zoom out": "缩小"}}

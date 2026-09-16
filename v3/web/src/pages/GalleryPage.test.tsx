@@ -45,6 +45,7 @@ it("filters local assets and opens traceable image details", async () => {
 
   render(<GalleryPage enabled />);
   expect(await screen.findByText("2 张")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "筛选"}));
   fireEvent.change(screen.getByLabelText("筛选项目"), {target: {value: "雨夜项目"}});
   expect(screen.getByText("1 张")).toBeInTheDocument();
   expect(screen.queryByAltText("two.jpg")).not.toBeInTheDocument();
@@ -109,6 +110,7 @@ it("moves an image to recoverable trash and restores it", async () => {
 
   render(<GalleryPage enabled />);
   fireEvent.click(await screen.findByAltText("one.png"));
+  fireEvent.click(screen.getByLabelText("更多图片操作"));
   fireEvent.click(screen.getByRole("button", {name: "移入回收站"}));
   expect(await screen.findByText("图片已移入画廊回收站，可随时恢复。")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: /回收站/}));
@@ -136,6 +138,7 @@ it("uses trash identities for renamed restores and keeps failed items selected",
   await screen.findByAltText("one.png");
   fireEvent.click(screen.getByRole("button", {name: /画廊回收站/}));
   await screen.findByAltText("two.jpg");
+  fireEvent.click(screen.getByRole("button", {name: "多选模式"}));
   fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
   fireEvent.click(screen.getByRole("button", {name: /^恢复$/}));
   expect(await screen.findByText("已恢复 1 张，1 张未完成，已保留选择。")).toBeInTheDocument();
@@ -248,6 +251,7 @@ it("selects the current result set and permanently deletes the original image fi
 
   render(<GalleryPage enabled />);
   expect(await screen.findByText("2 张")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "多选模式"}));
   fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
   expect(screen.getByText("已选择 2 项")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: "彻底删除"}));
@@ -280,6 +284,7 @@ it("keeps only failed trash items selected and retries only those items", async 
     .mockResolvedValueOnce(new Response(JSON.stringify({moved: [assets[1].path], failed: []})));
   render(<GalleryPage enabled />);
   await screen.findByAltText("one.png");
+  fireEvent.click(screen.getByRole("button", {name: "多选模式"}));
   fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
   fireEvent.click(screen.getByRole("button", {name: "移入回收站"}));
   expect(await screen.findByText("已选择 1 项")).toBeInTheDocument();
