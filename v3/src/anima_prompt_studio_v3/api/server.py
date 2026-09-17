@@ -28,6 +28,8 @@ class LocalApiServer:
         translation_service: object | None = None,
         app_version: str | None = None,
         preferred_port: int = 0,
+        allow_local_sessions: bool = False,
+        desktop_instance_id: str = "",
     ) -> None:
         if isinstance(preferred_port, bool) or not isinstance(preferred_port, int) or not 0 <= preferred_port <= 65535:
             raise ValueError("本地首选端口必须为 0–65535 的整数。")
@@ -70,6 +72,8 @@ class LocalApiServer:
             translation_service=translation_service,
             comfy_access=self._owned_comfy_access,
             app_version=app_version,
+            allow_local_sessions=allow_local_sessions,
+            desktop_instance_id=desktop_instance_id,
         )
         self._socket: socket.socket | None = None
         self._server: uvicorn.Server | None = None
@@ -113,6 +117,7 @@ class LocalApiServer:
                 port=self._port,
                 log_level="warning",
                 access_log=False,
+                proxy_headers=False,
             )
             self._server = uvicorn.Server(config)
             self._socket = sock

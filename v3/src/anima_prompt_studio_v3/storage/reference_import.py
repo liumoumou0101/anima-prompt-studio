@@ -1,10 +1,13 @@
 """Import an explicitly selected local research collection without guessing provenance."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import re
+import time
 
 from .reference_examples import ExampleMetadata, ExampleNotes, ExampleStore, MAX_IMAGE_BYTES, inspect_image, now
 
@@ -17,6 +20,56 @@ MODEL_PROFILES = {
     "anima-2.9b-preview-v1": "anima_2_9b_preview_v1",
 }
 
+IMPORT_LOCK_TIMEOUT_SECONDS = 5.0
+
+
+@contextmanager
+def _import_lock(database: Path, cancelled=None):
+    """Serialize collection imports across processes without stale lock state."""
+    lock_path = Path(database).parent / "reference-import.lock"
+    with lock_path.open("a+b") as stream:
+        deadline = time.monotonic() + IMPORT_LOCK_TIMEOUT_SECONDS
+        if os.name == "nt":
+            import msvcrt
+
+            stream.seek(0, os.SEEK_END)
+            if stream.tell() == 0:
+                stream.write(b"\0")
+                stream.flush()
+            while True:
+                if cancelled is not None and cancelled():
+                    raise InterruptedError("reference import cancelled")
+                try:
+                    stream.seek(0)
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("reference import is busy")
+                    time.sleep(0.05)
+            try:
+                yield
+            finally:
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            while True:
+                if cancelled is not None and cancelled():
+                    raise InterruptedError("reference import cancelled")
+                try:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("reference import is busy")
+                    time.sleep(0.05)
+            try:
+                yield
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
 
 def source_path(root: Path, relative: str) -> Path:
     if not isinstance(relative, str) or not relative or "\\" in relative:
@@ -28,13 +81,15 @@ def source_path(root: Path, relative: str) -> Path:
     return resolved
 
 
-def prepare_collection(root: Path):
+def prepare_collection(root: Path, *, cancelled=None):
     root = Path(root).resolve(strict=True)
     batches = root / "batches"
     if not batches.is_dir() or not batches.resolve().is_relative_to(root):
         raise ValueError("集合缺少有效的 batches 目录。")
     prepared, seen, batch_receipts = [], set(), []
     for batch in sorted(batches.glob("*.json")):
+        if cancelled is not None and cancelled():
+            raise InterruptedError("reference import cancelled")
         if not batch.resolve().is_relative_to(root):
             raise ValueError("批次文件越出集合目录。")
         raw = batch.read_bytes()
@@ -43,6 +98,8 @@ def prepare_collection(root: Path):
             raise ValueError("批次必须是 JSON 数组。")
         batch_receipts.append({"file": batch.relative_to(root).as_posix(), "sha256": sha256(raw).hexdigest(), "count": len(entries)})
         for row in entries:
+            if cancelled is not None and cancelled():
+                raise InterruptedError("reference import cancelled")
             if not isinstance(row, dict) or re.fullmatch(r"civitai:[0-9]{1,20}", str(row.get("id", ""))) is None:
                 raise ValueError("案例必须携带有效且稳定的 civitai:<数字> 来源 ID。")
             source_id = row["id"]
@@ -51,7 +108,8 @@ def prepare_collection(root: Path):
             seen.add(source_id)
             if not isinstance(row.get("title"), str) or not 1 <= len(row["title"].strip()) <= 200:
                 raise ValueError("案例标题必须为 1～200 字。")
-            for key in ("prompt", "negative", "checkpoint", "artist_tag", "lora", "source_url"):
+            for key in ("prompt", "negative", "checkpoint", "artist_tag", "lora", "source_url",
+                        "style_axis", "why", "copy_tip", "lora_url", "stats"):
                 if not isinstance(row.get(key, ""), str):
                     raise ValueError(f"{source_id} 的 {key} 必须是字符串。")
             if len(row.get("prompt", "")) > 20000 or len(row.get("negative", "")) > 20000:
@@ -63,6 +121,8 @@ def prepare_collection(root: Path):
             with image.open("rb") as stream:
                 data = stream.read(MAX_IMAGE_BYTES + 1)
             media = inspect_image(data)
+            if cancelled is not None and cancelled():
+                raise InterruptedError("reference import cancelled")
             artists = list(dict.fromkeys(part.strip().lstrip("@").casefold().replace(" ", "_")
                 for part in row.get("artist_tag", "").split(",") if part.strip()))
             lora = row.get("lora", "").strip()
@@ -105,12 +165,20 @@ def prepare_collection(root: Path):
     return prepared, batch_receipts
 
 
-def import_collection(store: ExampleStore, root: Path, *, dry_run=False):
+def import_collection(store: ExampleStore, root: Path, *, dry_run=False, cancelled=None):
     """Preflight every source before writing; unchanged imports never edit personal data."""
-    prepared, batches = prepare_collection(root)
+    with _import_lock(store.path, cancelled):
+        return _import_collection_unlocked(store, root, dry_run=dry_run, cancelled=cancelled)
+
+
+def _import_collection_unlocked(store: ExampleStore, root: Path, *, dry_run=False, cancelled=None):
+    prepared, batches = (prepare_collection(root) if cancelled is None
+                         else prepare_collection(root, cancelled=cancelled))
     actions = []
     with store.connect() as db:
         for item in prepared:
+            if cancelled is not None and cancelled():
+                raise InterruptedError("reference import cancelled")
             old = db.execute("SELECT * FROM examples WHERE id=?", (item["id"],)).fetchone()
             action = "created"
             if old is not None:
@@ -133,6 +201,8 @@ def import_collection(store: ExampleStore, root: Path, *, dry_run=False):
         "counts": {key: sum(action == key for action, _ in actions) for key in ("created", "updated", "unchanged", "deleted_preserved")},
         "items": []}
     for action, item in actions:
+        if cancelled is not None and cancelled():
+            raise InterruptedError("reference import cancelled")
         if not dry_run and action == "created":
             profile = item["provenance"]["model_profile"]
             store.create(item["data"], item["title"], item["metadata"], example_id=item["id"],

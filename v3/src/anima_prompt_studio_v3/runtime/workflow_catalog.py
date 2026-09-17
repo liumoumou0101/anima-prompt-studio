@@ -456,9 +456,13 @@ class InspectionJobs:
         self.manager = manager
         self.lock = Lock()
         self.jobs = {}
+        self.deleting = set()
+        self.deleted = set()
 
     def start(self, remote_id, credentials):
         with self.lock:
+            if remote_id in self.deleting or remote_id in self.deleted:
+                raise ValueError("云主机配置正在删除。")
             current = self.jobs.get(remote_id)
             if current and current["state"] == "running":
                 return {"state": "running"}
@@ -486,6 +490,25 @@ class InspectionJobs:
             if remote_id in self.jobs:
                 self.jobs[remote_id]["cancel"].set()
         return self.status(remote_id)
+
+    def with_profile_deletion(self, remote_id, delete):
+        with self.lock:
+            current = self.jobs.get(remote_id)
+            if current and current["state"] == "running":
+                raise RuntimeError("workflow_inspection_running")
+            self.deleting.add(remote_id)
+        try:
+            result = delete()
+            with self.lock:
+                self.deleted.add(remote_id)
+            return result
+        finally:
+            with self.lock:
+                self.deleting.discard(remote_id)
+
+    def restore_profile(self, remote_id):
+        with self.lock:
+            self.deleted.discard(remote_id)
 
     def close(self):
         with self.lock:

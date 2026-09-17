@@ -51,16 +51,56 @@ it("borrows original prompt without requiring analyzed requirements and copies i
   expect(fetchMock.mock.calls.some(call => String(call[0]).endsWith("/ingest"))).toBe(false);
 });
 
-it("sends model, artist, LoRA, and content filters together", async () => {
+it("auto-applies all five selects and clears them without a search click", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).endsWith("/facets") ? {models: ["anima-base-v1.0"], artists: ["sample_artist"]} : String(url).includes("?") ? {items: [example], next_cursor: null, official_pack: {ready: true}} : example)));
   mount();
   await screen.findByRole("option", {name: "@sample_artist"});
+  fireEvent.change(screen.getByLabelText("案例来源"), {target: {value: "research_import"}});
   fireEvent.change(screen.getByLabelText("参考模型"), {target: {value: "anima-base-v1.0"}});
   fireEvent.change(screen.getByLabelText("参考画师"), {target: {value: "sample_artist"}});
   fireEvent.change(screen.getByLabelText("LoRA 依赖"), {target: {value: "unknown"}});
   fireEvent.change(screen.getByLabelText("内容标记"), {target: {value: "safe"}});
-  fireEvent.click(screen.getByRole("button", {name: "搜索 / 刷新"}));
-  await waitFor(() => expect(fetchMock.mock.calls.some(call => String(call[0]).includes("model=anima-base-v1.0&artist=sample_artist&lora_dependency=unknown&content=safe"))).toBe(true));
+  await waitFor(() => expect(fetchMock.mock.calls.some(call => String(call[0]).includes("origin=research_import&model=anima-base-v1.0&artist=sample_artist&lora_dependency=unknown&content=safe"))).toBe(true));
+  fireEvent.click(screen.getByRole("button", {name: "清除筛选"}));
+  await waitFor(() => {
+    const listCalls = fetchMock.mock.calls.map(call => String(call[0])).filter(url => url.includes("reference-examples?"));
+    expect(listCalls.at(-1)).not.toMatch(/origin=|model=|artist=|lora_dependency=|content=/);
+  });
+  for (const label of ["案例来源", "参考模型", "参考画师", "LoRA 依赖", "内容标记"]) expect(screen.getByLabelText(label)).toHaveValue("");
+});
+
+it("debounces typed search but Enter applies it immediately", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).endsWith("/facets") ? {models: [], artists: []} : String(url).includes("?") ? {items: [example], next_cursor: null, official_pack: {ready: true}, total: 1} : example)));
+  mount();
+  await screen.findByText("已载入 1 / 1 条参考");
+  const before = fetchMock.mock.calls.length;
+  const search = screen.getByLabelText("搜索收藏");
+  fireEvent.change(search, {target: {value: "rain night"}});
+  expect(fetchMock.mock.calls).toHaveLength(before);
+  fireEvent.keyDown(search, {key: "Enter"});
+  await waitFor(() => expect(fetchMock.mock.calls.some(call => String(call[0]).includes("q=rain+night"))).toBe(true));
+});
+
+it("keeps selected unsaved edits while an automatic filter request is pending and after it resolves", async () => {
+  let resolveFiltered!: (response: Response) => void;
+  const filtered = new Promise<Response>(resolve => {resolveFiltered = resolve;});
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async url => {
+    const value = String(url);
+    if (value.endsWith("/facets")) return new Response(JSON.stringify({models: [], artists: []}));
+    if (value.includes("origin=research_import")) return filtered;
+    if (value.includes("?")) return new Response(JSON.stringify({items: [example], next_cursor: null, official_pack: {ready: true}, total: 1}));
+    return new Response(JSON.stringify(example));
+  });
+  mount();
+  const notes = await screen.findByLabelText("我的笔记");
+  fireEvent.change(notes, {target: {value: "筛选期间未保存"}});
+  fireEvent.change(screen.getByLabelText("案例来源"), {target: {value: "research_import"}});
+  await waitFor(() => expect(fetchMock.mock.calls.some(call => String(call[0]).includes("origin=research_import"))).toBe(true));
+  expect(notes).toHaveValue("筛选期间未保存");
+  resolveFiltered(new Response(JSON.stringify({items: [], next_cursor: null, official_pack: {ready: true}, total: 0})));
+  await screen.findByText("没有符合当前筛选的案例。");
+  expect(screen.getByLabelText("我的笔记")).toHaveValue("筛选期间未保存");
+  expect(screen.getByRole("heading", {name: "雨夜案例"})).toBeInTheDocument();
 });
 
 it("keeps unsaved notes, selected reference and original image URL while changing all four appearance modes", async () => {

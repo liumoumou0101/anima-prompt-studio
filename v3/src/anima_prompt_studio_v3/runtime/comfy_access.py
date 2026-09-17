@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteCredentials
 from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
@@ -17,6 +17,7 @@ COMFY_ACCESS_HOST = "127.0.0.1"
 COMFY_ACCESS_PORT = 18188
 COMFY_ACCESS_URL = f"http://{COMFY_ACCESS_HOST}:{COMFY_ACCESS_PORT}"
 LOGGER = logging.getLogger(__name__)
+T = TypeVar("T")
 
 
 class ManagedComfyAccess:
@@ -146,6 +147,25 @@ class ManagedComfyAccess:
             self._devices = []
             self._queue_running = 0
             self._queue_pending = 0
+
+    def with_profile_deletion(self, profile_id: str, delete: Callable[[], T]) -> T:
+        """Serialize deletion with open(), then disconnect only the deleted profile."""
+        with self._operation_lock:
+            result = delete()
+            with self._state_lock:
+                if self._profile_id != profile_id:
+                    return result
+            self._close_current_tunnel()
+            with self._state_lock:
+                self._profile_id = ""
+                self._profile_name = ""
+                self._profile_snapshot = None
+                self._state = "stopped"
+                self._message = "云主机配置已删除，维护隧道已停止。"
+                self._devices = []
+                self._queue_running = 0
+                self._queue_pending = 0
+            return result
 
     def _open_default_safely(self) -> None:
         try:

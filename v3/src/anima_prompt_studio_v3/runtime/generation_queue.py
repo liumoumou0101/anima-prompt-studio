@@ -9,6 +9,7 @@ from threading import Condition, Lock, Thread
 from typing import Protocol
 
 from anima_prompt_studio.domain.execution_models import (
+    ACTIVE_RUN_STATES,
     GenerationArtifact,
     GenerationRun,
     GenerationRunState,
@@ -172,6 +173,8 @@ class GenerationQueueService:
         self._active_run_id: str | None = None
         self._active_coordinator: RemoteExecutionCoordinator | None = None
         self._scheduled_run_ids: set[str] = set()
+        self._profile_delete_versions: dict[str, int] = {}
+        self._deleted_profile_ids: set[str] = set()
         self._stopping = False
         self._worker = Thread(target=self._work_loop, name="anima-v3-generation-queue", daemon=True)
         self._worker.start()
@@ -208,6 +211,7 @@ class GenerationQueueService:
             capacity = self._max_pending if self._active_run_id is not None else self._max_pending + 1
             if len(self._pending) + len(self._reserved) >= capacity:
                 raise GenerationQueueFullError(f"文生图等待队列已达到 {self._max_pending} 项。")
+            profile_delete_version = self._profile_delete_versions.get(remote_profile_id, 0)
 
         target = self._target_resolver(remote_profile_id, workflow_profile_id)
         self._validate_target(prepared, target)
@@ -243,6 +247,8 @@ class GenerationQueueService:
                 return self._runs[existing_id].model_copy(deep=True)
             if self._stopping:
                 raise GenerationQueueError("生成队列正在停止。")
+            if self._profile_delete_versions.get(remote_profile_id, 0) != profile_delete_version:
+                raise GenerationQueueError("云主机配置已删除，请重新选择连接。")
             capacity = self._max_pending if self._active_run_id is not None else self._max_pending + 1
             if len(self._pending) + len(self._reserved) >= capacity:
                 raise GenerationQueueFullError(f"文生图等待队列已达到 {self._max_pending} 项。")
@@ -286,13 +292,15 @@ class GenerationQueueService:
         with self._condition:
             return list(self._reserved)
 
-    def accept_durable(self, key, payload_hash, builder):
+    def accept_durable(self, key, payload_hash, builder, *, remote_profile_id=None):
         from ..storage.generation_submissions import IdempotencyConflict
         with self._condition:
             if key in self._idempotency:
                 raise IdempotencyConflict("该幂等键已有任务，请查询原提交。")
             if self._stopping:
                 raise GenerationQueueError("生成队列正在停止。")
+            if remote_profile_id is not None and remote_profile_id in self._deleted_profile_ids:
+                raise GenerationQueueError("云主机配置已删除，请重新选择连接。")
             capacity = self._max_pending if self._active_run_id else self._max_pending + 1
             if len(self._pending) + len(self._reserved) >= capacity:
                 raise GenerationQueueFullError("生成队列已满，未接受新任务。")
@@ -374,7 +382,31 @@ class GenerationQueueService:
     def set_private_key_passphrase(self, remote_profile_id: str, passphrase: str) -> None:
         if self._passphrase_vault is None:
             raise GenerationQueueError("当前生成队列不支持私钥口令输入。")
-        self._passphrase_vault.set(remote_profile_id, passphrase)
+        with self._condition:
+            if remote_profile_id in self._deleted_profile_ids:
+                raise GenerationQueueError("云主机配置已删除，请重新选择连接。")
+            self._passphrase_vault.set(remote_profile_id, passphrase)
+
+    def with_profile_deletion(self, remote_profile_id: str, delete):
+        """Prevent accepted or concurrently resolving work from outliving its profile."""
+        with self._condition:
+            in_use = any(
+                run.remote_profile_id == remote_profile_id
+                and (run.state in ACTIVE_RUN_STATES or run.id in self._reserved or run.id in self._scheduled_run_ids)
+                for run in self._runs.values()
+            )
+            if in_use:
+                raise GenerationRunActionError("云主机仍有活动生成任务。")
+            result = delete()
+            self._profile_delete_versions[remote_profile_id] = self._profile_delete_versions.get(remote_profile_id, 0) + 1
+            self._deleted_profile_ids.add(remote_profile_id)
+            if self._passphrase_vault is not None:
+                self._passphrase_vault.set(remote_profile_id, "")
+            return result
+
+    def restore_profile(self, remote_profile_id: str) -> None:
+        with self._condition:
+            self._deleted_profile_ids.discard(remote_profile_id)
 
     def resume(self, run_id: str) -> GenerationRun:
         with self._condition:
@@ -394,6 +426,7 @@ class GenerationQueueService:
                 raise GenerationQueueFullError(f"文生图等待队列已达到 {self._max_pending} 项。")
             remote_profile_id = run.remote_profile_id
             workflow_profile_id = run.workflow_profile_id
+            profile_delete_version = self._profile_delete_versions.get(remote_profile_id, 0)
 
         target = self._recovery_resolver(run) if self._recovery_resolver else self._target_resolver(remote_profile_id, workflow_profile_id)
         self._validate_remote_target(target)
@@ -408,6 +441,8 @@ class GenerationQueueService:
                 raise GenerationRunActionError("任务已在本地执行或恢复队列中。")
             if self._stopping:
                 raise GenerationQueueError("生成队列正在停止。")
+            if self._profile_delete_versions.get(remote_profile_id, 0) != profile_delete_version:
+                raise GenerationQueueError("云主机配置已删除，请重新选择连接。")
             capacity = self._max_pending if self._active_run_id is not None else self._max_pending + 1
             if len(self._pending) + len(self._reserved) >= capacity:
                 raise GenerationQueueFullError(f"文生图等待队列已达到 {self._max_pending} 项。")

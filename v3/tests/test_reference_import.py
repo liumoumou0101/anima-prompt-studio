@@ -69,6 +69,18 @@ def test_import_validates_every_record_before_writing(tmp_path, invalid):
     assert list(store.root.iterdir()) == []
 
 
+@pytest.mark.parametrize("field", ["style_axis", "why", "copy_tip", "lora_url", "stats"])
+def test_import_rejects_non_string_display_metadata_before_writing(tmp_path, field):
+    root, _ = collection(tmp_path, [{}, {"id": "civitai:456", field: {"unexpected": "object"}}])
+    store = ExampleStore(tmp_path / "state/examples.db")
+
+    with pytest.raises(ValueError, match=field):
+        import_collection(store, root)
+
+    assert store.list()["items"] == []
+    assert list(store.root.iterdir()) == []
+
+
 def test_duplicate_source_ids_and_changed_images_are_rejected(tmp_path):
     root, values = collection(tmp_path, [{}, {}])
     store = ExampleStore(tmp_path / "state/examples.db")

@@ -170,7 +170,12 @@ class SubmissionService:
                                      token=payload.compiled_token if workspace else None,
                                      prompt=PromptEdit(positive=prepared.job.positive_prompt, negative=prepared.job.negative_prompt))
         try:
-            entry = self.queue.accept_durable(key, request_hash, accept)
+            entry = self.queue.accept_durable(
+                key,
+                request_hash,
+                accept,
+                remote_profile_id=payload.remote_profile_id,
+            )
         except IdempotencyConflict:
             old = self.store.lookup(key, request_hash)
             if old:

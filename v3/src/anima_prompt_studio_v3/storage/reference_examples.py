@@ -256,6 +256,22 @@ class ExampleStore:
         pack_status = {"ready": False} if pack is None else {"ready": True, "id": pack[1].pack_id, "count": len(pack[2])}
         normalized_artist = artist.strip().lstrip("@").casefold().replace(" ", "_") if artist else None
         filters = [q, origin, model, normalized_artist, lora_dependency, content]
+        user_where = """deleted_at IS NULL
+                AND instr(lower(json_extract(payload_json,'$.title') || ' ' ||
+                    coalesce(json_extract(payload_json,'$.notes.user_notes'),'') || ' ' ||
+                    coalesce(json_extract(payload_json,'$.notes.external_prompt'),'') || ' ' ||
+                    coalesce(json_extract(payload_json,'$.provenance.reference_metadata'),'')),lower(?)) > 0
+                AND (? IS NULL OR json_extract(payload_json,'$.origin')=?)
+                AND (? IS NULL OR json_extract(payload_json,'$.provenance.model_profile')=?
+                     OR json_extract(payload_json,'$.provenance.reference_metadata.checkpoint')=?)
+                AND (? IS NULL OR EXISTS (SELECT 1 FROM json_each(json_extract(payload_json,
+                     '$.provenance.reference_metadata.artists')) WHERE value=?))
+                AND (? IS NULL OR coalesce(json_extract(payload_json,
+                     '$.provenance.reference_metadata.lora_dependency'),'unknown')=?)
+                AND (? IS NULL OR coalesce(json_extract(payload_json,
+                     '$.provenance.reference_metadata.content_level'),'unknown')=?)"""
+        user_params = (q, origin, origin, model, model, model, normalized_artist, normalized_artist,
+                       lora_dependency, lora_dependency, content, content)
         with self.connect() as db:
             db.execute("BEGIN")
             version = db.execute("SELECT revision FROM example_catalog_revision WHERE id=1").fetchone()[0]
@@ -269,30 +285,18 @@ class ExampleStore:
                 except (ValueError, IndexError, KeyError, TypeError):
                     fail("reference_version_conflict", "参考库或查询已变化，请重新加载列表。")
             # JSON fields stay server-owned; query parameters are bound, never SQL fragments.
+            user_total = db.execute(f"SELECT count(*) FROM examples WHERE {user_where}", user_params).fetchone()[0]
             selected = official[offset:offset + limit + 1]
-            rows = db.execute("""SELECT * FROM examples WHERE deleted_at IS NULL
-                AND instr(lower(json_extract(payload_json,'$.title') || ' ' ||
-                    coalesce(json_extract(payload_json,'$.notes.user_notes'),'') || ' ' ||
-                    coalesce(json_extract(payload_json,'$.notes.external_prompt'),'') || ' ' ||
-                    coalesce(json_extract(payload_json,'$.provenance.reference_metadata'),'')),lower(?)) > 0
-                AND (? IS NULL OR json_extract(payload_json,'$.origin')=?)
-                AND (? IS NULL OR json_extract(payload_json,'$.provenance.model_profile')=?
-                     OR json_extract(payload_json,'$.provenance.reference_metadata.checkpoint')=?)
-                AND (? IS NULL OR EXISTS (SELECT 1 FROM json_each(json_extract(payload_json,
-                     '$.provenance.reference_metadata.artists')) WHERE value=?))
-                AND (? IS NULL OR coalesce(json_extract(payload_json,
-                     '$.provenance.reference_metadata.lora_dependency'),'unknown')=?)
-                AND (? IS NULL OR coalesce(json_extract(payload_json,
-                     '$.provenance.reference_metadata.content_level'),'unknown')=?)
-                ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?""", (q, origin, origin, model, model, model,
-                    normalized_artist, normalized_artist, lora_dependency, lora_dependency, content, content,
-                    max(0,limit + 1-len(selected)), max(0,offset-len(official)))).fetchall()
+            rows = db.execute(f"""SELECT * FROM examples WHERE {user_where}
+                ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?""", user_params +
+                (max(0,limit + 1-len(selected)), max(0,offset-len(official)))).fetchall()
             for item in selected:
                 item.pop("media_path")
                 self.official_notes(db, item)
             selected += [self.record(row) for row in rows]
             next_cursor = base64.urlsafe_b64encode(json.dumps([version,filters,offset+limit,pack_stamp]).encode()).decode() if len(selected) > limit else None
-            return {"items": selected[:limit], "next_cursor": next_cursor, "official_pack": pack_status}
+            return {"items": selected[:limit], "next_cursor": next_cursor,
+                    "total": len(official) + user_total, "official_pack": pack_status}
 
     def facets(self):
         with self.connect() as db:

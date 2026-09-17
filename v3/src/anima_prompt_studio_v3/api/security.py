@@ -68,6 +68,13 @@ class SessionManager:
                 return self._issue_session(now)
             raise SessionInvalidError("恢复凭据无效或已过期，请从桌面入口重新打开。")
 
+    def create_local_session(self) -> SessionExchange:
+        """Create a session after the desktop HTTP boundary has accepted a local client."""
+        now = time.monotonic()
+        with self._lock:
+            self._prune(now)
+            return self._issue_session(now)
+
     def _issue_session(self, now: float, recovery_token: str = "") -> SessionExchange:
         session_token = secrets.token_urlsafe(32)
         recovery_token = recovery_token or secrets.token_urlsafe(32)

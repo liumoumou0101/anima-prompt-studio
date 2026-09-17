@@ -66,6 +66,8 @@ class ContinueGeneration(ContractModel):
 def register_reference_routes(app, workspace_db, require_session):
     store = ExampleStore(Path(workspace_db).with_name("examples.db"))
     app.state.example_store = store
+    from .reference_sync import register_local_sync_routes
+    register_local_sync_routes(app, store, workspace_db, require_session)
     from .reference_presets import register_preset_routes
     register_preset_routes(app, store, require_session)
     if app.state.submission_service is not None:

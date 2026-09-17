@@ -1,5 +1,13 @@
 # V3 本地 API 契约
 
+## 已保存生成环境的删除（2026-09-17）
+
+`DELETE /api/v3/settings/remote-profiles/{profile_id}` 接收严格空对象 `{}`，沿用本地会话、Origin 与 JSON 请求体校验，成功返回 204。不存在的连接返回 404；仍有活动生成任务或工作流检查的连接返回 409。终态生成历史不阻止删除。
+
+删除清理本机连接记录、系统保存密码、临时口令、该连接的默认选择及工作流资源缓存、映射和 LoRA 绑定；关闭属于该连接的 ComfyUI 维护入口，其他连接继续保留。生成历史、图片、全局工作流模板及远端主机文件不随连接删除。凭据清理失败返回 503 并保留连接配置，供用户重试。
+
+设置页仅对已保存连接显示删除入口，确认内容绑定所选连接；切换连接或新建时取消确认。删除成功后选择剩余连接，删除最后一项后回到新增表单。
+
 ## LLM 模型目录刷新（2026-09-10）
 
 `POST /api/v3/llm/services/{service_id}/models/refresh` 沿用会话与 Origin 校验，仅使用已保存服务端点与 Key，返回 `{models: string[], count: number}`。OpenAI 兼容服务 GET `/models`，Ollama GET `/api/tags`，超时 20 秒且不跟随重定向；不生成文本、不改变当前模型或思考配置。目录合并保留已有模型参数与自定义 ID。请求期间地址/Key/协议变化返回 422 `llm_config_invalid`，读取或保存失败返回 502 `llm_models_failed`，不泄漏上游错误正文。列表不保证当前套餐对每个模型都有生成权限。
@@ -42,7 +50,23 @@
 
 ## 2. 会话与安全
 
-桌面壳启动浏览器时生成一次性 bootstrap token：
+桌面入口（2026-09-17 起）直接打开不含凭据的本机地址。新浏览器、已过期恢复凭据及后台重启场景通过以下接口自动建立会话：
+
+```http
+POST /api/v3/session/local
+Content-Type: application/json
+X-Anima-Local: 1
+
+{}
+```
+
+仅 `run_desktop` 显式开启 `allow_local_sessions`；直接 API 启动默认关闭，调用返回 403 `local_session_unavailable`。请求必须来自真实回环地址，Host 必须为 `127.0.0.1`、`localhost` 或 `::1`，Origin 必须精确匹配当前协议、主机和端口；若提供 `Sec-Fetch-Site`，其值必须为 `same-origin`。请求体为严格空对象，必须带上述自定义头，不开放跨域许可，Uvicorn 不采信代理转发头。
+
+响应包含 `session_token`、`expires_in`、`recovery_token`，禁止缓存。前端优先复用当前会话或恢复凭据；缺失凭据、恢复/交换返回 401 时自动建立本机会话，网络错误和其他 HTTP 错误不触发无限重试。恢复凭据保存在当前浏览器同源存储中；业务请求依然携带会话令牌。桌面模式的信任范围是本机使用者及本机进程，不再用一次性链接区分浏览器；来源检查用于阻止外部网页借浏览器调用本机能力。页面通过 CSP `frame-ancestors 'none'` 及 `X-Frame-Options: DENY` 禁止被其他页面嵌入，防止自动会话页面被用于点击劫持。
+
+同一工作空间由跨进程锁维持单个桌面后台。重复启动等待已就绪实例并核对随机实例标识，只重新打开其普通网址。`POST /api/v3/desktop/instance` 使用相同本机请求限制及空对象，返回 `{instance_id}`，不签发会话或图片 Cookie，禁止缓存。实例标识为空时返回 404。端口及实例标识用于本机启动协调，不含会话、恢复或系统凭据。
+
+旧启动链接和直接 API 模式继续兼容一次性 bootstrap token：
 
 ```text
 http://127.0.0.1:{port}/?bootstrap={one_time_token}
@@ -60,7 +84,7 @@ POST /api/v3/session/exchange
 X-Anima-Session: <token>
 ```
 
-除 `/health` 和静态文件外，所有 API 默认要求会话。所有写请求同时校验 Host、Origin、Content-Type 和请求体上限。正式环境不开放通配 CORS。
+除 `/health`、静态文件、会话建立/恢复入口及桌面实例探测外，所有 API 默认要求会话。所有写请求同时校验 Host、Origin、Content-Type 和请求体上限。正式环境不开放通配 CORS。
 
 ## 3. 错误模型
 
@@ -439,11 +463,12 @@ LoraSelectionDto 为 logical_id/file_name/weight/trigger_words，extra=forbid。
 
 | 方法 | 路径 | 请求要点 |
 | --- | --- | --- |
-| GET/POST | `/reference-examples` | 列表 q/origin/limit/cursor；创建仅 multipart file/title/可选 metadata JSON 字段，不接本机路径 |
+| GET/POST | `/reference-examples` | 列表 q/origin/model/artist/lora_dependency/content/limit/cursor；创建仅 multipart file/title/可选 metadata JSON 字段，不接本机路径 |
 | GET/PATCH/DELETE | `/reference-examples/{id}` | PATCH/DELETE 必须 revision；PATCH 允许 title/notes/requirements_edit/声明兼容性；不能伪造 run 身份 |
 | PATCH | `/reference-examples/{off_id}/notes` | override_revision（首次 0）+ notes |
 | POST | `/reference-examples/{off_id}/copy` | source_version；复制为新 ex_ ID |
 | POST | `/reference-examples/install-bundled` | 严格空对象 `{}`；显式安装内置包，返回 `{id,ready,count}`；已有有效激活包时原样返回，不替换 |
+| GET/POST | `/reference-examples/local-sync` | GET 读取本地扫描状态；POST 严格空对象 `{}`，后台重新发现并补齐本地集合；不接收客户端路径 |
 | POST | `/reference-examples/from-gallery` | 受 gallery 根目录授权的 path，服务端复制 |
 | POST | `/reference-examples/from-run` | run_id/path，须属于该 run 的 artifacts |
 | GET | `/reference-examples/{id}/content`、`/thumbnail` | 已登记媒体；无绝对路径；cookie 限参考媒体前缀或用 session header |
@@ -469,6 +494,10 @@ GET/PUT /workflows/servers/{remote}/{workflow}/lora-bindings 为 logical_id/reso
 
 `install-bundled` 沿用会话与 Origin 校验，不接收路径、不联网、不调用模型。进程内串行安装，源仅为随发行携带的内置包；个人笔记不变。内置文件缺失返回 422 `bundled_examples_missing`，文件校验或写入失败返回 422 `bundled_examples_install_failed`；错误不回显文件路径，失败后可显式重试。
 
+`local-sync` 在应用启动后自动进行一次后台扫描，之后由页面按钮显式重扫。仅检查约定目录，按优先级选择第一份存在的 `anima-ref`：当前工作台数据目录、冻结 EXE 所在目录、由当前前端目录或工作台目录识别出的项目根目录。不递归扫描磁盘，不联网或调用模型；启动后新放入的集合可以通过重扫发现。目录存在但集合损坏时显示失败，不静默跳过到其他来源。
+
+状态结构为 `{status,run_id,counts,total,message,completed_at}`；`status` 为 `idle|scanning|ready|missing|error`，`counts` 包含 `created/updated/unchanged/deleted_preserved`。GET 和 POST 均沿用会话及 Origin 校验。并发重扫复用当前任务，导入还使用跨进程锁。先校验完整来源，再逐条写入；写入中断可能留下部分结果，重扫幂等续补。原始图片变化会拒绝；个人标题、笔记、结构化要求和删除状态保留。成功回执原子保存到当前数据目录的 `reference-sync-receipt.json`。界面完成后刷新列表，未保存编辑或尚未应用的筛选会推迟刷新。
+
 ### 9.5 产物投影、flags 与错误
 
 GET /generation-runs/{id}/artifacts 返回 `{items:[{id,path,content_url,thumbnail_url}]}`，只含画廊根内相对路径，复用现有 content/thumbnail。产物未就绪 items=[]，不伪造 completed；missing run 404。不下发 local_path/request_json。
@@ -483,7 +512,7 @@ conversational_workbench/reference_gallery 默认 false；内部可按依赖打�
 
 已实现 GET/POST /reference-examples、单项 GET/PATCH/DELETE、content/thumbnail、from-gallery/from-run、ingest，以及 POST/DELETE /workbench/pins。上传独占 multipart/form-data，其他写请求仍为 JSON，均验证会话和 Origin。metadata 只允许 notes、requirements_edit、compat（模型/工作流类型声明）。PATCH revision 必填，省略字段保留，requirements_edit 不接受 null。
 
-列表返回 items、next_cursor、official_pack（未安装/校验失败 ready=false，已就绪含 id/count）。游标绑定查询、用户目录版本及官方包版本，变动返回 409 reference_version_conflict；官方条目按 ID 排在用户条目前，用户条目按更新时间倒序。用户 source_version 为 revision 字符串，官方为 pack_id 与条目内容摘要。failed ingest 可保留合法要求。from-run 验证已登记 artifact，公开 provenance 仅含 run_id、实际正负、model_profile、settings、workflow_snapshot_ref。
+列表返回 items、next_cursor、total、official_pack（未安装/校验失败 ready=false，已就绪含 id/count）。total 是当前所有筛选条件下匹配的官方与未删除用户条目总数，与分页读取处于同一数据库快照，不受 limit/cursor 影响。游标绑定查询、用户目录版本及官方包版本，变动返回 409 reference_version_conflict；官方条目按 ID 排在用户条目前，用户条目按更新时间倒序。用户 source_version 为 revision 字符串，官方为 pack_id 与条目内容摘要。failed ingest 可保留合法要求。from-run 验证已登记 artifact，公开 provenance 仅含 run_id、实际正负、model_profile、settings、workflow_snapshot_ref。
 
 分析失败返回 502；编辑/删除使 late result 返回 409 ingest_superseded。pending 启动/完成各升例图 revision，用户编辑使 attempt 失效。
 

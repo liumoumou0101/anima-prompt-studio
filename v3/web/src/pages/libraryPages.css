@@ -35,7 +35,13 @@
 .library-reference .reference-upload-form { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(240px, 1.2fr) auto; align-items: end; gap: 12px; padding: 0 0 12px; }
 .library-reference .reference-install-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .library-reference .reference-install-row p { flex: 1; min-width: 220px; margin: 0; color: var(--muted); font-size: 13px; }
+.library-reference .reference-local-sync, .library-reference .reference-local-refresh { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 10px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.library-reference .reference-local-sync button, .library-reference .reference-local-refresh button { min-height: 34px; }
 .library-reference .reference-count { margin: 16px 0 12px; color: var(--muted); font-size: 13px; }
+.library-reference .reference-filter-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; grid-column: 1 / -1; }
+.library-reference .reference-catalog-state { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 16px; padding: 18px 12px; color: var(--muted); text-align: center; font-size: 13px; }
+.library-reference .reference-catalog-state p { margin: 0; }
+.library-reference .reference-catalog-sentinel { min-height: 1px; }
 .library-reference .reference-browser { display: grid; gap: 24px; align-items: start; min-width: 0; }
 .library-reference.reference-library-page .reference-browser.has-detail { grid-template-columns: minmax(0, 1fr) minmax(330px, .75fr); }
 .library-reference .reference-results { min-width: 0; }
@@ -191,6 +197,12 @@
 .library-page .settings-form-head h2 { font-family: inherit; font-size: 20px; }
 .library-page .settings-form-head p { font-size: 13px; }
 .library-page .settings-security { background: var(--panel); border-color: var(--line); }
+.library-page .settings-delete-confirm { margin-block: 16px; padding: 14px 16px; border: 1px solid var(--danger); border-radius: 6px; background: var(--panel); overflow-wrap: anywhere; }
+.library-page .settings-delete-confirm > strong { display: block; margin-bottom: 8px; color: var(--text); font-size: 14px; }
+.library-page .settings-delete-confirm p { margin: 0 0 12px; color: var(--text); font-size: 13px; line-height: 1.65; }
+.library-page .settings-delete-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.library-page .settings-security > .button--danger { margin-top: 12px; }
+.library-page .settings-delete-actions .is-danger:not(:disabled), .library-page .settings-form .button--danger:not(:disabled) { color: var(--danger); border-color: var(--danger); background: var(--panel); }
 .library-page .remote-profile-item { color: var(--text); background: transparent; border-color: var(--line); }
 .library-page .remote-profile-item.is-selected { background: var(--accent-soft); border-color: var(--accent); }
 .library-page .remote-profile-item :is(strong, small) { color: var(--text); font-size: 13px; }

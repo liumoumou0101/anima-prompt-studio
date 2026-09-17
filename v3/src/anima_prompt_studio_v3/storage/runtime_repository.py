@@ -21,6 +21,10 @@ from anima_prompt_studio.domain.models import ArtistProfile, CharacterCard, LoRA
 SCHEMA_VERSION = 4
 
 
+class RemoteProfileInUseError(RuntimeError):
+    pass
+
+
 def default_data_dir() -> Path:
     base = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".local" / "share"))
     return base / "AnimaPromptStudio"
@@ -160,9 +164,57 @@ class SQLiteRepository:
         ]
         return [profile for profile in profiles if profile.enabled] if enabled_only else profiles
 
-    def delete_remote_profile(self, profile_id: str) -> None:
-        with self.connection:
+    def delete_remote_profile(self, profile_id: str, *, before_delete=None) -> None:
+        """Delete one profile and its owned settings without touching run history."""
+        states = sorted(state.value for state in ACTIVE_RUN_STATES)
+        placeholders = ",".join("?" for _ in states)
+        try:
+            self.connection.execute("BEGIN IMMEDIATE")
+            row = self.connection.execute(
+                "SELECT payload_json FROM remote_profiles WHERE id=?", (profile_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"云主机配置不存在：{profile_id}")
+            active = self.connection.execute(
+                f"SELECT 1 FROM generation_runs WHERE remote_profile_id=? AND state IN ({placeholders}) LIMIT 1",
+                (profile_id, *states),
+            ).fetchone()
+            if active is not None:
+                raise RemoteProfileInUseError(profile_id)
+
+            profile = RemoteProfile.model_validate_json(row[0])
+            if before_delete is not None:
+                before_delete(profile)
+
+            exact_keys = (
+                f"remember_remote_password:{profile_id}",
+                f"workflow_capabilities:{profile_id}",
+            )
+            self.connection.executemany("DELETE FROM settings WHERE key=?", [(key,) for key in exact_keys])
+            mapping_prefix = f"workflow_mapping:{profile_id}:"
+            self.connection.execute(
+                "DELETE FROM settings WHERE substr(key,1,?)=?",
+                (len(mapping_prefix), mapping_prefix),
+            )
+            lora_prefix = "workflow_lora_bindings:"
+            lora_rows = self.connection.execute(
+                "SELECT key FROM settings WHERE substr(key,1,?)=?",
+                (len(lora_prefix), lora_prefix),
+            ).fetchall()
+            for setting in lora_rows:
+                try:
+                    identity = json.loads(str(setting["key"])[len(lora_prefix):])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if isinstance(identity, list) and identity and identity[0] == profile_id:
+                    self.connection.execute("DELETE FROM settings WHERE key=?", (setting["key"],))
+            if self.get_setting("last_remote_profile_id") == profile_id:
+                self.connection.execute("DELETE FROM settings WHERE key='last_remote_profile_id'")
             self.connection.execute("DELETE FROM remote_profiles WHERE id=?", (profile_id,))
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
 
     def save_workflow_profile(self, profile: WorkflowProfile) -> None:
         with self.connection:

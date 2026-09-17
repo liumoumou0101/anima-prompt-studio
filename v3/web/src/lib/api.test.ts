@@ -73,13 +73,84 @@ describe("API bootstrap client", () => {
     expect(new Headers(retried.headers).get("X-Anima-Session")).toBe("restored-session");
   });
 
-  it("does not acquire sessions without an existing credential or discard local drafts", async () => {
+  it("creates a local session from a clean URL without discarding local drafts or query parameters", async () => {
     window.history.replaceState({}, "", "/workbench?workspace=draft-1");
     localStorage.setItem("anima-draft", "unfinished changes");
-    const fetchMock = vi.spyOn(globalThis, "fetch");
-    await expect(initializeApp()).rejects.toMatchObject({code: "session_invalid"});
-    expect(fetchMock).not.toHaveBeenCalled();
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({session_token: "local-session", recovery_token: "local-recovery"})))
+      .mockResolvedValueOnce(new Response(JSON.stringify(bootstrapPayload)));
+    await expect(initializeApp()).resolves.toEqual(bootstrapPayload);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v3/session/local");
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(request.method).toBe("POST");
+    expect(request.body).toBe("{}");
+    expect(new Headers(request.headers).get("Content-Type")).toBe("application/json");
+    expect(new Headers(request.headers).get("X-Anima-Local")).toBe("1");
+    expect(window.location.search).toBe("?workspace=draft-1");
+    expect(sessionStorage.getItem("anima-v3-session")).toBe("local-session");
+    expect(localStorage.getItem("anima-v3-session-recovery")).toBe("local-recovery");
     expect(localStorage.getItem("anima-draft")).toBe("unfinished changes");
+  });
+
+  it("falls back once to a local session when a remembered recovery credential is invalid", async () => {
+    window.history.replaceState({}, "", "/workbench");
+    localStorage.setItem("anima-v3-session-recovery", "stale-recovery");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({error: {code: "session_invalid", message: "expired"}}), {status: 401}))
+      .mockResolvedValueOnce(new Response(JSON.stringify({session_token: "rebuilt", recovery_token: "new-recovery"})))
+      .mockResolvedValueOnce(new Response(JSON.stringify(bootstrapPayload)));
+    await initializeApp();
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
+      "/api/v3/session/restore", "/api/v3/session/local", "/api/v3/bootstrap",
+    ]);
+    expect(sessionStorage.getItem("anima-v3-session")).toBe("rebuilt");
+    expect(localStorage.getItem("anima-v3-session-recovery")).toBe("new-recovery");
+  });
+
+  it("falls back to a local session after an expired one-time bootstrap credential", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({error: {code: "session_invalid", message: "consumed"}}), {status: 401}))
+      .mockResolvedValueOnce(new Response(JSON.stringify({session_token: "local-after-bootstrap", recovery_token: "recovery"})))
+      .mockResolvedValueOnce(new Response(JSON.stringify(bootstrapPayload)));
+    await initializeApp();
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
+      "/api/v3/session/exchange", "/api/v3/session/local", "/api/v3/bootstrap",
+    ]);
+    expect(window.location.search).toBe("");
+  });
+
+  it("shares one local rebuild when concurrent requests discover the same failed recovery", async () => {
+    window.history.replaceState({}, "", "/");
+    sessionStorage.setItem("anima-v3-session", "expired");
+    localStorage.setItem("anima-v3-session-recovery", "stale");
+    let releaseRestore!: (response: Response) => void;
+    const pendingRestore = new Promise<Response>(resolve => {releaseRestore = resolve;});
+    const unauthorized = () => new Response(JSON.stringify({error: {code: "session_invalid"}}), {status: 401});
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (path, init) => {
+      if (path === "/api/v3/session/restore") return pendingRestore;
+      if (path === "/api/v3/session/local") return new Response(JSON.stringify({session_token: "rebuilt", recovery_token: "fresh"}));
+      if (new Headers(init?.headers).get("X-Anima-Session") === "expired") return unauthorized();
+      return new Response(JSON.stringify({ok: true}));
+    });
+    const requests = Promise.all([apiRequest("/api/v3/one"), apiRequest("/api/v3/two")]);
+    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(call => call[0] === "/api/v3/session/restore")).toHaveLength(1));
+    releaseRestore(unauthorized());
+    await requests;
+    expect(fetchMock.mock.calls.filter(call => call[0] === "/api/v3/session/local")).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(call => call[0] === "/api/v3/one")).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(call => call[0] === "/api/v3/two")).toHaveLength(2);
+  });
+
+  it.each([
+    ["a forbidden browser mode", () => Promise.resolve(new Response(JSON.stringify({error: {code: "local_session_unavailable", message: "desktop only"}}), {status: 403})), "local_session_unavailable"],
+    ["a server failure", () => Promise.resolve(new Response(JSON.stringify({error: {code: "local_session_failed", message: "temporarily unavailable", retryable: true}}), {status: 503})), "local_session_failed"],
+    ["a network failure", () => Promise.reject(new TypeError("offline")), "network_error"],
+  ])("does not loop local-session acquisition after %s", async (_label, result, code) => {
+    window.history.replaceState({}, "", "/");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementationOnce(result);
+    await expect(initializeApp()).rejects.toMatchObject({code});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v3/session/local");
   });
 
   it("upgrades an existing session and shares a recovery request between concurrent requests", async () => {

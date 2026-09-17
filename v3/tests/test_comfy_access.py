@@ -102,3 +102,59 @@ def test_managed_comfy_access_starts_the_saved_default_in_background(tmp_path: P
     manager._startup_thread.join(timeout=2)
 
     assert opened == ["remote-default"]
+
+
+def test_profile_deletion_disconnects_only_matching_tunnel_and_manager_can_reopen(tmp_path: Path) -> None:
+    database = tmp_path / "v2.db"
+    repository = SQLiteRepository(database)
+    profiles = [
+        RemoteProfile(id="first", display_name="First", ssh_host="first.example", ssh_user="root",
+                      auth_type=RemoteAuthType.AGENT, known_host_fingerprint="SHA256:first"),
+        RemoteProfile(id="second", display_name="Second", ssh_host="second.example", ssh_user="root",
+                      auth_type=RemoteAuthType.AGENT, known_host_fingerprint="SHA256:second"),
+    ]
+    try:
+        for profile in profiles:
+            repository.save_remote_profile(profile)
+    finally:
+        repository.close()
+
+    closed: list[str] = []
+
+    class FakeTunnel:
+        def __init__(self, profile, **_kwargs) -> None:
+            self.profile_id = profile.id
+            self.base_url = "http://127.0.0.1:18188"
+            self.client = SimpleNamespace(get_transport=lambda: SimpleNamespace(is_active=lambda: True))
+            self.server = object()
+
+        def open(self, _credentials):
+            return self
+
+        def close(self) -> None:
+            closed.append(self.profile_id)
+            self.client = None
+            self.server = None
+
+    class FakeClient:
+        def __init__(self, _url: str) -> None:
+            pass
+
+        def validate_environment(self):
+            return SimpleNamespace(devices=[], queue_running=0, queue_pending=0)
+
+    manager = ManagedComfyAccess(database, tunnel_factory=FakeTunnel, client_factory=FakeClient)
+    manager.open("first")
+
+    manager.with_profile_deletion("second", lambda: None)
+    assert manager.status()["remote_profile_id"] == "first"
+    assert closed == []
+
+    manager.with_profile_deletion("first", lambda: None)
+    assert manager.status()["state"] == "stopped"
+    assert manager.status()["remote_profile_id"] is None
+    assert closed == ["first"]
+
+    manager.open("second")
+    assert manager.status()["ready"] is True
+    assert manager.status()["remote_profile_id"] == "second"

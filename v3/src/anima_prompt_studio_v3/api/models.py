@@ -484,6 +484,10 @@ class PreferredRemoteProfileRequest(ApiModel):
     remote_profile_id: str = Field(min_length=1, max_length=200)
 
 
+class EmptyRequest(ApiModel):
+    pass
+
+
 class RemoteProfileSettingsRequest(ApiModel):
     """The editable, non-secret part of a V2 remote profile.
 

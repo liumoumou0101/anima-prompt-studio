@@ -59,7 +59,8 @@ async function restoreSessionOnce(): Promise<void> {
   const remembered = recoveryToken();
   const current = sessionStorage.getItem(SESSION_KEY);
   if (!remembered && !current) {
-    throw new ApiClientError("缺少启动会话。请从 ANIMA Prompt Studio 桌面入口重新打开。", "session_invalid");
+    await createLocalSession();
+    return;
   }
   const headers = new Headers({"Content-Type": "application/json"});
   if (remembered) headers.set("X-Anima-Recovery", remembered);
@@ -68,7 +69,18 @@ async function restoreSessionOnce(): Promise<void> {
   if (response.status === 401) {
     if (sessionStorage.getItem(SESSION_KEY) === current) sessionStorage.removeItem(SESSION_KEY);
     try { if (recoveryToken() === remembered) localStorage.removeItem(RECOVERY_KEY); } catch { /* storage unavailable */ }
+    await createLocalSession();
+    return;
   }
+  rememberSession(await parseResponse<SessionResponse>(response));
+}
+
+async function createLocalSession(): Promise<void> {
+  const response = await fetchLocal("/api/v3/session/local", {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "X-Anima-Local": "1"},
+    body: "{}",
+  });
   rememberSession(await parseResponse<SessionResponse>(response));
 }
 
@@ -86,7 +98,7 @@ async function initializeAppOnce(): Promise<BootstrapResponse> {
       body: JSON.stringify({bootstrap_token: bootstrap}),
     });
     if (response.ok || response.status === 401) pendingBootstrap = null;
-    if (response.status === 401 && (recoveryToken() || sessionStorage.getItem(SESSION_KEY))) {
+    if (response.status === 401) {
       await restoreSession();
     } else {
       rememberSession(await parseResponse<SessionResponse>(response));

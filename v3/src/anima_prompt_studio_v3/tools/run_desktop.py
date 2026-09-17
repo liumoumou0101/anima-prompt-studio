@@ -9,9 +9,16 @@ import threading
 import webbrowser
 from pathlib import Path
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 from ..api import LocalApiServer
 from ..data import DataContractError, DataPackManager, DataPackManifest
+from .desktop_single_instance import (
+    DesktopInstanceLease,
+    read_instance_state,
+    save_instance_state,
+    wait_for_existing_instance,
+)
 
 
 COMFY_ACCESS_URL = "http://127.0.0.1:18188"
@@ -24,6 +31,9 @@ def desktop_port_state_path(workspace_db: Path) -> Path:
 
 
 def read_desktop_port(workspace_db: Path) -> int:
+    current = read_instance_state(workspace_db)
+    if current:
+        return int(current["port"])
     try:
         state = json.loads(desktop_port_state_path(workspace_db).read_text(encoding="utf-8"))
         if not isinstance(state, dict) or state.get("schema") != PORT_STATE_SCHEMA:
@@ -109,50 +119,68 @@ def run(
     frontend_dist = frontend_dist.resolve()
     if not (frontend_dist / "index.html").is_file():
         raise DataContractError(f"V3 网页尚未构建：{frontend_dist / 'index.html'}")
-    manager = DataPackManager(data_root)
-    reference_db = ensure_active_pack(manager, pack_source_root.resolve() if pack_source_root else None)
-    # A new installation has no legacy database yet. Passing a runtime path
-    # means initialize it; only an explicit None disables generation services.
-    selected_v2_database = v2_database.resolve() if v2_database is not None else None
-    preferred_port = read_desktop_port(workspace_db)
-    if selected_v2_database is not None:
-        from ..runtime.packaged_workflows import migrate_packaged_workflow_ownership
-        migrate_packaged_workflow_ownership(selected_v2_database)
-    with LocalApiServer(
-        reference_db,
-        frontend_dist=frontend_dist,
-        workspace_db=workspace_db.resolve(),
-        v2_database=selected_v2_database,
-        preferred_port=preferred_port,
-    ) as server:
-        if preferred_port and server.port != preferred_port:
-            print(f"上次本地端口 {preferred_port} 已被占用或不可用；本地地址已改为 {server.base_url}。"
-                  "浏览器草稿和偏好按地址分别保存。", flush=True)
-        try:
-            save_desktop_port(workspace_db, server.port)
-        except OSError:
-            print("未能保存本地端口记录；下次启动的地址可能变化。", flush=True)
-        if verify_runtime:
-            verify_first_connection(server)
-        print(
-            json.dumps(
-                {
-                    "status": "ready",
-                    "url": server.bootstrap_url,
-                    "data_pack": reference_db.parent.name,
-                    "v2_integration": selected_v2_database is not None,
-                },
-                ensure_ascii=False,
-            ),
-            flush=True,
-        )
-        print("ANIMA V3 已启动。关闭此窗口即可停止本地服务。", flush=True)
+    workspace_db = workspace_db.resolve()
+    lease = DesktopInstanceLease(workspace_db)
+    if not lease.acquire():
+        existing_url = wait_for_existing_instance(workspace_db, lease=lease)
+        if existing_url:
+            print(f"ANIMA V3 已在运行，正在打开现有窗口：{existing_url}", flush=True)
+            if open_browser and not webbrowser.open(existing_url, new=1):
+                print(f"未能自动打开浏览器，请手动访问：{existing_url}", flush=True)
+            return 0
+        if not lease.held:
+            raise RuntimeError("已有 ANIMA V3 正在启动，但未能确认其本地地址。")
+    instance_id = uuid4().hex
+    try:
+        manager = DataPackManager(data_root)
+        reference_db = ensure_active_pack(manager, pack_source_root.resolve() if pack_source_root else None)
+        # A new installation has no legacy database yet. Passing a runtime path
+        # means initialize it; only an explicit None disables generation services.
+        selected_v2_database = v2_database.resolve() if v2_database is not None else None
+        preferred_port = read_desktop_port(workspace_db)
         if selected_v2_database is not None:
-            print(f"ComfyUI 网页维护入口：{COMFY_ACCESS_URL}（后台安全隧道连接中）", flush=True)
-        if open_browser and not webbrowser.open(server.bootstrap_url, new=1):
-            print(f"未能自动打开浏览器，请手动访问：{server.bootstrap_url}", flush=True)
-        (wait_event or threading.Event()).wait()
-    return 0
+            from ..runtime.packaged_workflows import migrate_packaged_workflow_ownership
+            migrate_packaged_workflow_ownership(selected_v2_database)
+        with LocalApiServer(
+            reference_db,
+            frontend_dist=frontend_dist,
+            workspace_db=workspace_db,
+            v2_database=selected_v2_database,
+            preferred_port=preferred_port,
+            allow_local_sessions=True,
+            desktop_instance_id=instance_id,
+        ) as server:
+            if preferred_port and server.port != preferred_port:
+                print(f"上次本地端口 {preferred_port} 已被占用或不可用；本地地址已改为 {server.base_url}。"
+                      "浏览器草稿和偏好按地址分别保存。", flush=True)
+            try:
+                save_instance_state(workspace_db, server.port, instance_id)
+            except OSError as exc:
+                raise RuntimeError("未能发布本地实例地址，启动已安全停止；请重试。") from exc
+            if verify_runtime:
+                verify_first_connection(server)
+            print(
+                json.dumps(
+                    {
+                        "status": "ready",
+                        "url": server.base_url + "/",
+                        "data_pack": reference_db.parent.name,
+                        "v2_integration": selected_v2_database is not None,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            print("ANIMA V3 已启动。关闭此窗口即可停止本地服务。", flush=True)
+            if selected_v2_database is not None:
+                print(f"ComfyUI 网页维护入口：{COMFY_ACCESS_URL}（后台安全隧道连接中）", flush=True)
+            clean_url = server.base_url + "/"
+            if open_browser and not webbrowser.open(clean_url, new=1):
+                print(f"未能自动打开浏览器，请手动访问：{clean_url}", flush=True)
+            (wait_event or threading.Event()).wait()
+        return 0
+    finally:
+        lease.close()
 
 
 def verify_first_connection(server: LocalApiServer) -> None:

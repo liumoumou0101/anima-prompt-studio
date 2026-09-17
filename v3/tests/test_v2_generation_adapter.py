@@ -19,6 +19,7 @@ from anima_prompt_studio.domain.execution_models import (
 from anima_prompt_studio_v3.remote.execution_coordinator import RemoteExecutionCoordinator
 from anima_prompt_studio_v3.remote.result_organizer import ResultOrganizer
 from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
+from anima_prompt_studio_v3.runtime.generation_queue import EphemeralPassphraseVault, GenerationQueueError
 
 from anima_prompt_studio_v3.adapters.v2 import (
     BRIDGE_SCHEMA,
@@ -45,6 +46,41 @@ from anima_prompt_studio_v3.domain import (
     ProvenanceKind,
     TagSource,
 )
+
+
+def test_queue_profile_deletion_blocks_memory_runs_and_retires_durable_acceptance(tmp_path: Path) -> None:
+    active = GenerationRun(
+        prompt_job_id="job-active",
+        remote_profile_id="busy",
+        workflow_profile_id="workflow",
+        state=GenerationRunState.QUEUED,
+    )
+    busy = V2GenerationQueueService(lambda *_args: None, existing_runs=[active])
+    try:
+        with pytest.raises(GenerationRunActionError):
+            busy.with_profile_deletion("busy", lambda: None)
+    finally:
+        busy.shutdown()
+
+    vault = EphemeralPassphraseVault()
+    vault.set("deleted", "one")
+    vault.set("other", "two")
+    queue = V2GenerationQueueService(lambda *_args: None, passphrase_vault=vault)
+    built: list[bool] = []
+    try:
+        queue.with_profile_deletion("deleted", lambda: None)
+        assert vault.has("deleted") is False
+        assert vault.get("other") == "two"
+        with pytest.raises(GenerationQueueError):
+            queue.accept_durable(
+                "key",
+                "hash",
+                lambda: built.append(True),
+                remote_profile_id="deleted",
+            )
+        assert built == []
+    finally:
+        queue.shutdown()
 
 
 def sample_intent() -> IntentDocument:

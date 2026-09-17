@@ -47,7 +47,9 @@ def test_desktop_restarts_on_same_port_with_new_server_credentials(tmp_path: Pat
     assert len(ports) == 2 and ports[0] == ports[1]
     assert tokens[0] != tokens[1]
     state = json.loads(run_desktop.desktop_port_state_path(arguments["workspace_db"]).read_text(encoding="utf-8"))
-    assert state == {"schema": "anima-local-api-port/1", "port": ports[0]}
+    assert state["schema"] == "anima-local-api-port/1"
+    assert state["port"] == ports[0]
+    assert len(state["instance_id"]) >= 32
 
 
 def test_occupied_desktop_port_falls_back_and_preserves_other_listener(tmp_path: Path, monkeypatch, capsys):

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from ipaddress import ip_address
 import json
 import logging
 from pathlib import Path
 import re
+from threading import RLock
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -94,6 +96,7 @@ from .models import (
     ArtistComparisonRequest,
     DirectPromptPreviewRequest,
     DirectPromptSubmitRequest,
+    EmptyRequest,
     GenerationRunActionRequest,
     GenerationSubmitRequest,
     IntentCandidateRequest,
@@ -214,6 +217,8 @@ def create_api_runtime(
     allowed_hosts: set[str] | None = None,
     bootstrap_ttl: int = 120,
     session_ttl: int = 3600,
+    allow_local_sessions: bool = False,
+    desktop_instance_id: str = "",
 ) -> ApiRuntime:
     reference_db = reference_db.resolve()
     frontend_dist = frontend_dist.resolve() if frontend_dist is not None else None
@@ -244,6 +249,7 @@ def create_api_runtime(
         gallery_service.regeneration_service = GalleryGenerationService(app.state.submission_service)
     app.state.translation_service = translation_service
     app.state.comfy_access = comfy_access
+    app.state.remote_profile_lock = RLock()
     profiles = ModelProfileRegistry.built_in()
     generation_bridge = CandidateToPromptJobAdapter() if CandidateToPromptJobAdapter is not None else None
     # Cookies are not port-scoped. Distinct instance names avoid two local
@@ -287,8 +293,12 @@ def create_api_runtime(
             set_gallery_cookie(response, authenticated_token)
         elif getattr(request.state, "gallery_token", None):
             set_gallery_cookie(response, request.state.gallery_token, image_only=True)
-        if request.url.path.startswith(f"{API_PREFIX}/session/"):
+        if request.url.path.startswith(f"{API_PREFIX}/session/") or request.url.path == f"{API_PREFIX}/desktop/instance":
             response.headers["Cache-Control"] = "no-store"
+        # A desktop page can establish its own session. Keep foreign sites from
+        # framing that page and disguising privileged controls as their own UI.
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+        response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Request-ID"] = request.state.request_id
         return response
 
@@ -479,6 +489,38 @@ def create_api_runtime(
         set_gallery_cookie(response, exchange.token)
         return {"session_token": exchange.token, "expires_in": exchange.expires_in,
                 "recovery_token": exchange.recovery_token}
+
+    def require_local_browser(request: Request) -> None:
+        # Desktop mode trusts this computer, while foreign webpages must not be
+        # able to mint credentials through forms, embeds, CORS or DNS rebinding.
+        if not allow_local_sessions:
+            raise ApiError(403, "local_session_unavailable", "此服务未开启桌面自动连接，请从原启动入口打开。")
+        try:
+            loopback_peer = bool(request.client and ip_address(request.client.host).is_loopback)
+        except ValueError:
+            loopback_peer = False
+        origin = request.headers.get("origin", "")
+        loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+        if (not loopback_peer
+                or _hostname(request.headers.get("host", "")) not in loopback_hosts
+                or not _allowed_loopback_origin(origin, loopback_hosts)
+                or not _same_origin(origin, str(request.base_url))
+                or request.headers.get("x-anima-local") != "1"
+                or request.headers.get("sec-fetch-site") not in {None, "same-origin"}):
+            raise ApiError(403, "invalid_request", "自动连接仅接受本机页面发起的同源请求。")
+
+    @app.post(f"{API_PREFIX}/session/local", dependencies=[Depends(require_local_browser)])
+    def create_local_session(payload: EmptyRequest, response: FastAPIResponse) -> dict[str, object]:
+        exchange = sessions.create_local_session()
+        set_gallery_cookie(response, exchange.token)
+        return {"session_token": exchange.token, "expires_in": exchange.expires_in,
+                "recovery_token": exchange.recovery_token}
+
+    @app.post(f"{API_PREFIX}/desktop/instance", dependencies=[Depends(require_local_browser)])
+    def desktop_instance(payload: EmptyRequest) -> dict[str, str]:
+        if not desktop_instance_id:
+            raise ApiError(404, "desktop_instance_unavailable", "当前服务没有桌面实例标识。")
+        return {"instance_id": desktop_instance_id}
 
     @app.post(f"{API_PREFIX}/session/restore")
     def restore_session(
@@ -1425,18 +1467,19 @@ def create_api_runtime(
     ) -> dict[str, object]:
         from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
-        repository = SQLiteRepository(database)
-        try:
+        with app.state.remote_profile_lock:
+            repository = SQLiteRepository(database)
             try:
-                profile = repository.get_remote_profile(payload.remote_profile_id)
-            except KeyError as exc:
-                raise ApiError(404, "remote_profile_not_found", "云主机配置不存在。") from exc
-            if not profile.enabled:
-                raise ApiError(409, "remote_profile_disabled", "不能将已停用的云主机设为默认连接。")
-            repository.set_setting("last_remote_profile_id", profile.id)
-            return {"remote_profile_id": profile.id}
-        finally:
-            repository.close()
+                try:
+                    profile = repository.get_remote_profile(payload.remote_profile_id)
+                except KeyError as exc:
+                    raise ApiError(404, "remote_profile_not_found", "云主机配置不存在。") from exc
+                if not profile.enabled:
+                    raise ApiError(409, "remote_profile_disabled", "不能将已停用的云主机设为默认连接。")
+                repository.set_setting("last_remote_profile_id", profile.id)
+                return {"remote_profile_id": profile.id}
+            finally:
+                repository.close()
 
     @app.get(f"{API_PREFIX}/settings/artist-ranking", dependencies=[Depends(require_session)])
     def get_artist_ranking(database: Path = Depends(require_v2_settings_database)) -> dict[str, object]:
@@ -1499,7 +1542,15 @@ def create_api_runtime(
         payload: RemoteProfileSettingsRequest,
         database: Path = Depends(require_v2_settings_database),
     ) -> dict[str, object]:
-        return _save_remote_profile_settings(database, payload)
+        with app.state.remote_profile_lock:
+            result = _save_remote_profile_settings(database, payload)
+            queue = app.state.generation_queue
+            if queue is not None and hasattr(queue, "restore_profile"):
+                queue.restore_profile(str(result["id"]))
+            jobs = getattr(app.state, "workflow_jobs", None)
+            if jobs is not None and hasattr(jobs, "restore_profile"):
+                jobs.restore_profile(str(result["id"]))
+            return result
 
     @app.put(
         f"{API_PREFIX}/settings/remote-profiles/{{profile_id}}",
@@ -1510,7 +1561,79 @@ def create_api_runtime(
         payload: RemoteProfileSettingsRequest,
         database: Path = Depends(require_v2_settings_database),
     ) -> dict[str, object]:
-        return _save_remote_profile_settings(database, payload, profile_id=profile_id)
+        with app.state.remote_profile_lock:
+            result = _save_remote_profile_settings(database, payload, profile_id=profile_id)
+            queue = app.state.generation_queue
+            if queue is not None and hasattr(queue, "restore_profile"):
+                queue.restore_profile(profile_id)
+            jobs = getattr(app.state, "workflow_jobs", None)
+            if jobs is not None and hasattr(jobs, "restore_profile"):
+                jobs.restore_profile(profile_id)
+            return result
+
+    @app.delete(
+        f"{API_PREFIX}/settings/remote-profiles/{{profile_id}}",
+        dependencies=[Depends(require_session)],
+        status_code=204,
+    )
+    def delete_remote_profile_for_settings(
+        profile_id: str,
+        payload: EmptyRequest,
+        database: Path = Depends(require_v2_settings_database),
+    ) -> Response:
+        from anima_prompt_studio_v3.remote.credential_store import CredentialStore, CredentialStoreError
+        from anima_prompt_studio_v3.storage.runtime_repository import RemoteProfileInUseError, SQLiteRepository
+
+        def delete_from_store() -> None:
+            repository = SQLiteRepository(database)
+            try:
+                repository.delete_remote_profile(
+                    profile_id,
+                    before_delete=lambda _profile: CredentialStore().delete_password(profile_id),
+                )
+            finally:
+                repository.close()
+
+        def delete_with_comfy_guard() -> None:
+            manager = app.state.comfy_access
+            if manager is None:
+                delete_from_store()
+            else:
+                manager.with_profile_deletion(profile_id, delete_from_store)
+
+        try:
+            with app.state.remote_profile_lock:
+                queue = app.state.generation_queue
+
+                def delete_with_queue_guard() -> None:
+                    if queue is not None and hasattr(queue, "with_profile_deletion"):
+                        queue.with_profile_deletion(profile_id, delete_with_comfy_guard)
+                    else:
+                        delete_with_comfy_guard()
+                    if queue is not None and not hasattr(queue, "with_profile_deletion") and hasattr(queue, "set_private_key_passphrase"):
+                        queue.set_private_key_passphrase(profile_id, "")
+
+                jobs = getattr(app.state, "workflow_jobs", None)
+                if jobs is None:
+                    delete_with_queue_guard()
+                else:
+                    jobs.with_profile_deletion(profile_id, delete_with_queue_guard)
+        except KeyError as exc:
+            raise ApiError(404, "remote_profile_not_found", "云主机配置不存在。") from exc
+        except (RemoteProfileInUseError, GenerationRunActionError) as exc:
+            raise ApiError(409, "remote_profile_in_use", "云主机仍有活动生成任务，请等待任务结束后再删除。") from exc
+        except CredentialStoreError as exc:
+            raise ApiError(
+                503,
+                "credential_store_unavailable",
+                "无法从系统凭据存储中删除该连接密码，云主机配置已保留。",
+                retryable=True,
+            ) from exc
+        except RuntimeError as exc:
+            if str(exc) != "workflow_inspection_running":
+                raise
+            raise ApiError(409, "remote_profile_in_use", "云主机正在检测工作流，请等待检测结束或先取消检测。") from exc
+        return Response(status_code=204)
 
     @app.post(
         f"{API_PREFIX}/settings/remote-profiles/{{profile_id}}/probe-host-key",
@@ -1551,12 +1674,16 @@ def create_api_runtime(
             raise ApiError(409, "ssh_host_key_changed", "SSH 主机指纹在确认前发生变化，请重新检测。")
         from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
         from anima_prompt_studio_v3.remote.credential_store import CredentialStore
-        repository = SQLiteRepository(database)
-        try:
-            repository.save_remote_profile(profile.model_copy(update={"known_host_fingerprint": actual}))
-            return _remote_profile_settings_response(profile.model_copy(update={"known_host_fingerprint": actual}), CredentialStore())
-        finally:
-            repository.close()
+        with app.state.remote_profile_lock:
+            repository = SQLiteRepository(database)
+            try:
+                repository.get_remote_profile(profile_id)
+                repository.save_remote_profile(profile.model_copy(update={"known_host_fingerprint": actual}))
+                return _remote_profile_settings_response(profile.model_copy(update={"known_host_fingerprint": actual}), CredentialStore())
+            except KeyError as exc:
+                raise ApiError(404, "remote_profile_not_found", "云主机配置不存在。") from exc
+            finally:
+                repository.close()
 
     @app.post(
         f"{API_PREFIX}/settings/remote-profiles/{{profile_id}}/test-connection",
@@ -3784,7 +3911,15 @@ def _tag_search_item(row: dict[str, object], *, match_kind: str = "search") -> d
 
 def _hostname(host_header: str) -> str:
     try:
-        return (urlsplit(f"//{host_header}").hostname or "").lower()
+        parsed = urlsplit(f"//{host_header}")
+        if (parsed.username is not None or parsed.password is not None
+                or parsed.path or parsed.query or parsed.fragment
+                or any(character.isspace() for character in host_header)):
+            return ""
+        # Accessing port validates numeric syntax and its 0–65535 range.
+        if parsed.port == 0:
+            return ""
+        return (parsed.hostname or "").lower()
     except ValueError:
         return ""
 

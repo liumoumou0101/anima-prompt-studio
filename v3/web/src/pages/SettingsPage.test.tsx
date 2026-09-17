@@ -139,3 +139,111 @@ it("opens the selected remote ComfyUI through the managed local tunnel", async (
   expect(fetchMock.mock.calls[1][0]).toBe("/api/v3/settings/remote-profiles/remote-new/open-comfy");
   expect(popup.location.replace).toHaveBeenCalledWith(access.local_url);
 });
+
+it("deletes a saved connection only after naming it in explicit confirmation and supports cancel", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({items: [profile], workflows: [], credential_store_available: true})));
+  render(<SettingsPage remoteEnabled />);
+  const remove = await screen.findByRole("button", {name: "删除此连接"});
+  fireEvent.click(remove);
+  expect(screen.getByText(/确定删除已保存的连接“新云显卡”/)).toBeInTheDocument();
+  expect(screen.getByText(/生成记录、图片和远端主机内容都会保留/)).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(call => call[1]?.method === "DELETE")).toBe(false);
+  fireEvent.click(screen.getByRole("button", {name: "取消删除"}));
+  expect(screen.queryByRole("button", {name: "确认删除连接"})).not.toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(call => call[1]?.method === "DELETE")).toBe(false);
+});
+
+it("locks confirmation to the exact id and changing selection cannot delete the wrong profile", async () => {
+  const other = {...profile, id: "remote-other", display_name: "备用云主机", ssh_host: "203.0.113.11"};
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [profile, other], workflows: [], credential_store_available: true})))
+    .mockResolvedValueOnce(new Response(null, {status: 204}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [profile], workflows: [], credential_store_available: true})));
+  render(<SettingsPage remoteEnabled />);
+  fireEvent.click(await screen.findByRole("button", {name: "删除此连接"}));
+  fireEvent.click(screen.getByRole("button", {name: /备用云主机/}));
+  expect(screen.queryByRole("button", {name: "确认删除连接"})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "删除此连接"}));
+  fireEvent.click(screen.getByRole("button", {name: "确认删除连接"}));
+  await waitFor(() => expect(fetchMock.mock.calls.some(call => call[1]?.method === "DELETE")).toBe(true));
+  const deletion = fetchMock.mock.calls.find(call => call[1]?.method === "DELETE")!;
+  expect(deletion[0]).toBe("/api/v3/settings/remote-profiles/remote-other");
+  expect(deletion[1]?.body).toBe("{}");
+});
+
+it("selects a remaining connection after deletion and resets to a fresh form after deleting the last one", async () => {
+  const passwordProfile = {...profile, auth_type: "password" as const};
+  const other = {...passwordProfile, id: "remote-other", display_name: "备用云主机", ssh_host: "203.0.113.11"};
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [passwordProfile, other], workflows: [], credential_store_available: true})))
+    .mockResolvedValueOnce(new Response(null, {status: 204}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [other], workflows: [], credential_store_available: true})))
+    .mockResolvedValueOnce(new Response(null, {status: 204}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [], workflows: [], credential_store_available: true})));
+  render(<SettingsPage remoteEnabled />);
+  fireEvent.change(await screen.findByLabelText("SSH 密码"), {target: {value: "temporary-secret"}});
+  fireEvent.click(screen.getByRole("button", {name: "删除此连接"}));
+  fireEvent.click(screen.getByRole("button", {name: "确认删除连接"}));
+  await waitFor(() => expect(screen.getByLabelText("显示名称")).toHaveValue("备用云主机"));
+  expect(screen.getByLabelText("SSH 密码")).toHaveValue("");
+  fireEvent.click(screen.getByRole("button", {name: "删除此连接"}));
+  fireEvent.click(screen.getByRole("button", {name: "确认删除连接"}));
+  await waitFor(() => expect(screen.getByRole("heading", {name: "新增连接"})).toBeInTheDocument());
+  expect(screen.getByLabelText("显示名称")).toHaveValue("我的云端 ComfyUI");
+  expect(screen.queryByRole("button", {name: "删除此连接"})).not.toBeInTheDocument();
+  expect(screen.getByText(/已删除连接“备用云主机”/)).toBeInTheDocument();
+  expect(fetchMock.mock.calls.filter(call => call[1]?.method === "DELETE")).toHaveLength(2);
+});
+
+it("preserves the profile after delete failure, allows retry, and prevents double delete", async () => {
+  let resolveDelete!: (response: Response) => void;
+  const pendingDelete = new Promise<Response>(resolve => {resolveDelete = resolve;});
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [profile], workflows: [], credential_store_available: true})))
+    .mockReturnValueOnce(pendingDelete)
+    .mockResolvedValueOnce(new Response(JSON.stringify({error: {code: "remote_profile_in_use", message: "当前任务仍在使用此连接，请稍后重试。", retryable: true}}), {status: 409}));
+  render(<SettingsPage remoteEnabled />);
+  fireEvent.click(await screen.findByRole("button", {name: "删除此连接"}));
+  const confirm = screen.getByRole("button", {name: "确认删除连接"});
+  fireEvent.click(confirm); fireEvent.click(confirm);
+  expect(fetchMock.mock.calls.filter(call => call[1]?.method === "DELETE")).toHaveLength(1);
+  expect(confirm).toBeDisabled();
+  resolveDelete(new Response(JSON.stringify({error: {code: "remote_cleanup_failed", message: "清理连接失败，请重试。", retryable: true}}), {status: 503}));
+  expect(await screen.findByText("清理连接失败，请重试。")).toBeInTheDocument();
+  expect(screen.getByLabelText("显示名称")).toHaveValue("新云显卡");
+  fireEvent.click(screen.getByRole("button", {name: "确认删除连接"}));
+  expect(await screen.findByText("当前任务仍在使用此连接，请稍后重试。")).toBeInTheDocument();
+  expect(fetchMock.mock.calls.filter(call => call[1]?.method === "DELETE")).toHaveLength(2);
+});
+
+it("blocks a confirmed deletion while another connection operation is running", async () => {
+  let resolveProbe!: (response: Response) => void;
+  const pendingProbe = new Promise<Response>(resolve => {resolveProbe = resolve;});
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [profile], workflows: [], credential_store_available: true})))
+    .mockReturnValueOnce(pendingProbe);
+  render(<SettingsPage remoteEnabled />);
+  fireEvent.click(await screen.findByRole("button", {name: "删除此连接"}));
+  fireEvent.click(screen.getByRole("button", {name: "检测 SSH 指纹"}));
+  const confirm = screen.getByRole("button", {name: "确认删除连接"});
+  expect(confirm).toBeDisabled();
+  fireEvent.click(confirm);
+  expect(fetchMock.mock.calls.filter(call => call[1]?.method === "DELETE")).toHaveLength(0);
+  resolveProbe(new Response(JSON.stringify({fingerprint: "SHA256:busy"})));
+  await waitFor(() => expect(confirm).toBeEnabled());
+});
+
+it("removes a deleted connection locally when the post-delete refresh fails", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: [profile], workflows: [], credential_store_available: true})))
+    .mockResolvedValueOnce(new Response(null, {status: 204}))
+    .mockResolvedValueOnce(new Response(JSON.stringify({error: {code: "settings_unavailable", message: "连接已删除，但列表刷新失败，请稍后重试。", retryable: true}}), {status: 503}));
+  render(<SettingsPage remoteEnabled />);
+  fireEvent.click(await screen.findByRole("button", {name: "删除此连接"}));
+  fireEvent.click(screen.getByRole("button", {name: "确认删除连接"}));
+  expect(await screen.findByText("连接已删除，但列表刷新失败，请稍后重试。")).toBeInTheDocument();
+  expect(screen.getByText(/已删除连接“新云显卡”/)).toBeInTheDocument();
+  expect(screen.getByRole("heading", {name: "新增连接"})).toBeInTheDocument();
+  expect(screen.queryByRole("button", {name: "删除此连接"})).not.toBeInTheDocument();
+  expect(fetchMock.mock.calls.filter(call => call[1]?.method === "DELETE")).toHaveLength(1);
+});

@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useState} from "react";
+import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {ApiClientError, apiRequest} from "../lib/api";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
 import {AppearanceControls} from "../components/AppearanceControls";
@@ -83,19 +83,25 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
   const [comfyOpening, setComfyOpening] = useState(false);
   const [comfyAccess, setComfyAccess] = useState<ComfyAccess | null>(null);
   const [privateKeyPassphrase, setPrivateKeyPassphrase] = useState("");
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const deleteLock = useRef(false);
 
   const selected = useMemo(() => settings?.items.find((item) => item.id === selectedId) || null, [settings, selectedId]);
+  const deleteTarget = useMemo(() => settings?.items.find((item) => item.id === deleteConfirmId) || null, [settings, deleteConfirmId]);
   const endpointDirty = !!selected && (["connection_type", "comfy_host", "comfy_port", "ssh_host", "ssh_port", "ssh_user", "auth_type", "private_key_path"] as const).some(key => form[key] !== formFromProfile(selected)[key]);
   const comfyUrl = selected?.connection_type === "local" ? `http://${selected.comfy_host === "::1" ? "[::1]" : selected.comfy_host || "127.0.0.1"}:${selected.comfy_port || 8188}` : comfyAccess?.remote_profile_id === selectedId ? comfyAccess.local_url : "http://127.0.0.1:18188";
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<SettingsResponse | null> => {
     setError(null);
     try {
       const response = await apiRequest<SettingsResponse>("/api/v3/settings/remote-profiles");
       setSettings(response);
       setComfyAccess(response.comfy_access || null);
       setSelectedId((current) => current && response.items.some((item) => item.id === current) ? current : response.items[0]?.id || null);
+      return response;
     } catch (caught) {
       setError(caught as ApiClientError);
+      return null;
     }
   }, []);
 
@@ -103,23 +109,28 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
   useEffect(() => { if (selected) setForm(formFromProfile(selected)); }, [selected]);
 
   function selectProfile(profile: RemoteProfile) {
+    if (deleting) return;
     setNotice("");
     setFingerprint("");
     setPrivateKeyPassphrase("");
+    setDeleteConfirmId(null);
     setSelectedId(profile.id);
     setForm(formFromProfile(profile));
   }
 
   function startNew() {
+    if (deleting) return;
     setNotice("");
     setFingerprint("");
     setPrivateKeyPassphrase("");
+    setDeleteConfirmId(null);
     setSelectedId(null);
     setForm(newProfile());
   }
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
+    if (deleting) return;
     setSaving(true);
     setError(null);
     setNotice("");
@@ -226,6 +237,54 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
     }
   }
 
+  async function deleteProfile() {
+    if (deleteLock.current || deleting || saving || probing || testing || comfyOpening || !deleteConfirmId || !settings) return;
+    const targetId = deleteConfirmId;
+    const target = settings.items.find((item) => item.id === targetId);
+    if (!target) return;
+    const targetIndex = settings.items.findIndex((item) => item.id === targetId);
+    deleteLock.current = true;
+    setDeleting(true);
+    setError(null);
+    setNotice("");
+    try {
+      await apiRequest<void>(`/api/v3/settings/remote-profiles/${encodeURIComponent(targetId)}`, {
+        method: "DELETE",
+        body: JSON.stringify({}),
+      });
+      const remaining = settings.items.filter((item) => item.id !== targetId);
+      const optimisticNext = remaining[Math.min(targetIndex, remaining.length - 1)] || null;
+      setSettings({...settings, items: remaining, comfy_access: settings.comfy_access?.remote_profile_id === targetId ? null : settings.comfy_access});
+      setDeleteConfirmId(null);
+      setFingerprint("");
+      setPrivateKeyPassphrase("");
+      setComfyAccess((current) => current?.remote_profile_id === targetId ? null : current);
+      if (optimisticNext) {
+        setSelectedId(optimisticNext.id);
+        setForm(formFromProfile(optimisticNext));
+      } else {
+        setSelectedId(null);
+        setForm(newProfile());
+      }
+      setNotice(`已删除连接“${target.display_name}”。本地连接配置和已保存密码已移除；生成记录、图片和远端主机内容都会保留。`);
+      const response = await refresh();
+      if (!response) return;
+      const next = response.items[Math.min(targetIndex, response.items.length - 1)] || null;
+      if (next) {
+        setSelectedId(next.id);
+        setForm(formFromProfile(next));
+      } else {
+        setSelectedId(null);
+        setForm(newProfile());
+      }
+    } catch (caught) {
+      setError(caught as ApiClientError);
+    } finally {
+      deleteLock.current = false;
+      setDeleting(false);
+    }
+  }
+
   if (!remoteEnabled) {
     return <section className="page library-page settings-page"><SettingsHeader count="—" /><AppearanceSettings /><EmptyState title="远程设置尚未启用" detail="请从 V3 桌面入口启动本地服务，再添加本机或云端 ComfyUI 连接。" /></section>;
   }
@@ -238,9 +297,9 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
     <div className="settings-ranking"><h2>画师推荐</h2><p>在工作台展开“画师推荐”，可随时切换排序并选择画师。</p><a href="/workbench">打开工作台</a></div>
     <div className="settings-layout">
       <aside className="settings-side">
-        <div className="settings-side-head"><span>生成环境</span><button type="button" className="button button--secondary" onClick={startNew}>＋ 新建</button></div>
+        <div className="settings-side-head"><span>生成环境</span><button type="button" className="button button--secondary" onClick={startNew} disabled={deleting}>＋ 新建</button></div>
         <div className="remote-profile-list">
-          {settings.items.map((profile) => <button type="button" key={profile.id} className={`remote-profile-item${profile.id === selectedId ? " is-selected" : ""}`} onClick={() => selectProfile(profile)}>
+          {settings.items.map((profile) => <button type="button" key={profile.id} className={`remote-profile-item${profile.id === selectedId ? " is-selected" : ""}`} onClick={() => selectProfile(profile)} disabled={deleting}>
             <span className={profile.enabled && (profile.connection_ready ?? profile.host_fingerprint_confirmed) ? "status-dot is-ready" : "status-dot"} /><span><strong>{profile.display_name}</strong><small>{profile.connection_type === "local" ? `本机 · ${profile.comfy_endpoint}` : `${profile.ssh_user}@${profile.ssh_host}:${profile.ssh_port} · ${profile.host_fingerprint_confirmed ? "指纹已确认" : "待确认指纹"}`}</small></span>
           </button>)}
           {!settings.items.length && <p>尚未配置执行环境。</p>}
@@ -248,10 +307,10 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
         <div className="settings-workflows"><strong>本地工作流模板</strong><p>模板导入、模型关联和版本管理已集中到独立页面。</p><a href="/workflows">打开工作流模板库</a></div>
       </aside>
       <form className="settings-form" onSubmit={(event) => void save(event)}>
-        <div className="settings-form-head"><div><span className="eyebrow">COMFYUI</span><h2>{selected ? "编辑连接" : "新增连接"}</h2><p>选择本机直连或云端 SSH；保存后在工作流页面检测并映射资源。</p></div><button className="button button--primary" type="submit" disabled={saving}>{saving ? "保存中…" : "保存连接"}</button></div>
+        <div className="settings-form-head"><div><span className="eyebrow">COMFYUI</span><h2>{selected ? "编辑连接" : "新增连接"}</h2><p>选择本机直连或云端 SSH；保存后在工作流页面检测并映射资源。</p></div><button className="button button--primary" type="submit" disabled={saving || deleting}>{saving ? "保存中…" : "保存连接"}</button></div>
         {endpointDirty && <p role="status">连接信息已修改，请先保存再测试或打开网页。</p>}
         {notice && <div className="workspace-notice" role="status" style={{whiteSpace: "pre-wrap"}}>{notice}</div>}
-        <fieldset>
+        <fieldset disabled={deleting}>
           <legend>连接信息</legend>
           <label>连接类型<select value={form.connection_type} onChange={e => {setForm({...form, connection_type: e.target.value as "ssh" | "local", password: ""}); setPrivateKeyPassphrase(""); setFingerprint("");}}><option value="ssh">云端 SSH</option><option value="local">本地 ComfyUI</option></select></label>
           <label>显示名称<input required value={form.display_name} onChange={(event) => setForm({...form, display_name: event.target.value})} /></label>
@@ -260,7 +319,7 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
           <label>用户名<input required value={form.ssh_user} onChange={(event) => setForm({...form, ssh_user: event.target.value})} /></label></>}
           {form.connection_type === "local" && <><label>ComfyUI 本机地址<select value={form.comfy_host} onChange={e => setForm({...form, comfy_host: e.target.value})}><option>127.0.0.1</option><option>localhost</option><option>::1</option></select></label><label>ComfyUI 端口<input type="number" required min="1" max="65535" value={form.comfy_port} onChange={e => setForm({...form, comfy_port: Number(e.target.value)})} /></label><p>先启动本机 ComfyUI，再测试连接。</p></>}
         </fieldset>
-        {form.connection_type !== "local" && <fieldset>
+        {form.connection_type !== "local" && <fieldset disabled={deleting}>
           <legend>认证方式</legend>
           <label>方式<select value={form.auth_type} onChange={(event) => setForm({...form, auth_type: event.target.value as AuthType})}><option value="password">密码</option><option value="private_key">私钥文件</option><option value="agent">SSH Agent</option></select></label>
           {form.auth_type === "password" && <label>SSH 密码<input type="password" placeholder={selected?.has_saved_password ? "留空：保留已保存密码" : "输入后保存到 Windows 凭据管理器"} value={form.password} onChange={(event) => setForm({...form, password: event.target.value})} autoComplete="new-password" /></label>}
@@ -268,18 +327,31 @@ export function SettingsPage({remoteEnabled}: {remoteEnabled: boolean}) {
           {form.auth_type === "private_key" && <label>私钥口令（可选，仅本次测试）<input type="password" autoComplete="current-password" value={privateKeyPassphrase} onChange={(event) => setPrivateKeyPassphrase(event.target.value)} /></label>}
           {form.auth_type === "password" && <label className="check-label"><input type="checkbox" checked={form.remember_password} onChange={(event) => setForm({...form, remember_password: event.target.checked})} /> 安全保存密码到 Windows 凭据管理器</label>}
         </fieldset>}
-        <label className="check-label"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({...form, enabled: event.target.checked})} /> 在生成列表中启用此连接</label>
-        {form.connection_type === "local" && selected?.connection_type === "local" && <div className="settings-security"><button type="button" className="button button--primary" onClick={() => void testConnection()} disabled={endpointDirty || saving || testing}>{testing ? "正在测试 ComfyUI…" : "测试本地连接"}</button></div>}
-        {form.connection_type !== "local" && <div className="settings-security"><strong>SSH 指纹与连接测试</strong><p>{selected?.host_fingerprint_confirmed ? "主机指纹已确认。更改地址、端口、用户名、认证方式或私钥后会自动要求重新确认。完整测试会继续验证 SSH 登录、隧道和 ComfyUI API。" : "新建连接尚未确认主机指纹。检测不会自动信任主机；请核对显示的指纹后确认保存。"}</p>{selected && <div className="host-key-actions"><button type="button" className="button button--secondary" onClick={() => void probeHostKey()} disabled={probing || testing}>{probing ? "检测中…" : "检测 SSH 指纹"}</button>{fingerprint && <><code>{fingerprint}</code><button type="button" className="button button--secondary" onClick={() => void confirmHostKey()} disabled={probing || testing}>确认并保存指纹</button></>}<button type="button" className="button button--primary" onClick={() => void testConnection()} disabled={endpointDirty || saving || !selected.host_fingerprint_confirmed || probing || testing}>{testing ? "正在测试 SSH 与 ComfyUI…" : "测试完整连接"}</button></div>}</div>}
+        <label className="check-label"><input type="checkbox" checked={form.enabled} disabled={deleting} onChange={(event) => setForm({...form, enabled: event.target.checked})} /> 在生成列表中启用此连接</label>
+        {form.connection_type === "local" && selected?.connection_type === "local" && <div className="settings-security"><button type="button" className="button button--primary" onClick={() => void testConnection()} disabled={endpointDirty || saving || testing || deleting}>{testing ? "正在测试 ComfyUI…" : "测试本地连接"}</button></div>}
+        {form.connection_type !== "local" && <div className="settings-security"><strong>SSH 指纹与连接测试</strong><p>{selected?.host_fingerprint_confirmed ? "主机指纹已确认。更改地址、端口、用户名、认证方式或私钥后会自动要求重新确认。完整测试会继续验证 SSH 登录、隧道和 ComfyUI API。" : "新建连接尚未确认主机指纹。检测不会自动信任主机；请核对显示的指纹后确认保存。"}</p>{selected && <div className="host-key-actions"><button type="button" className="button button--secondary" onClick={() => void probeHostKey()} disabled={probing || testing || saving || comfyOpening || deleting}>{probing ? "检测中…" : "检测 SSH 指纹"}</button>{fingerprint && <><code>{fingerprint}</code><button type="button" className="button button--secondary" onClick={() => void confirmHostKey()} disabled={probing || testing || saving || comfyOpening || deleting}>确认并保存指纹</button></>}<button type="button" className="button button--primary" onClick={() => void testConnection()} disabled={endpointDirty || saving || !selected.host_fingerprint_confirmed || probing || testing || comfyOpening || deleting}>{testing ? "正在测试 SSH 与 ComfyUI…" : "测试完整连接"}</button></div>}</div>}
         <div className="settings-security">
           <strong>ComfyUI 网页维护入口</strong>
           <p>{form.connection_type === "local" ? "直接打开已启动的本机 ComfyUI 网页。" : "项目运行期间通过本机 SSH 隧道访问云端 ComfyUI。"}</p>
           <div className="host-key-actions">
             <a href={comfyUrl} target="_blank" rel="noreferrer"><code>{comfyUrl}</code></a>
-            <button type="button" className="button button--primary" onClick={() => void openComfy()} disabled={endpointDirty || saving || !(selected?.connection_ready ?? selected?.host_fingerprint_confirmed) || comfyOpening || testing || probing}>{comfyOpening ? "正在连接 ComfyUI…" : "打开 ComfyUI 网页"}</button>
+            <button type="button" className="button button--primary" onClick={() => void openComfy()} disabled={endpointDirty || saving || !(selected?.connection_ready ?? selected?.host_fingerprint_confirmed) || comfyOpening || testing || probing || deleting}>{comfyOpening ? "正在连接 ComfyUI…" : "打开 ComfyUI 网页"}</button>
           </div>
           <small>{comfyAccess?.remote_profile_id === selectedId ? comfyAccess.message : "保存连接后，可在这里打开 ComfyUI 网页。"}</small>
         </div>
+        {selected && <div className="settings-security">
+          <strong>删除已保存连接</strong>
+          <p>删除只会移除本机保存的连接配置和密码。</p>
+          <button type="button" className="button button--danger" onClick={() => setDeleteConfirmId(selected.id)} disabled={saving || probing || testing || comfyOpening || deleting}>删除此连接</button>
+          {deleteTarget?.id === selected.id && <div className="settings-delete-confirm" role="group" aria-label={`删除连接 ${deleteTarget.display_name}`}>
+            <strong>确定删除已保存的连接“{deleteTarget.display_name}”吗？</strong>
+            <p>本地连接配置和已保存密码将被移除；生成记录、图片和远端主机内容都会保留。</p>
+            <div className="settings-delete-actions">
+              <button type="button" className="button button--secondary" onClick={() => setDeleteConfirmId(null)} disabled={deleting}>取消删除</button>
+              <button type="button" className="button button--danger is-danger" onClick={() => void deleteProfile()} disabled={deleting || saving || probing || testing || comfyOpening}>{deleting ? "正在删除…" : "确认删除连接"}</button>
+            </div>
+          </div>}
+        </div>}
       </form>
       {selectedId && <div className="settings-security"><strong>工作流资源映射</strong><p>保存连接配置后，在工作流页面检测当前环境并确认模型文件。</p><a href={`/workflows?environment=${encodeURIComponent(selectedId)}`}>管理此环境的工作流资源</a></div>}
     </div>
