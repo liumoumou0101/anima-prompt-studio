@@ -13,36 +13,42 @@ export interface SceneDesignControlsProps {
   positive?: string;
   negative?: string;
   disabled?: boolean;
+  adviceDisabledReason?: string;
+  llmContextKey?: string;
+  onBusyChange?: (busy: boolean) => void;
 }
 
-export function SceneDesignControls({requirements, onChange, workspaceId, workspaceRevision, delta = "", positive = "", negative = "", disabled = false}: SceneDesignControlsProps) {
+export function SceneDesignControls({requirements, onChange, workspaceId, workspaceRevision, delta = "", positive = "", negative = "", disabled = false,
+  adviceDisabledReason = "", llmContextKey = "", onBusyChange}: SceneDesignControlsProps) {
   const [custom, setCustom] = useState<Partial<Record<SceneField, string>>>({});
   const [target, setTarget] = useState(sceneChoice(requirements, "gaze")?.target || "");
   const [undo, setUndo] = useState<{before: RequirementsEdit; after: RequirementsEdit} | null>(null);
   const [pendingShot, setPendingShot] = useState<SceneChoice | null>(null);
   const [advice, setAdvice] = useState<SceneAdvice | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [requestPending, setRequestPending] = useState(false);
+  const requestLock = useRef(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const epoch = useRef(0);
-  const contextKey = JSON.stringify({requirements, delta, positive, negative, workspaceId, workspaceRevision, custom, target});
+  const contextKey = JSON.stringify({requirements, delta, positive, negative, workspaceId, workspaceRevision, custom, target, llmContextKey});
   const requirementsKey = JSON.stringify(requirements);
   const savedTarget = sceneChoice(requirements, "gaze")?.target || "";
   useEffect(() => {setTarget(savedTarget);}, [savedTarget]);
+  useEffect(() => {onBusyChange?.(requestPending); return () => onBusyChange?.(false);}, [requestPending, onBusyChange]);
   useEffect(() => {
-    epoch.current += 1; setAdvice(null); setLoading(false);
+    epoch.current += 1; setAdvice(null);
   }, [contextKey]);
   useEffect(() => {setPendingShot(null);}, [requirementsKey]);
   useEffect(() => {
     epoch.current += 1;
-    setAdvice(null); setError(""); setNotice(""); setLoading(false); setUndo(null); setPendingShot(null); setCustom({});
+    setAdvice(null); setError(""); setNotice(""); setUndo(null); setPendingShot(null); setCustom({});
     setTarget(sceneChoice(requirements, "gaze")?.target || "");
     return () => {epoch.current += 1;};
     // A workspace switch must discard in-flight suggestions, not draft contents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
   const commit = (next: RequirementsEdit, message: string) => {
-    epoch.current += 1; setAdvice(null); setLoading(false); setPendingShot(null);
+    epoch.current += 1; setAdvice(null); setPendingShot(null);
     setUndo({before: structuredClone(requirements), after: structuredClone(next)});
     onChange(next); setNotice(message); setError("");
   };
@@ -57,16 +63,17 @@ export function SceneDesignControls({requirements, onChange, workspaceId, worksp
     commit(applySceneChoices(requirements, {[field]: choice}), choice ? `已指定${sceneLabels[field]}，更新提示词后生效。` : `已清除${sceneLabels[field]}，手写要求已保留。`);
   }
   async function suggest() {
-    if (disabled || loading || !workspaceId || !workspaceRevision || (requirements.layers.composition.locked && requirements.layers.lighting.locked)) return;
+    if (disabled || adviceDisabledReason || requestLock.current || !workspaceId || !workspaceRevision || (requirements.layers.composition.locked && requirements.layers.lighting.locked)) return;
+    requestLock.current = true; setRequestPending(true);
     const requestEpoch = ++epoch.current;
-    setLoading(true); setError(""); setAdvice(null);
+    setError(""); setAdvice(null);
     try {
       const result = parseSceneAdvice(await apiRequest<unknown>("/api/v3/workbench/scene-advice", {method: "POST", body: JSON.stringify({
         workspace_id: workspaceId, revision: workspaceRevision, requirements, delta, positive, negative,
       })}));
       if (requestEpoch === epoch.current) setAdvice(result);
     } catch (err) {if (requestEpoch === epoch.current) setError(err instanceof Error ? err.message : "暂时未能获取建议，请重试。");}
-    finally {if (requestEpoch === epoch.current) setLoading(false);}
+    finally {requestLock.current = false; setRequestPending(false);}
   }
   function adopt(changes: SceneChoices) {
     if (disabled) return;
@@ -90,7 +97,8 @@ export function SceneDesignControls({requirements, onChange, workspaceId, worksp
   }
   return <section className="scene-design" aria-label="画面设计辅助">
     <div className="scene-design__heading"><div><h3>画面设计</h3><p>按需指定，或让助手提供几个方向。</p></div>
-      <button type="button" onClick={() => void suggest()} disabled={disabled || loading || !workspaceId || !workspaceRevision || (requirements.layers.composition.locked && requirements.layers.lighting.locked)}>{loading ? "正在思考方向…" : "给我建议"}</button></div>
+      <button type="button" onClick={() => void suggest()} disabled={disabled || Boolean(adviceDisabledReason) || requestPending || !workspaceId || !workspaceRevision || (requirements.layers.composition.locked && requirements.layers.lighting.locked)}>{requestPending ? "正在获取建议…" : "给我建议"}</button></div>
+    {adviceDisabledReason && <p className="scene-design__note">{adviceDisabledReason}</p>}
     <div className="scene-design__fields">
       {sceneFields.map(field => {
         const selected = sceneChoice(requirements, field);

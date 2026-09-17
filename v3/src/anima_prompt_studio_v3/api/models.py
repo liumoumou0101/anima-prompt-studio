@@ -112,6 +112,7 @@ class LlmSettingsUpdateRequest(ApiModel):
     clear_api_key: bool = False
     supports_vision: bool | None = None
     ingest_enable_thinking: bool | None = None
+    workbench_enable_thinking: bool | None = None
 
 
 class DirectPromptPreviewRequest(ApiModel):

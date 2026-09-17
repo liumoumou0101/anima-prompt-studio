@@ -499,21 +499,22 @@ def test_upstream_parameter_rejection_is_not_retryable(conversation_client, monk
 def test_task_owns_thinking_override(task, ingest_enabled, expected, monkeypatch):
     from anima_prompt_studio_v3.prompt_assistant.services import completion
     seen = []
-    def control(provider, model, disable_thinking):
-        seen.append(disable_thinking)
-        return {}
     def handle(request):
+        seen.append(json.loads(request.content))
         return httpx.Response(200, json={"choices": [{"message": {"content": "OK"}}]})
-    monkeypatch.setattr(completion, "build_thinking_suppression", control)
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
             monkeypatch.setattr(completion.HTTPClientPool, "get_client", lambda **kwargs: client)
-            await completion.complete({"provider": "test", "model": "test", "base_url": "http://localhost:1234"},
+            await completion.complete({"provider": "test", "model": "mimo-v2.5", "base_url": "http://localhost:1234"},
                                       {"ingest_enable_thinking": ingest_enabled},
                                       messages=[{"role": "user", "content": "test"}],
                                       task=task, disable_thinking=False)
     asyncio.run(run())
-    assert seen == [expected]
+    assert len(seen) == 1
+    if expected:
+        assert seen[0]["thinking"] == {"type": "disabled"}
+    else:
+        assert "thinking" not in seen[0]
 
 
 @pytest.mark.parametrize("model", ["glm-5.3", "GLM-5.3-FLASH", "z-ai/glm-5.3"])

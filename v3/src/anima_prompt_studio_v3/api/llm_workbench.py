@@ -106,7 +106,7 @@ def save_settings(manager, payload: LlmSettingsUpdateRequest) -> None:
     if not model:
         raise ValueError("请输入模型名称。")
     service["base_url"] = url
-    for field in ("supports_vision", "ingest_enable_thinking"):
+    for field in ("supports_vision", "ingest_enable_thinking", "workbench_enable_thinking"):
         value = getattr(payload, field)
         if value is not None:
             service[field] = value
@@ -125,12 +125,20 @@ def save_settings(manager, payload: LlmSettingsUpdateRequest) -> None:
 async def test_connection() -> dict[str, object]:
     from ..prompt_assistant.services.llm import LLMService
 
-    result = await asyncio.wait_for(LLMService.expand_prompt(
-        "Reply with OK only.",
-        system_message_override={"role": "system", "content": "Reply with OK only, no reasoning.", "name": "连接测试"},
-    ), timeout=30)
-    if not result.get("success") or not (result.get("data") or {}).get("expanded", "").strip():
-        raise RuntimeError("连接测试失败，请检查 API 地址、Key、模型权限及网络。")
+    failure_message = "连接测试失败，请检查 API 地址、Key、模型权限及网络。"
+    try:
+        result = await asyncio.wait_for(LLMService.complete(
+            messages=[{"role": "system", "content": "Reply with OK only."},
+                      {"role": "user", "content": "Reply with OK only."}],
+            task="rewrite", timeout_s=30,
+        ), timeout=30)
+    except RuntimeError:
+        # Transport failures may contain private upstream text. Keep timeouts
+        # and actionable WorkbenchError configuration errors for API mapping.
+        raise RuntimeError(failure_message) from None
+    text = result.get("text") if isinstance(result, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        raise RuntimeError(failure_message)
     return {"ok": True, "message": "模型已成功返回内容；连接可用，不代表生图效果已验证。"}
 
 

@@ -11,6 +11,7 @@ OpenAI-compatible degradation path.
 import re
 from copy import deepcopy
 from typing import Any, Dict, List
+from urllib.parse import urlsplit
 
 
 THINKING_CONTROL_RULES: List[Dict[str, Any]] = [
@@ -20,6 +21,13 @@ THINKING_CONTROL_RULES: List[Dict[str, Any]] = [
         "patterns": [r"mimo[-_/.]v2\.5(?:$|[-_/])"],
         "params": {"thinking": {"type": "disabled"}},
         "sources": ["https://platform.xiaomimimo.com/docs/en-US/usage-guide/passing-back-reasoning_content"],
+    },
+    {
+        "name": "minimax_m3_thinking",
+        "description": "MiniMax M3 defaults to thinking; disable it for prompt conversion",
+        "patterns": [r"(?:^|/)minimax[-_/.]m3(?:$|[-_/:])"],
+        "params": {"thinking": {"type": "disabled"}},
+        "sources": ["https://platform.minimax.io/docs/api-reference/text-openai-api"],
     },
     {
         "name": "zai_glm_thinking",
@@ -112,10 +120,115 @@ def requires_glm_thinking(model: str) -> bool:
     return _matches(GLM_REQUIRED_THINKING_PATTERNS, model.strip().lower())
 
 
+def opencode_go_base(base_url: str) -> str | None:
+    """Match only the actual Go API, including explicitly saved endpoints."""
+    endpoint = urlsplit(base_url)
+    if (endpoint.scheme == "https" and endpoint.netloc.lower() == "opencode.ai"
+            and not endpoint.query and not endpoint.fragment
+            and endpoint.path.rstrip("/") in {
+                "/zen/go/v1", "/zen/go/v1/chat/completions", "/zen/go/v1/messages", "/zen/go/v1/responses"}):
+        return "https://opencode.ai/zen/go/v1"
+    return None
+
+
+# Exact Go IDs verified against its gateway on 2026-09-18. Native provider
+# capabilities do not predict proxy routing (e.g. Go GLM 5.1/5.2 -> 5.3).
+# Do not generalize these routes/fields to other hosts or newly named models.
+GO_COMBINED_THINKING = {
+    "minimax-m3", "mimo-v2.5", "mimo-v2.5-pro", "deepseek-v4-pro",
+    "deepseek-flash", "deepseek-v4.1-flash", "deepseek-v4-flash-vision-exp",
+}
+GO_QWEN_THINKING = {"qwen3.7-max", "qwen3.8-max", "qwen3.8-flash", "qwen3.7-plus", "qwen3.6-plus"}
+GO_REQUIRED_THINKING = {
+    "glm-5.1", "glm-5.2", "glm-5.3", "glm-5.3-flash", "kimi-k3", "kimi-k2.7-code",
+    "minimax-m2.5", "minimax-m2.7", "grok-4.6", "muse-spark-1.3-contributor", "muse-spark-1.2-contributor",
+    "omen-alpha", "deepseek-v4-flash",
+}
+GO_RESPONSES = {"gpt-5.6-luna", "grok-4.6", "muse-spark-1.3-contributor", "muse-spark-1.2-contributor"}
+GO_MESSAGES = {"minimax-m2.7", "union-alpha"}
+
+
+def go_completion_protocol(model: str, base_url: str) -> str:
+    if opencode_go_base(base_url):
+        model = model.strip().lower()
+        if model in GO_RESPONSES:
+            return "responses"
+        if model in GO_MESSAGES:
+            return "messages"
+    return "chat"
+
+
+def _go_thinking_controls(model: str, enabled: bool) -> Dict[str, Any] | None:
+    thinking = {"type": "enabled" if enabled else "disabled"}
+    if model in GO_COMBINED_THINKING:
+        if enabled and model == "minimax-m3":
+            thinking = {"type": "adaptive"}
+        return {"thinking": thinking, "reasoning": {"enabled": enabled}}
+    if model in GO_QWEN_THINKING:
+        return {"enable_thinking": enabled, "reasoning": {"enabled": enabled}}
+    if model in {"hy3", "hy4-preview"}:
+        return {"reasoning": {"enabled": enabled}}
+    if model in GO_RESPONSES:
+        return {"reasoning": {"effort": "medium" if enabled else "none"}}
+    if model in {"kimi-k2.6", "glm-5.3-flash", "omen-alpha"}:
+        return {"reasoning_effort": "medium" if enabled else "none"}
+    if model in GO_REQUIRED_THINKING or model == "longcat-2.0":
+        return {"thinking": thinking}
+    if model == "union-alpha":
+        # The anonymous route accepts Messages but its reasoning behavior is
+        # unverified. Never guess gateway reasoning/effort parameters here.
+        return {"thinking": {**thinking, **({"budget_tokens": 2048} if enabled else {})}}
+    return None
+
+
+def get_thinking_capability(provider: str, model: str, *, base_url: str = "") -> Dict[str, str]:
+    model_lower = model.strip().lower()
+    if opencode_go_base(base_url):
+        if model_lower in GO_REQUIRED_THINKING:
+            if model_lower in {"glm-5.1", "glm-5.2"}:
+                message = "当前 Go 路由实际使用必须思考的 GLM-5.3；请开启深度思考或更换模型。"
+            elif model_lower in {"omen-alpha", "deepseek-v4-flash"}:
+                message = "当前 Go 路由实测无法可靠关闭思考；请开启深度思考或更换模型。"
+            else:
+                message = "此模型必须开启思考；请开启深度思考或更换模型。"
+            return {"mode": "required", "message": message}
+        if model_lower != "union-alpha" and _go_thinking_controls(model_lower, False) is not None:
+            return {"mode": "switchable", "message": "已验证此 Go 模型的思考开关；开启通常更慢。"}
+        return {"mode": "unverified", "message": "此 Go 模型的思考开关尚未验证，实际行为由上游决定。"}
+    if requires_glm_thinking(model):
+        return {"mode": "required", "message": "此模型必须开启思考；请开启深度思考或更换模型。"}
+    if build_thinking_suppression(provider, model, base_url=base_url):
+        return {"mode": "switchable", "message": "将发送该模型支持的思考开关；开启通常更慢。"}
+    return {"mode": "unverified", "message": "此模型的思考开关尚未验证，实际行为由上游决定。"}
+
+
+def build_workbench_thinking_controls(provider: str, model: str, *, enabled: bool, base_url: str = "") -> Dict[str, Any]:
+    """Explicit on and off for user-controlled tasks; legacy suppression stays compatible."""
+    model_lower = model.strip().lower()
+    if opencode_go_base(base_url):
+        params = _go_thinking_controls(model_lower, enabled)
+        if params is not None:
+            return params
+    if not enabled or provider == "ollama":
+        return build_thinking_suppression(provider, model, disable_thinking=not enabled, base_url=base_url)
+    if requires_glm_thinking(model):
+        return {"thinking": {"type": "enabled"}}
+    params = build_thinking_suppression(provider, model, base_url=base_url)
+    if "thinking" in params:
+        params["thinking"] = {"type": "adaptive" if _matches([r"(?:^|/)minimax[-_/.]m3(?:$|[-_/:])"], model_lower) else "enabled"}
+    if "enable_thinking" in params:
+        params["enable_thinking"] = True
+    if "reasoning_effort" in params:
+        params["reasoning_effort"] = "medium"
+    return params
+
+
 def build_thinking_suppression(
     provider: str,
     model: str,
     disable_thinking: bool = True,
+    *,
+    base_url: str = "",
 ) -> Dict[str, Any]:
     """Return request parameters for thinking control, or an empty dict."""
     if not model:
@@ -123,6 +236,11 @@ def build_thinking_suppression(
 
     model_lower = model.strip().lower()
     provider_lower = provider.strip().lower() if provider else ""
+
+    if disable_thinking and opencode_go_base(base_url):
+        params = _go_thinking_controls(model_lower, False)
+        if params is not None:
+            return params
 
     if _matches(EXCLUDE_PATTERNS, model_lower):
         return {}
@@ -144,7 +262,8 @@ def build_thinking_suppression(
 
     for rule in THINKING_CONTROL_RULES:
         if _matches(rule["patterns"], model_lower):
-            return deepcopy(rule["params"])
+            params = deepcopy(rule["params"])
+            return params
 
     return {}
 

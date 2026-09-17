@@ -14,7 +14,11 @@ from urllib.parse import urlsplit
 
 from .core import HTTPClientPool
 from .openai_base import OpenAICompatibleService
-from .thinking_control import build_thinking_suppression, should_append_no_thinking_instruction, requires_glm_thinking
+from .thinking_control import (build_thinking_suppression, should_append_no_thinking_instruction,
+                               build_workbench_thinking_controls, get_thinking_capability,
+                               go_completion_protocol, opencode_go_base)
+from .completion_protocols import (build_protocol_payload, parse_protocol_records,
+                                   stream_is_done_line, ProtocolError)
 from .thinking_filter import postprocess_model_output
 from ...core.requirements import WorkbenchError
 
@@ -43,16 +47,22 @@ async def complete(config, service, *, messages, images=None, disable_thinking=T
     if images and (len(images) != 1 or not isinstance(images[0], bytes)
                    or len(images[0]) > 20 * 1024 * 1024 or not images[0].startswith(b"\xff\xd8")):
         raise ValueError("图像必须是预处理后的单张 JPEG。")
-    disabled = True if task in {"rewrite", "prompt_ingest", "probe"} else not service.get("ingest_enable_thinking", False)
-    # The task owns the override; caller flags cannot enable reasoning on rewrite.
+    disabled = (not service.get("workbench_enable_thinking", False) if task == "rewrite"
+                else not service.get("ingest_enable_thinking", False) if task == "ingest" else True)
+    # Persisted task-specific settings own the mode, not a caller override.
     provider, model, base = config.get("provider", ""), config.get("model", ""), config.get("base_url", "").rstrip("/")
     if not model or not base:
         raise CompletionError("请先配置 LLM 服务和模型。")
-    if disabled and requires_glm_thinking(model):
-        raise WorkbenchError("thinking_disable_unsupported",
-                             "GLM-5.3 / 5.3-Flash 不支持关闭思考，请为文字任务选择其他模型；可选读图需先启用思考。")
     native = service.get("type") == "ollama" and not base.endswith("/v1") and "/v1/" not in base
-    controls = build_thinking_suppression("ollama" if native else provider, model, disable_thinking=disabled) or {}
+    control_provider = "ollama" if native else provider
+    capability = get_thinking_capability(control_provider, model, base_url=base)
+    if disabled and capability["mode"] == "required":
+        raise WorkbenchError("thinking_disable_unsupported", capability["message"])
+    if task == "rewrite" or (opencode_go_base(base) and not disabled):
+        controls = build_workbench_thinking_controls(control_provider, model, enabled=not disabled, base_url=base)
+    else:
+        controls = build_thinking_suppression(control_provider, model, disable_thinking=disabled, base_url=base) or {}
+    protocol = "chat" if native else go_completion_protocol(model, base)
     wire = deepcopy(messages)
     if should_append_no_thinking_instruction("ollama" if native else provider, model, disabled):
         wire.insert(0, {"role": "system", "content": "Return the requested result only, without reasoning or think tags."})
@@ -67,6 +77,7 @@ async def complete(config, service, *, messages, images=None, disable_thinking=T
             user["content"] = [{"type": "text", "text": user["content"]},
                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}}]
     payload = {"model": model, "messages": wire, "stream": True, **controls}
+    advanced = {}
     if service.get("enable_advanced_params", False):
         advanced = {"temperature": config.get("temperature", 0.7), "top_p": config.get("top_p", 0.9),
                     "num_predict" if native else "max_tokens": config.get("max_tokens", 2000)}
@@ -74,6 +85,11 @@ async def complete(config, service, *, messages, images=None, disable_thinking=T
             payload["options"] = advanced
         else:
             payload.update(advanced)
+    if protocol != "chat":
+        try:
+            payload = build_protocol_payload(protocol, model, wire, controls, advanced)
+        except ProtocolError as exc:
+            raise CompletionError(str(exc), reason=exc.reason) from None
     headers = {"Content-Type": "application/json"}
     if config.get("api_key"):
         headers["Authorization"] = f"Bearer {config['api_key']}"
@@ -81,6 +97,13 @@ async def complete(config, service, *, messages, images=None, disable_thinking=T
         headers.update({"User-Agent": "AnimaPromptStudio/0.1",
                         "x-opencode-session": OpenAICompatibleService._opencode_session})
     url = base + "/api/chat" if native else OpenAICompatibleService.parse_api_url(base)
+    go_base = opencode_go_base(base) if not native else None
+    if go_base:
+        url = go_base + ("/chat/completions" if protocol == "chat" else "/" + protocol)
+        if protocol == "messages":
+            headers["anthropic-version"] = "2023-06-01"
+            if config.get("api_key"):
+                headers["x-api-key"] = config["api_key"]
 
     async def request():
         client = HTTPClientPool.get_client(provider=provider, base_url=base, timeout=timeout_s)
@@ -110,7 +133,8 @@ async def complete(config, service, *, messages, images=None, disable_thinking=T
                 while (line_end := data.find(b"\n", line_start)) >= 0:
                     line = bytes(data[line_start:line_end]).strip()
                     line_start = line_end + 1
-                    if line.startswith(b"data:") and line[5:].strip() == b"[DONE]":
+                    if ((line.startswith(b"data:") and line[5:].strip() == b"[DONE]")
+                            or (protocol != "chat" and stream_is_done_line(line, protocol))):
                         del data[line_start:]
                         stream_done = True
                         break
@@ -118,14 +142,25 @@ async def complete(config, service, *, messages, images=None, disable_thinking=T
                     break
             raw = data.decode("utf-8")
             content_type = response.headers.get("content-type", "")
-        if "text/event-stream" in content_type or raw.lstrip().startswith("data:"):
+        is_sse = "text/event-stream" in content_type or raw.lstrip().startswith(("data:", "event:"))
+        if is_sse:
             records = [json.loads(line[5:].strip()) for line in raw.splitlines()
                        if line.startswith("data:") and line[5:].strip() not in {"", "[DONE]"}]
         elif native and "\n" in raw.strip():
             records = [json.loads(line) for line in raw.splitlines() if line.strip()]
         else:
             records = [json.loads(raw)]
+        if protocol != "chat":
+            try:
+                text = parse_protocol_records(protocol, records)
+            except ProtocolError as exc:
+                raise CompletionError(str(exc), reason=exc.reason) from None
+            valid, text = postprocess_model_output(text, filter_thinking_output=True)
+            if not valid or not text.strip():
+                raise CompletionError("LLM 未返回有效内容。", reason="empty_response")
+            return {"text": text, "capabilities": {"vision": vision, "thinking_control": capability["mode"] != "unverified"}}
         parts = []
+        chat_finished = stream_done
         for record in records:
             if record.get("error"):
                 raise CompletionError("LLM 未完成请求。", reason="incomplete_response")
@@ -135,16 +170,20 @@ async def complete(config, service, *, messages, images=None, disable_thinking=T
                 choices = record.get("choices", [])
                 choice = choices[0] if choices else {}
                 fragment = choice.get("delta", choice.get("message", {})).get("content", "")
-                if choice.get("finish_reason") in {"length", "content_filter"}:
+                finish_reason = choice.get("finish_reason")
+                if finish_reason is not None and finish_reason != "stop":
                     raise CompletionError("LLM 返回被截断或未完成。", reason="incomplete_response")
+                chat_finished = chat_finished or finish_reason == "stop"
             if fragment is not None:
                 if not isinstance(fragment, str):
                     raise CompletionError("LLM 返回格式不受支持。")
                 parts.append(fragment)
+        if is_sse and not native and not chat_finished:
+            raise CompletionError("LLM 返回被截断或未完成。", reason="incomplete_response")
         valid, text = postprocess_model_output("".join(parts), filter_thinking_output=True)
         if not valid or not text.strip():
             raise CompletionError("LLM 未返回有效内容。", reason="empty_response")
-        return {"text": text, "capabilities": {"vision": vision, "thinking_control": bool(controls)}}
+        return {"text": text, "capabilities": {"vision": vision, "thinking_control": capability["mode"] != "unverified"}}
 
     try:
         return await asyncio.wait_for(request(), timeout=timeout_s)

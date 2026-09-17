@@ -931,6 +931,7 @@ def create_api_runtime(
         """返回 LLM 服务商与模型列表（API Key 掩码），供前台配置使用。"""
         try:
             from ..prompt_assistant.config_manager import config_manager
+            from ..prompt_assistant.services.thinking_control import get_thinking_capability
         except ImportError as exc:  # pragma: no cover - 依赖未安装时降级
             raise ApiError(503, "llm_dependency_missing", f"LLM 内核依赖未安装：{exc}", retryable=True) from exc
         services = config_manager.get_all_services() or []
@@ -948,6 +949,7 @@ def create_api_runtime(
                 "api_key_exists": bool(api_key),
                 "supports_vision": bool(svc.get("supports_vision", False)),
                 "ingest_enable_thinking": bool(svc.get("ingest_enable_thinking", False)),
+                "workbench_enable_thinking": bool(svc.get("workbench_enable_thinking", False)),
                 "llm_models": [
                     {
                         "name": m.get("name", ""),
@@ -958,11 +960,18 @@ def create_api_runtime(
                 ],
             })
         current = config_manager.get_llm_config()
+        current_service = next((svc for svc in services if svc.get("id") == current.get("provider")), {})
+        provider = current.get("provider") or ""
+        model = current.get("model") or ""
+        base_url = (current.get("base_url") or "").rstrip("/")
+        native = current_service.get("type") == "ollama" and not base_url.endswith("/v1") and "/v1/" not in base_url
         return {
             "services": service_items,
             "current": {
-                "service": current.get("provider") or "",
-                "model": current.get("model") or "",
+                "service": provider,
+                "model": model,
+                "workbench_enable_thinking": bool(current_service.get("workbench_enable_thinking", False)),
+                "thinking": get_thinking_capability("ollama" if native else provider, model, base_url=base_url),
             },
         }
 

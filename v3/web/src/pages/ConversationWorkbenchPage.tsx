@@ -18,6 +18,7 @@ import {cleanRequirements, editableRequirements, emptyRequirements, hasUncompile
 import {applySelectedContent, consumeTransfer, readTransfer, undoSelectedContent, type ContentTransfer, type SelectedContent} from "../lib/contentTransfer";
 import "./conversationWorkbench.css";
 import {LlmSettingsPanel} from "../components/LlmSettingsPanel";
+import {useWorkbenchThinking} from "../lib/useWorkbenchThinking";
 import {LoraMappingPanel, type ResourceIdentity} from "./LoraMappingPanel";
 import type {ConversationRecord, LayerName, LocalConversation, RequirementLayers} from "../lib/conversation";
 import type {GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, ModelProfileOption, WorkspaceListResponse} from "../lib/types";
@@ -52,6 +53,11 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [showLlmSettings, setShowLlmSettings] = useState(false);
+  const thinking = useWorkbenchThinking();
+  const [llmSettingsBusy, setLlmSettingsBusy] = useState(false);
+  const [adviceBusy, setAdviceBusy] = useState(false);
+  const llmUnavailableReason = thinking.unavailableReason || (llmSettingsBusy ? "正在保存或测试 LLM 配置…" : "");
+  const llmContextKey = JSON.stringify([thinking.current?.service, thinking.current?.model, thinking.enabled]);
   const [inspectorTab, setInspectorTab] = useState<"prompt" | "requirements" | "settings">("prompt");
   useEffect(() => {
     if (inspectorTab !== "settings") return;
@@ -281,7 +287,7 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
     return next;
   }
   async function turn(recompile: boolean) {
-    if (!record || !local || conflict) return;
+    if (!record || !local || conflict || llmUnavailableReason || adviceBusy) return;
     await act(recompile ? "重新编译" : "发送修改", async () => {
       const saved = hasUnsavedInputs(record, {...local, mode: record.draft.mode}) ? await save(true) : record;
       const next = await apiRequest<ConversationRecord>("/api/v3/workbench/turns", {method: "POST", body: JSON.stringify({
@@ -338,13 +344,14 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
   return <section className="conversation-workbench">
     <header className="conversation-heading"><div className="conversation-title"><h1>{record?.title || "开始创作"}</h1>{record && <span className="conversation-save-state">{dirty || local?.delta.trim() || promptChanged ? "草稿已保留" : "已保存"}</span>}</div>
       <div className="conversation-actions conversation-toolbar">
-        <button aria-expanded={showLlmSettings} aria-controls="conversation-llm-settings" disabled={Boolean(busy)} onClick={() => setShowLlmSettings(value => !value)}><GearSix size={17} aria-hidden="true" />LLM 设置</button>
+        <button aria-expanded={showLlmSettings} aria-controls="conversation-llm-settings" disabled={Boolean(busy || adviceBusy || thinking.saving || llmSettingsBusy)} onClick={() => setShowLlmSettings(value => !value)}><GearSix size={17} aria-hidden="true" />LLM 设置</button>
         <button className="conversation-new" disabled={Boolean(busy)} onClick={() => void create()}><Plus size={16} aria-hidden="true" />新会话</button>
       </div></header>
     <div className="conversation-session-bar"><div className="conversation-session-select"><ChatCircleDots size={19} aria-hidden="true" /><select aria-label="打开已有会话" value={record?.id || ""} disabled={Boolean(busy)} onChange={event => {if (event.target.value) void open(event.target.value);}}>
         <option value="">选择工作台</option>{workspaces.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select>
       </div><span className="conversation-session-note">{record ? `${record.draft.conversation_events.length} 次修改 · 输入自动保留在本机` : "开始新创作，或继续已有会话"}</span></div>
-    {showLlmSettings && <div id="conversation-llm-settings"><LlmSettingsPanel /></div>}
+    {showLlmSettings && <div id="conversation-llm-settings"><LlmSettingsPanel disabled={Boolean(busy || pending || adviceBusy || thinking.loading || thinking.saving)}
+      onSaved={thinking.refresh} onBusyChange={setLlmSettingsBusy} /></div>}
     {error && <p role="alert" className="conversation-error">{error}</p>}
     {busy && <p role="status">{busy}…</p>}
     {requestedTransfer && error && <button disabled={Boolean(busy)} onClick={() => {transferAttempt.current = ""; setInitialLoaded(false); setTransferRetry(value => value + 1);}}>重试带入</button>}
@@ -380,7 +387,8 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
             onSeries={series_tags => layer("subject", {series_tags})} onArtists={manual_artist_tags => layer("style", {manual_artist_tags})} />
             <SceneDesignControls requirements={local.requirements} onChange={requirements => edit({requirements})}
               workspaceId={record.id} workspaceRevision={record.revision} delta={local.delta}
-              positive={local.positive} negative={local.negative} disabled={Boolean(busy || pending || conflict)} />
+              positive={local.positive} negative={local.negative} disabled={Boolean(busy || pending || conflict)}
+              adviceDisabledReason={llmUnavailableReason} llmContextKey={llmContextKey} onBusyChange={setAdviceBusy} />
           </div>
           <div className="conversation-inspector">
             <div className="conversation-tabs" role="tablist" aria-label="画面工作区">{tabs.map((item, index) => <button key={item.id} id={`tab-${item.id}`} role="tab" aria-selected={inspectorTab === item.id} aria-controls={`panel-${item.id}`} tabIndex={inspectorTab === item.id ? 0 : -1} onClick={() => setInspectorTab(item.id)} onKeyDown={event => {
@@ -482,9 +490,24 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
               <p role="status" id="conversation-generation-reason" className="conversation-muted">{generationReason || "目标与资源可用，可以生成"}</p>
             </div>
             <div className="conversation-dock-actions">
-              <button className="conversation-update" disabled={conflict || (!canCompileRequirements && !local.delta.trim()) || (!needsCompile && !local.delta.trim())} onClick={() => void turn(!local.delta.trim())}><PaperPlaneRight size={16} aria-hidden="true" />更新提示词</button>
+              <div className="conversation-thinking-control">
+                <button type="button" role="switch" aria-label="深度思考" aria-checked={thinking.enabled} aria-describedby="conversation-thinking-status"
+                  disabled={Boolean(busy || pending || adviceBusy || llmSettingsBusy || thinking.loading || thinking.saving || !thinking.current?.service || !thinking.current.model)}
+                  onClick={() => void thinking.toggle()}>
+                  <span aria-hidden="true" className="conversation-thinking-indicator" />
+                  深度思考：{thinking.saving ? "保存中…" : thinking.loading ? "读取中…" : !thinking.current ? "状态未读取"
+                    : thinking.mode === "unverified" ? `${thinking.enabled ? "开" : "关"}（待确认）` : thinking.enabled ? "开" : thinking.mode === "required" ? "关（需开启）" : "关"}
+                </button>
+                {thinking.current && <span className="conversation-thinking-model" title={thinking.current.model}>{thinking.current.model || "尚未选择模型"}</span>}
+              </div>
+              <button className="conversation-update" disabled={Boolean(llmUnavailableReason || adviceBusy) || conflict || (!canCompileRequirements && !local.delta.trim()) || (!needsCompile && !local.delta.trim())} onClick={() => void turn(!local.delta.trim())}><PaperPlaneRight size={16} aria-hidden="true" />更新提示词</button>
               <button disabled={!dirty || conflict} onClick={() => void act("保存要求与设置", async () => {await save();})}>保存要求与设置</button>
               <button className="conversation-generate" aria-describedby="conversation-generation-reason" disabled={Boolean(generationReason)} onClick={() => void generate()}><ImageSquare size={19} aria-hidden="true" />生成图片</button>
+            </div>
+            <div id="conversation-thinking-status" className="conversation-thinking-status">
+              <span>{llmUnavailableReason || (thinking.mode === "unverified" ? `思考开关尚未验证。${thinking.message}` : thinking.mode === "required" ? thinking.message : "用于更新提示词和给我建议；开启后可能需要更久。")}</span>
+              {thinking.error && <span role="alert">{thinking.error}</span>}
+              {!thinking.current && !thinking.loading && <button type="button" onClick={() => void thinking.refresh()}>重新读取配置</button>}
             </div>
           </div>
         </section>

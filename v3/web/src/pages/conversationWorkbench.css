@@ -200,6 +200,16 @@
 .conversation-dock-summary .conversation-muted { margin:4px 0 0; font-size:12px; }
 .conversation-workbench .conversation-dock-actions .conversation-generate { min-width:146px; width:auto; margin:0; }
 .conversation-workbench .conversation-dock-actions > button { min-height:42px; }
+.conversation-thinking-control { display:flex; flex-direction:column; align-items:center; gap:3px; min-width:132px; }
+.conversation-workbench .conversation-thinking-control button { min-height:36px; gap:7px; white-space:nowrap; }
+.conversation-thinking-indicator { width:22px; height:12px; border-radius:8px; background:var(--muted); position:relative; opacity:.7; }
+.conversation-thinking-indicator::after { content:""; position:absolute; left:2px; top:2px; width:8px; height:8px; border-radius:50%; background:var(--panel); transition:transform .15s; }
+.conversation-thinking-control [aria-checked='true'] .conversation-thinking-indicator { background:var(--accent); opacity:1; }
+.conversation-thinking-control [aria-checked='true'] .conversation-thinking-indicator::after { transform:translateX(10px); }
+.conversation-thinking-model { max-width:180px; font-size:11px; line-height:1.25; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.conversation-thinking-status { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin-top:-8px; font-size:11px; color:var(--muted); }
+.conversation-thinking-status [role='alert'] { color:var(--danger); }
+.conversation-workbench .conversation-thinking-status button { padding:2px 6px; min-height:24px; font-size:11px; }
 @media (min-width:951px) {
  .conversation-workbench { padding-bottom:150px; }
  .conversation-generation-footer { position:fixed; z-index:25; left:calc(196px + 24px); right:24px; bottom:16px; max-height:calc(50vh - 24px); overflow-y:auto; margin:0; padding:14px 18px; border:1px solid var(--line-bright); border-radius:7px; background:var(--panel); box-shadow:0 4px 24px var(--shadow-color); }
@@ -214,5 +224,7 @@
 @media (max-width:950px) {
  .conversation-generation-footer { grid-template-columns:minmax(0,1fr); }
  .conversation-dock-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
- .conversation-workbench .conversation-dock-actions .conversation-generate { grid-column:1 / -1; width:100%; }
+ .conversation-thinking-control { align-items:stretch; }
+ .conversation-thinking-model { max-width:100%; text-align:center; }
+ .conversation-workbench .conversation-dock-actions .conversation-generate { width:100%; }
 }

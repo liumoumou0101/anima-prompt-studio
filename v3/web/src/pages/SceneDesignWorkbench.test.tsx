@@ -21,7 +21,8 @@ beforeEach(() => {
     const url = String(input), body = init?.body ? JSON.parse(String(init.body)) : undefined;
     if (body) writes.push({url, body});
     let response: unknown = {items: []};
-    if (url.startsWith("/api/v3/workspaces?")) response = {items: [workspace]};
+    if (url.endsWith("/llm/settings")) response = {services: [], current: {service: "test", model: "test-model"}};
+    else if (url.startsWith("/api/v3/workspaces?")) response = {items: [workspace]};
     else if (url.includes("/identities/preferences?")) response = {recent: [], favorites: [], aliases: []};
     else if (url === `/api/v3/workspaces/${workspace.id}`) {
       if (init?.method === "PUT") {

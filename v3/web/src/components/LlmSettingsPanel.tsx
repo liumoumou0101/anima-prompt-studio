@@ -1,15 +1,10 @@
 import {useEffect, useId, useState} from "react";
 import {apiRequest} from "../lib/api";
+import type {LlmSettingsResponse} from "../lib/useWorkbenchThinking";
 
-type LlmService = {
-  id: string; name: string; type: string; base_url: string;
-  api_key_masked: string; api_key_exists: boolean;
-  supports_vision?: boolean; ingest_enable_thinking?: boolean;
-  llm_models: {name: string; display_name: string; is_default: boolean}[];
-};
-type LlmSettingsResponse = {services: LlmService[]; current: {service: string; model: string}};
-
-export function LlmSettingsPanel({defaultOpen = true}: {defaultOpen?: boolean}) {
+export function LlmSettingsPanel({defaultOpen = true, disabled = false, onSaved, onBusyChange}: {
+  defaultOpen?: boolean; disabled?: boolean; onSaved?: () => void | Promise<void>; onBusyChange?: (busy: boolean) => void;
+}) {
   const modelListId = useId();
   const [settings, setSettings] = useState<LlmSettingsResponse | null>(null);
   const [error, setError] = useState("");
@@ -25,6 +20,8 @@ export function LlmSettingsPanel({defaultOpen = true}: {defaultOpen?: boolean}) 
   const [ingestThinking, setIngestThinking] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [discovered, setDiscovered] = useState<string[] | null>(null);
+
+  useEffect(() => {onBusyChange?.(busy); return () => onBusyChange?.(false);}, [busy, onBusyChange]);
 
   useEffect(() => {
     apiRequest<LlmSettingsResponse>("/api/v3/llm/settings").then((payload) => {
@@ -57,6 +54,7 @@ export function LlmSettingsPanel({defaultOpen = true}: {defaultOpen?: boolean}) 
   }
 
   async function refreshModels() {
+    if (disabled || busy) return;
     setBusy(true); setError(""); setNotice("");
     try {
       const result = await apiRequest<{models: string[]; count: number}>(`/api/v3/llm/services/${encodeURIComponent(serviceId)}/models/refresh`, {method: "POST", body: "{}"});
@@ -71,6 +69,7 @@ export function LlmSettingsPanel({defaultOpen = true}: {defaultOpen?: boolean}) 
     .filter(name => name.toLowerCase().includes(modelSearch.trim().toLowerCase()));
 
   async function save(test: boolean) {
+    if (disabled || busy) return;
     setBusy(true);
     setError("");
     setNotice("");
@@ -82,6 +81,7 @@ export function LlmSettingsPanel({defaultOpen = true}: {defaultOpen?: boolean}) 
       })});
       setApiKey("");
       setClearKey(false);
+      await onSaved?.();
       setSettings(await apiRequest<LlmSettingsResponse>("/api/v3/llm/settings"));
       setNotice("配置已保存。尚未测试连接。");
       if (test) {
@@ -95,7 +95,7 @@ export function LlmSettingsPanel({defaultOpen = true}: {defaultOpen?: boolean}) 
   return <details className="llm-settings" open={defaultOpen}>
     <summary>LLM 服务配置（API Key / 模型）</summary>
     {!settings ? <p>{error || "正在读取 LLM 配置…"}</p> : <>
-      <fieldset disabled={busy} className="llm-settings-grid">
+      <fieldset disabled={busy || disabled} className="llm-settings-grid">
         <label>服务商<select value={serviceId} onChange={(e) => selectService(e.target.value)}>
           {settings.services.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           {!settings.services.some((s) => s.id === "custom") && <option value="custom">自定义 API</option>}

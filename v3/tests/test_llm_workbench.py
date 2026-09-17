@@ -34,7 +34,10 @@ def test_settings_custom_model_masking_restart_and_key_retention(llm_client):
     assert client.put("/api/v3/llm/settings", json=settings()).status_code == 200
     result = client.get("/api/v3/llm/settings")
     assert "test-secret-12345" not in result.text
-    assert result.json()["current"] == {"service": "custom", "model": "test-model"}
+    current = result.json()["current"]
+    assert current["service"] == "custom" and current["model"] == "test-model"
+    assert current["workbench_enable_thinking"] is False
+    assert current["thinking"]["mode"] == "unverified"
     assert client.put("/api/v3/llm/settings", json=settings(api_key=None, model_name="another-model")).status_code == 200
     from anima_prompt_studio_v3.prompt_assistant.config_manager import ConfigManager
     reloaded = ConfigManager().get_llm_config()
@@ -148,16 +151,99 @@ def test_invalid_prompt_output_not_accepted(llm_client, monkeypatch, raw):
 def test_errors_do_not_echo_secrets_and_timeouts_are_explicit(llm_client, monkeypatch):
     client, _ = llm_client
     from anima_prompt_studio_v3.prompt_assistant.services.llm import LLMService
+    from anima_prompt_studio_v3.prompt_assistant.services.completion import CompletionError
+    async def legacy(*args, **kwargs):
+        return {"success": False, "error": "legacy transport called"}
+    monkeypatch.setattr(LLMService, "expand_prompt", legacy)
     async def failed(*args, **kwargs):
-        return {"success": False, "error": "Bearer secret-credential"}
-    monkeypatch.setattr(LLMService, "expand_prompt", failed)
+        raise CompletionError("Bearer secret-credential", reason="upstream_http_error", upstream_status=401)
+    monkeypatch.setattr(LLMService, "complete", failed)
     response = client.post("/api/v3/llm/test", json={})
     assert response.status_code == 502
     assert "secret-credential" not in response.text
     async def timeout(*args, **kwargs):
         raise TimeoutError()
-    monkeypatch.setattr(LLMService, "expand_prompt", timeout)
+    monkeypatch.setattr(LLMService, "complete", timeout)
     assert client.post("/api/v3/llm/test", json={}).status_code == 504
+
+
+def test_connection_uses_bounded_workbench_request(llm_client, monkeypatch):
+    client, _ = llm_client
+    from anima_prompt_studio_v3.prompt_assistant.services.llm import LLMService
+    calls = []
+    async def legacy(*args, **kwargs):
+        return {"success": False, "error": "legacy transport called"}
+    async def complete(**kwargs):
+        calls.append(kwargs)
+        return {"text": "OK"}
+    monkeypatch.setattr(LLMService, "expand_prompt", legacy)
+    monkeypatch.setattr(LLMService, "complete", complete)
+    response = client.post("/api/v3/llm/test", json={})
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is True
+    assert len(calls) == 1
+    assert calls[0]["task"] == "rewrite" and calls[0]["timeout_s"] == 30
+    assert [message["role"] for message in calls[0]["messages"]] == ["system", "user"]
+    assert all("OK" in message["content"] for message in calls[0]["messages"])
+    assert "no reasoning" not in str(calls[0]["messages"])
+
+
+def test_connection_does_not_report_empty_model_response_as_success(llm_client, monkeypatch):
+    client, _ = llm_client
+    from anima_prompt_studio_v3.prompt_assistant.services.llm import LLMService
+    calls = []
+    async def legacy(*args, **kwargs):
+        return {"success": False, "error": "legacy transport called"}
+    async def empty(**kwargs):
+        calls.append(kwargs)
+        return {"text": "  "}
+    monkeypatch.setattr(LLMService, "expand_prompt", legacy)
+    monkeypatch.setattr(LLMService, "complete", empty)
+    response = client.post("/api/v3/llm/test", json={})
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "llm_connection_failed"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("model,enabled,endpoint,control", [
+    ("mimo-v2.5", False, "chat/completions", {"thinking": {"type": "disabled"}, "reasoning": {"enabled": False}}),
+    ("mimo-v2.5", True, "chat/completions", {"thinking": {"type": "enabled"}, "reasoning": {"enabled": True}}),
+    ("gpt-5.6-luna", False, "responses", {"reasoning": {"effort": "none"}}),
+    ("gpt-5.6-luna", True, "responses", {"reasoning": {"effort": "medium"}}),
+    ("minimax-m2.7", True, "messages", {"thinking": {"type": "enabled"}}),
+])
+def test_connection_uses_saved_thinking_choice_and_go_protocol(llm_client, monkeypatch, model, enabled, endpoint, control):
+    client, _ = llm_client
+    from anima_prompt_studio_v3.prompt_assistant.services.core import HTTPClientPool
+    base_url = "https://opencode.ai/zen/go/v1"
+    assert client.put("/api/v3/llm/settings", json=settings(
+        base_url=base_url, model_name=model, workbench_enable_thinking=enabled)).status_code == 200
+    requests = []
+    def handle(request):
+        requests.append(request)
+        if request.url.path.endswith("/responses"):
+            body = {"object": "response", "status": "completed", "output": [
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "OK"}]}]}
+        elif request.url.path.endswith("/messages"):
+            body = {"type": "message", "stop_reason": "end_turn", "content": [{"type": "text", "text": "OK"}]}
+        else:
+            event = {"choices": [{"delta": {"content": "OK"}, "finish_reason": "stop"}]}
+            return httpx.Response(200, text="data: " + json.dumps(event) + "\n\ndata: [DONE]\n\n",
+                                  headers={"Content-Type": "text/event-stream"})
+        return httpx.Response(200, json=body)
+    transport_client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    monkeypatch.setattr(HTTPClientPool, "get_client", lambda **kwargs: transport_client)
+    try:
+        response = client.post("/api/v3/llm/test", json={})
+    finally:
+        asyncio.run(transport_client.aclose())
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is True
+    assert len(requests) == 1
+    assert str(requests[0].url) == base_url + "/" + endpoint
+    payload = json.loads(requests[0].content)
+    for key, expected in control.items():
+        assert all(payload.get(key, {}).get(name) == value for name, value in expected.items())
 
 
 def test_real_local_http_stream_and_language_contract(llm_client):

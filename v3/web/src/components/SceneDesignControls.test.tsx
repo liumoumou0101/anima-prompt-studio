@@ -192,6 +192,7 @@ it("avoids a paid advice request when both layers are locked", () => {
 it.each([
   {delta: "新的多人描述"}, {positive: "manually edited positive"}, {negative: "manual exclusions"},
   {workspaceId: "workspace_other"}, {workspaceRevision: 2},
+  {llmContextKey: "opencode_go:minimax-m3:thinking-on"},
 ])("discards delayed advice after context changes: %j", async changed => {
   let finish!: (value: unknown) => void;
   vi.mocked(apiRequest).mockReturnValue(new Promise(resolve => {finish = resolve;}));

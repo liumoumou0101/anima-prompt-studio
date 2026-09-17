@@ -1,4 +1,4 @@
-import {cleanup, fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {act, cleanup, fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {MemoryRouter} from "react-router-dom";
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {ConversationWorkbenchPage} from "./ConversationWorkbenchPage";
@@ -10,6 +10,7 @@ import {defaultGenerationSettings} from "../lib/generationSettings";
 let workspace: ConversationRecord;
 let writes: {url: string; method: string; body: Record<string, unknown>; key: string | null}[];
 let failure: "" | "conflict" | "network" | "turn";
+let llmSettings: {current: {service: string; model: string; workbench_enable_thinking: boolean; thinking: {mode: string; message: string}}; services: object[]};
 const target = {remote_profile_id: "cloud", workflow_profile_id: "workflow", remote_display_name: "测试服务器",
   workflow_display_name: "测试工作流", compatible_model_profiles: ["anima_base_v1"], availability: "ready"};
 beforeEach(() => {
@@ -22,11 +23,20 @@ beforeEach(() => {
       compiled: {positive: "cat", negative: "", compiled_token: "cmp_test", source: "llm"}, compile_state: "fresh", conversation_events: []}};
   localStorage.setItem("anima-conversation-active", JSON.stringify(workspace.id));
   writes = []; failure = "";
+  llmSettings = {current: {service: "opencode_go", model: "mimo-v2.5", workbench_enable_thinking: false,
+    thinking: {mode: "switchable", message: "支持切换深度思考。"}}, services: [{id: "opencode_go", name: "OpenCode Go",
+      type: "openai_compatible", base_url: "https://opencode.ai/zen/go/v1", api_key_exists: true, api_key_masked: "saved",
+      llm_models: [{name: "minimax-m3", display_name: "MiniMax", is_default: true}, {name: "mimo-v2.5", display_name: "MiMo", is_default: false}]}]};
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input), body = init?.body ? JSON.parse(String(init.body)) : null;
     if (body) writes.push({url, method: init?.method || "GET", body, key: new Headers(init?.headers).get("Idempotency-Key")});
     let response: unknown = {items: []};
-    if (url.startsWith("/api/v3/workspaces?")) response = {items: [workspace]};
+    if (url.endsWith("/llm/settings")) {
+      if (init?.method === "PUT") llmSettings.current = {...llmSettings.current, service: body.service_id, model: body.model_name,
+        workbench_enable_thinking: body.workbench_enable_thinking ?? llmSettings.current.workbench_enable_thinking};
+      response = llmSettings;
+    }
+    else if (url.startsWith("/api/v3/workspaces?")) response = {items: [workspace]};
     else if (url === "/api/v3/workspaces" && init?.method === "POST") {
       workspace = {...workspace, id: "workspace_new", revision: 1, title: body.title,
         draft: {...workspace.draft, ...body.draft, requirements: body.draft.requirements_edit ? {...body.draft.requirements_edit, contract: "anima-requirements/1", revision: 1} : null, compiled: null, compile_state: "missing", conversation_events: []}};
@@ -66,6 +76,159 @@ async function mount() {
   render(<MemoryRouter><ConversationWorkbenchPage remoteEnabled /></MemoryRouter>);
   await waitFor(() => expect(screen.getByRole("button", {name: "生成图片"})).toBeEnabled(), {timeout: 3000});
 }
+
+it("persists the thinking preference for the current service and exact model without changing the draft", async () => {
+  await mount();
+  const toggle = await screen.findByRole("switch", {name: "深度思考"});
+  expect(toggle).toHaveAttribute("aria-checked", "false");
+  expect(screen.getByText("mimo-v2.5", {selector: "span.conversation-thinking-model"})).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "我的未保存想法"}});
+  fireEvent.click(toggle);
+  await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).toMatchObject({url: "/api/v3/llm/settings", method: "PUT", body: {
+    service_id: "opencode_go", model_name: "mimo-v2.5", workbench_enable_thinking: true,
+  }});
+  expect(writes[0].body).not.toHaveProperty("api_key");
+  expect(screen.getByLabelText("继续追加要求")).toHaveValue("我的未保存想法");
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("cat");
+  expect(screen.getByRole("button", {name: "保存要求与设置"})).toBeDisabled();
+});
+
+it("keeps the previous preference and local edits when saving thinking fails", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith("/llm/settings") && init?.method === "PUT"
+    ? new Response(JSON.stringify({error: {code: "write_failed", message: "设置保存失败"}}), {status: 500}) : original(input, init));
+  await mount();
+  fireEvent.change(screen.getByLabelText("正向提示词"), {target: {value: "my edited prompt"}});
+  fireEvent.click(await screen.findByRole("switch", {name: "深度思考"}));
+  await screen.findByText(/设置保存失败/);
+  expect(screen.getByRole("switch", {name: "深度思考"})).toHaveAttribute("aria-checked", "false");
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("my edited prompt");
+  expect(screen.getByRole("button", {name: "生成图片"})).toBeEnabled();
+});
+
+it("reloads the saved thinking state when the server saves but its response is lost", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const response = await original(input, init);
+    if (String(input).endsWith("/llm/settings") && init?.method === "PUT") throw new TypeError("response lost after saving");
+    return response;
+  });
+  await mount();
+  fireEvent.click(screen.getByRole("switch", {name: "深度思考"}));
+  await waitFor(() => expect(screen.getByRole("switch", {name: "深度思考"})).toHaveAttribute("aria-checked", "true"));
+  expect(screen.getByRole("alert")).toHaveTextContent("保存结果未确认");
+  expect(screen.getByRole("alert")).toHaveTextContent("已重新读取");
+  expect(screen.getByRole("button", {name: "给我建议"})).toBeEnabled();
+});
+
+it("blocks text requests if both the save response and authoritative thinking reload fail", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let saved = false;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    if (String(input).endsWith("/llm/settings")) {
+      if (init?.method === "PUT") {await original(input, init); saved = true; throw new TypeError("response lost after saving");}
+      if (saved) throw new TypeError("reload unavailable");
+    }
+    return original(input, init);
+  });
+  await mount();
+  fireEvent.change(screen.getByLabelText("正向提示词"), {target: {value: "my retained edit"}});
+  fireEvent.click(screen.getByRole("switch", {name: "深度思考"}));
+  await waitFor(() => expect(screen.getByRole("switch", {name: "深度思考"})).toHaveTextContent("状态未读取"));
+  expect(screen.getByRole("switch", {name: "深度思考"})).toBeDisabled();
+  expect(screen.getByRole("alert")).toHaveTextContent("保存结果未确认");
+  expect(screen.getByRole("alert")).toHaveTextContent("无法读取");
+  expect(screen.getByRole("button", {name: "给我建议"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "生成图片"})).toBeEnabled();
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("my retained edit");
+  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "下雨"}});
+  expect(screen.getByRole("button", {name: "更新提示词"})).toBeDisabled();
+});
+
+it("labels enabled thinking as unverified when its model capability has not been confirmed", async () => {
+  llmSettings.current = {...llmSettings.current, workbench_enable_thinking: true,
+    thinking: {mode: "unverified", message: "服务商可能忽略此设置。"}};
+  await mount();
+  expect(screen.getByRole("switch", {name: "深度思考"})).toHaveTextContent("开（待确认）");
+});
+
+it("does not present a failed settings load as disabled thinking or block image generation", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith("/llm/settings")
+    ? new Response(JSON.stringify({error: {code: "settings_unavailable", message: "配置读取失败"}}), {status: 500}) : original(input, init));
+  await mount();
+  fireEvent.change(screen.getByLabelText("正向提示词"), {target: {value: "my prompt"}});
+  expect(await screen.findByRole("switch", {name: "深度思考"})).toBeDisabled();
+  expect(screen.getByRole("switch", {name: "深度思考"})).toHaveTextContent("状态未读取");
+  expect(screen.getByRole("button", {name: "给我建议"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "生成图片"})).toBeEnabled();
+  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "下雨"}});
+  expect(screen.getByRole("button", {name: "更新提示词"})).toBeDisabled();
+});
+
+it("requires an explicit opt-in for mandatory-thinking models while keeping manual editing available", async () => {
+  llmSettings.current = {...llmSettings.current, model: "glm-5.3", thinking: {mode: "required", message: "该模型必须开启深度思考。"}};
+  await mount();
+  expect(screen.getByRole("switch", {name: "深度思考"})).toHaveTextContent("关（需开启）");
+  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "下雨"}});
+  expect(screen.getByRole("button", {name: "更新提示词"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "给我建议"})).toBeDisabled();
+  expect(screen.getByRole("combobox", {name: "景别"})).toBeEnabled();
+  expect(screen.getAllByText(/开启深度思考或更换模型/).length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole("switch", {name: "深度思考"}));
+  await waitFor(() => expect(screen.getByRole("button", {name: "更新提示词"})).toBeEnabled());
+  expect(screen.getByRole("button", {name: "给我建议"})).toBeEnabled();
+});
+
+it("refreshes the visible model and thinking capability after settings are saved", async () => {
+  await mount();
+  fireEvent.click(screen.getByRole("button", {name: "LLM 设置"}));
+  fireEvent.change(await screen.findByLabelText("模型名称"), {target: {value: "minimax-m3"}});
+  fireEvent.click(screen.getByRole("button", {name: "保存配置"}));
+  await screen.findByText("minimax-m3", {selector: "span.conversation-thinking-model"});
+  fireEvent.click(screen.getByRole("switch", {name: "深度思考"}));
+  await waitFor(() => expect(screen.getByRole("switch", {name: "深度思考"})).toHaveAttribute("aria-checked", "true"));
+  expect(writes.at(-1)?.body).toMatchObject({service_id: "opencode_go", model_name: "minimax-m3", workbench_enable_thinking: true});
+});
+
+it("locks model and thinking changes until an advice request finishes even if the draft changes", async () => {
+  let finish!: (value: Response) => void;
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith("/scene-advice")
+    ? new Promise(resolve => {finish = resolve;}) : original(input, init));
+  await mount();
+  fireEvent.click(screen.getByRole("button", {name: "LLM 设置"}));
+  await screen.findByLabelText("模型名称");
+  fireEvent.click(screen.getByRole("button", {name: "给我建议"}));
+  expect(screen.getByRole("switch", {name: "深度思考"})).toBeDisabled();
+  expect(screen.getByLabelText("模型名称")).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "更新后的要求"}});
+  expect(screen.getByRole("switch", {name: "深度思考"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "更新提示词"})).toBeDisabled();
+  await act(async () => finish(new Response(JSON.stringify({suggestions: [{title: "旧方向", reason: "旧内容", choices: {layout: {value: "居中构图"}}}], extracted: []}))));
+  expect(screen.queryByText("助手建议 · 旧方向")).not.toBeInTheDocument();
+  expect(screen.getByRole("switch", {name: "深度思考"})).toBeEnabled();
+  expect(screen.getByLabelText("模型名称")).toBeEnabled();
+});
+
+it("keeps text requests disabled while a thinking preference is being saved", async () => {
+  let finish!: () => void;
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    if (String(input).endsWith("/llm/settings") && init?.method === "PUT") await new Promise<void>(resolve => {finish = resolve;});
+    return original(input, init);
+  });
+  await mount();
+  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "下雨"}});
+  fireEvent.click(screen.getByRole("switch", {name: "深度思考"}));
+  expect(screen.getByRole("switch", {name: "深度思考"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "给我建议"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "更新提示词"})).toBeDisabled();
+  await act(async () => finish());
+  expect(screen.getByRole("switch", {name: "深度思考"})).toHaveAttribute("aria-checked", "true");
+});
 
 it("saves manual identity tags and preserves them in the local workspace draft", async () => {
   await mount();
