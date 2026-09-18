@@ -199,6 +199,10 @@ class WorkspaceDraft(ApiModel, ConversationWriteFields):
         for key in ConversationWriteFields.model_fields:
             if key not in self.model_fields_set:
                 values.pop(key, None)
+        if self.requirements_edit is not None and "prompt_locks" not in self.requirements_edit.model_fields_set:
+            # An older client's omitted field must reach the store as omitted,
+            # so its CAS merge preserves locks instead of treating [] as unlock.
+            values["requirements_edit"].pop("prompt_locks", None)
         return values
 
 

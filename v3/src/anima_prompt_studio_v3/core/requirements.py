@@ -149,9 +149,20 @@ class RequirementLora(ContractModel):
     source: LoraSource = Field(default_factory=LoraSource)
 
 
+class PromptLock(ContractModel):
+    target: Literal["positive", "negative"]
+    text: str = Field(min_length=1, max_length=1000)
+
+
 class RequirementsEdit(ContractModel):
     layers: RequirementLayers
     loras: list[RequirementLora] = Field(max_length=16)
+    prompt_locks: list[PromptLock] = Field(default_factory=list, max_length=32)
+
+    @field_validator("prompt_locks")
+    @classmethod
+    def unique_prompt_locks(cls, values: list[PromptLock]) -> list[PromptLock]:
+        return list({(item.target, item.text): item for item in values}.values())
 
     @field_validator("loras")
     @classmethod
@@ -171,13 +182,24 @@ class Requirements(RequirementsEdit):
 
 
 class PromptEdit(ContractModel):
+    # Reviewed prompt text is also the browser's comparison baseline. Preserve
+    # its exact whitespace on input and when CompiledPrompt reloads it later.
+    model_config = ConfigDict(str_strip_whitespace=False)
     positive: str = Field(min_length=1, max_length=20_000)
     negative: str = Field(max_length=20_000)
+
+    @field_validator("positive")
+    @classmethod
+    def positive_contains_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("正向提示词不能只有空白。")
+        return value
 
 
 class CompiledPrompt(PromptEdit):
     mode: Mode
     source: Literal["llm", "user"]
+    requirements_synced: bool = False
     compiled_token: str = Field(pattern=r"^cmp_[a-f0-9]{32}$")
     inputs_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     prompt_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -229,12 +251,19 @@ class GenerationSource(ContractModel):
     model_profile: str
 
 
+class WorkspaceOrigin(ContractModel):
+    workspace_id: str = Field(pattern=r"^workspace_[A-Za-z0-9]+$")
+    revision: int = Field(ge=1)
+    run_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 class ConversationFields(ContractModel):
     mode: Mode = "faithful"
     requirements: Requirements | None = None
     compiled: CompiledPrompt | None = None
     reference_pin: ReferencePin | None = None
     generation_source: GenerationSource | None = None
+    workspace_origin: WorkspaceOrigin | None = None
     reference_preset_id: str | None = None
     conversation_events: list[ConversationEvent] = Field(default_factory=list, max_length=100)
     session_previews: list[SessionPreview] = Field(default_factory=list, max_length=100)
@@ -256,10 +285,24 @@ def digest(value: Any) -> str:
 
 
 def inputs_fingerprint(draft: dict[str, Any]) -> str:
+    return _inputs_fingerprint(draft, include_edit_controls=False)
+
+
+def _inputs_fingerprint(draft: dict[str, Any], *, include_edit_controls: bool) -> str:
     raw = draft.get("requirements")
     requirements = dump(Requirements.model_validate(raw)) if raw is not None else None
     if requirements is not None:
         requirements.pop("revision")
+        # Literal protection affects allowed edits, not the reviewed image text.
+        requirements.pop("prompt_locks", None)
+        # Protection and reference-copy switches affect editing, not rendering.
+        # Keep their default values in the hash for compatibility with prompts
+        # compiled before this distinction was introduced.
+        if not include_edit_controls:
+            for layer in requirements["layers"].values():
+                layer["locked"] = False
+                if "include_with_style_pin" in layer:
+                    layer["include_with_style_pin"] = False
         # Adding empty manual fields must not invalidate historical compiled
         # prompts or frozen submission fingerprints.
         for key in ("character_tags", "series_tags", "general_tags"):
@@ -284,7 +327,27 @@ def compile_state(draft: dict[str, Any]) -> Literal["missing", "fresh", "stale"]
     compiled = draft.get("compiled")
     if compiled is None:
         return "missing"
-    return "fresh" if compiled["inputs_fingerprint"] == inputs_fingerprint(draft) else "stale"
+    fingerprint = compiled["inputs_fingerprint"]
+    # Existing locked workspaces may carry the pre-normalization fingerprint.
+    # Accept it only against the exact current inputs, never against changed text.
+    return "fresh" if (fingerprint == inputs_fingerprint(draft)
+                       or fingerprint == _inputs_fingerprint(draft, include_edit_controls=True)) else "stale"
+
+
+def exclusions_fingerprint(requirements: dict[str, Any] | None) -> str:
+    exclusions = (requirements or {}).get("layers", {}).get("exclusions")
+    if exclusions is not None:
+        exclusions = {**exclusions, "locked": False}
+    return digest(exclusions)
+
+
+def validate_prompt_locks(requirements: dict[str, Any] | None, prompt: dict[str, Any] | None) -> None:
+    missing = [item for item in (requirements or {}).get("prompt_locks", [])
+               if item["text"] not in (prompt or {}).get(item["target"], "")]
+    if missing:
+        fragments = "；".join(f'{"正向" if item["target"] == "positive" else "负向"}：{item["text"]}' for item in missing)
+        raise WorkbenchError("protected_prompt_changed", "固定片段未保留，当前版本未修改：" + fragments
+                             + "。请保留这些原文，或先解除对应片段的固定。")
 
 
 def compile_prompt(draft: dict[str, Any], prompt: PromptEdit, *, source: Literal["llm", "user"]) -> dict:
@@ -293,10 +356,11 @@ def compile_prompt(draft: dict[str, Any], prompt: PromptEdit, *, source: Literal
     tags = declared_tags(draft.get("requirements")) if source == "llm" else previous
     if source == "llm" and (tags or previous):
         prompt = PromptEdit(positive=render_manual_tags(prompt.positive, tags, previous), negative=prompt.negative)
+    validate_prompt_locks(draft.get("requirements"), dump(prompt))
     return dump(CompiledPrompt(**dump(prompt), mode=draft.get("mode", "faithful"), source=source,
                                manual_tags=tags,
                                scene_intent=declared_scene_choices(draft.get("requirements")),
-                               exclusions_fingerprint=digest((draft.get("requirements") or {}).get("layers", {}).get("exclusions")),
+                               exclusions_fingerprint=exclusions_fingerprint(draft.get("requirements")),
                                compiled_token=f"cmp_{uuid4().hex}",
                                inputs_fingerprint=inputs_fingerprint(draft),
                                prompt_fingerprint=digest(dump(prompt))))
@@ -323,14 +387,22 @@ def apply_layer_updates(canonical: Requirements, touched_layers: list[str],
     result = dump(canonical)
     for name in touched_layers:
         if name not in CONTENT_MODELS or result["layers"][name]["locked"]:
-            raise WorkbenchError("invalid_layer_updates", "不能自动修改未知层或锁定层。")
+            raise WorkbenchError("invalid_layer_updates", "模型尝试修改锁定的要求或未知类别；当前版本未修改。请调整修改意见后重试。")
+        model = CONTENT_MODELS[name]
+        allowed = {field.alias or key for key, field in model.model_fields.items()}
+        patch = layer_updates[name]
+        if not isinstance(patch, dict) or not patch or not set(patch) <= allowed:
+            raise WorkbenchError("invalid_layer_updates", "模型修改了不可自动编辑的字段，或未提供修改内容；当前版本未修改。请重试或更换模型。")
         try:
-            update = dump(CONTENT_MODELS[name].model_validate(layer_updates[name]))
+            # Only known content fields can be omitted and inherited. Control
+            # fields, manual tags and scene-design choices are never writable.
+            content = {key: result["layers"][name][key] for key in allowed}
+            update = dump(model.model_validate({**content, **patch}))
         except ValidationError as exc:
-            raise WorkbenchError("invalid_layer_updates", "层内容不完整或包含不可编辑的控制字段。") from exc
+            raise WorkbenchError("invalid_layer_updates", "模型返回的要求内容格式不正确；当前版本未修改。请重试或更换模型。") from exc
         result["layers"][name].update(update)
     return replace_requirements(canonical, RequirementsEdit.model_validate(
-        {"layers": result["layers"], "loras": result["loras"]}))
+        {"layers": result["layers"], "loras": result["loras"], "prompt_locks": result.get("prompt_locks", [])}))
 
 
 def apply_pin(canonical: Requirements, source: Requirements, role: PinRole) -> Requirements:
@@ -347,7 +419,7 @@ def apply_pin(canonical: Requirements, source: Requirements, role: PinRole) -> R
                 target["layers"][name][key] = deepcopy(value)
     target["loras"] = [item for item in origin["loras"] if item["required"]]
     return replace_requirements(canonical, RequirementsEdit.model_validate(
-        {"layers": target["layers"], "loras": target["loras"]}))
+        {"layers": target["layers"], "loras": target["loras"], "prompt_locks": target.get("prompt_locks", [])}))
 
 
 def project_conversation(draft: dict[str, Any]) -> dict[str, Any]:
@@ -365,6 +437,10 @@ def project_conversation(draft: dict[str, Any]) -> dict[str, Any]:
     pin = result["reference_pin"]
     result["reference_preset_id"] = pin["example_id"] if pin else None
     result["compile_state"] = compile_state(result)
+    if result["compile_state"] == "stale" and result["compiled"] is not None:
+        # Internal replacements (for example adopting a reference's style) also
+        # make a prior synchronization receipt obsolete.
+        result["compiled"]["requirements_synced"] = False
     return result
 
 
@@ -386,13 +462,42 @@ def apply_workspace_edit(current: dict[str, Any] | None, incoming: dict[str, Any
         if edit is None:
             raise WorkbenchError("invalid_workspace_edit", "清除会话请使用重置操作。")
         before = Requirements.model_validate(existing["requirements"]) if existing["requirements"] else None
+        if "prompt_locks" not in edit and before is not None:
+            edit = {**edit, "prompt_locks": dump(before)["prompt_locks"]}
         result["requirements"] = dump(replace_requirements(before, RequirementsEdit.model_validate(edit)))
+    if (existing["compiled"] is not None
+            and inputs_fingerprint(existing) != inputs_fingerprint(result)):
+        # A previous synchronization describes the old requirements only.
+        # Lock-only changes are excluded from the fingerprint and keep it valid.
+        result["compiled"] = {**result["compiled"], "requirements_synced": False}
+    if (current is not None and existing["compiled"] is not None
+            and existing["compile_state"] == "fresh"
+            and inputs_fingerprint(existing) == inputs_fingerprint(result)):
+        # Rebase a validated historical fingerprint when only protection flags
+        # change, without changing reviewed text, provenance or compiled token.
+        result["compiled"] = {**result["compiled"], "inputs_fingerprint": inputs_fingerprint(result)}
+    if (existing["compiled"] is not None
+            and existing["compiled"].get("exclusions_fingerprint") in {
+                exclusions_fingerprint(existing["requirements"]),
+                digest((existing["requirements"] or {}).get("layers", {}).get("exclusions")),
+            }
+            and exclusions_fingerprint(existing["requirements"]) == exclusions_fingerprint(result["requirements"])):
+        result["compiled"] = {**result["compiled"],
+                              "exclusions_fingerprint": exclusions_fingerprint(result["requirements"])}
     if "prompt_edit" in incoming:
         if incoming["prompt_edit"] is None:
             raise WorkbenchError("invalid_workspace_edit", "提示词编辑不能为空。")
         prompt = PromptEdit.model_validate(incoming["prompt_edit"])
-        if current is None or result["compiled"] is None or compile_state(result) != "fresh":
-            raise WorkbenchError("invalid_workspace_edit", "请先根据当前要求编译，再编辑提示词。")
-        if any(result["compiled"][key] != value for key, value in dump(prompt).items()):
-            result["compiled"] = compile_prompt(result, prompt, source="user")
+        previous = result["compiled"]
+        if previous is None or any(previous[key] != value for key, value in dump(prompt).items()):
+            was_fresh = compile_state(result) == "fresh"
+            saved_prompt = compile_prompt(result, prompt, source="user")
+            if not was_fresh:
+                # Saving text is not validation against changed requirements.
+                # Preserve the previous compilation's inputs, or an explicit
+                # unmatched marker if this workspace has never been compiled.
+                saved_prompt["inputs_fingerprint"] = (previous["inputs_fingerprint"] if previous is not None
+                                                       else digest({"uncompiled_manual_prompt": True}))
+            result["compiled"] = saved_prompt
+    validate_prompt_locks(result.get("requirements"), result.get("compiled"))
     return result

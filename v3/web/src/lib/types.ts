@@ -557,6 +557,8 @@ export interface GenerationRunRecord {
   available_actions: GenerationRunAction[];
   error: {code: string; message: string} | null;
   artist_comparison?: ArtistComparisonInfo | null;
+  source?: {workspace_revision: number | null; positive_prompt: string; negative_prompt: string;
+    model_profile: string | null; settings: Partial<WorkbenchGenerationSettings>} | null;
 }
 
 export interface GenerationRunListResponse {
@@ -570,10 +572,14 @@ export interface GenerationTarget {
   template_revision?: string;
   remote_profile_id: string;
   remote_display_name: string;
+  connection_type?: "ssh" | "local";
   remote_ssh_host?: string;
   remote_ssh_port?: number;
+  remote_comfy_host?: string;
+  remote_comfy_port?: number;
   workflow_profile_id: string;
   workflow_display_name: string;
+  workflow_origin?: "official" | "user";
   workflow_kind: string;
   workflow_notes?: string;
   compatible_model_profiles: string[];

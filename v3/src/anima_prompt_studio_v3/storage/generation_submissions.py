@@ -82,8 +82,9 @@ class SubmissionStore:
                 if any(compiled[name] != value for name, value in dump(prompt).items()):
                     draft["compiled"] = compile_prompt(draft, prompt, source="user")
                     accepted_revision += 1
-                    db.execute("UPDATE workspaces SET draft_json=?,revision=?,updated_at=? WHERE id=?",
-                               (json.dumps(draft, ensure_ascii=False, allow_nan=False), accepted_revision, _utc_now(), workspace_id))
+                    self.workspaces._save_revision(db, row, title=row["title"],
+                        draft_json=json.dumps(draft, ensure_ascii=False, allow_nan=False),
+                        candidate_snapshot_json=row["candidate_snapshot_json"])
                 # Derive the immutable source from the row actually compared under lock.
                 snapshot.update(requirements=draft["requirements"], reference_pin=draft.get("reference_pin"),
                                 mode=draft["mode"], compiled=draft["compiled"],

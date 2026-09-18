@@ -111,6 +111,39 @@ def test_continue_missing_generation_does_not_create_workspace(conversation_clie
     assert calls == []
 
 
+@pytest.mark.parametrize("origin_kind", ["verified", "missing_version", "wrong_prompt", "absent"])
+def test_generation_continuation_records_only_verified_parent_and_replays_idempotently(conversation_client, origin_kind):
+    from types import SimpleNamespace
+    from anima_prompt_studio_v3.core.requirements import PromptEdit, Requirements, compile_prompt, dump
+    client, calls = conversation_client
+    workspace_store = client.app.state.workspace_store
+    parent = workspace_store.create("父会话", {"model_profile": "anima_base_v1"})
+    def populate(draft):
+        draft["requirements"] = dump(Requirements.empty())
+        draft["compiled"] = compile_prompt(draft, PromptEdit(positive="original prompt", negative="text"), source="user")
+        return draft
+    parent = workspace_store.transform(parent["id"], expected_revision=1, operation=populate)
+    snapshot = {"provenance": {"positive": "original prompt", "negative": "text", "model_profile": "anima_base_v1",
+        "requirements": parent["draft"]["requirements"], "settings": {"seed": 42}},
+        "run": {"remote_profile_id": "remote1", "workflow_profile_id": "wf1"}, "workflow": {"id": "wf1"}}
+    if origin_kind != "absent":
+        snapshot.update(workspace_id=parent["id"], workspace_revision=999 if origin_kind == "missing_version" else 2)
+    if origin_kind == "wrong_prompt":
+        snapshot["provenance"]["positive"] = "unrelated prompt"
+    client.app.state.submission_service = SimpleNamespace(store=SimpleNamespace(for_runs=lambda ids: [{"snapshot": snapshot}]))
+    headers = {"Idempotency-Key": "continue-one-request"}
+    response = client.post("/api/v3/generation-runs/run_verified/workspace", json={}, headers=headers)
+    assert response.status_code == 201, response.text
+    child = response.json()
+    assert child["draft"].get("workspace_origin") == (
+        {"workspace_id": parent["id"], "revision": 2, "run_id": "run_verified"} if origin_kind == "verified" else None)
+    assert child["draft"]["compiled"]["compiled_token"] != parent["draft"]["compiled"]["compiled_token"]
+    assert client.post("/api/v3/generation-runs/run_verified/workspace", json={}, headers=headers).json() == child
+    assert len(workspace_store.list()) == 2
+    assert workspace_store.get(parent["id"]) == parent
+    assert calls == []
+
+
 def test_bundled_install_is_explicit_and_preserves_notes(conversation_client, monkeypatch):
     client, calls = conversation_client
     endpoint = "/api/v3/reference-examples/install-bundled"

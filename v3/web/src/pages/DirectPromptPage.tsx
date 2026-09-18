@@ -4,7 +4,7 @@ import {ApiClientError, apiRequest} from "../lib/api";
 import {storeDirectImport} from "../lib/directPrompt";
 import {seedInput, applyAspect, applyGenerationRecipe, changeGenerationModel, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
 import {modelProfileChoices, LEGACY_AESTHETIC, resolveLegacyAesthetic} from "../lib/modelProfiles";
-import {targetReady, defaultTarget, targetStatus} from "../lib/workflowTargets";
+import {targetReady, defaultTarget, targetStatus, targetLabel, targetDescription} from "../lib/workflowTargets";
 import type {DirectPromptPreview, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, ModelProfileOption, WorkbenchGenerationSettings} from "../lib/types";
 import {ErrorState} from "../components/States";
 
@@ -323,8 +323,9 @@ export function DirectPromptPage({modelProfiles, remoteEnabled = false}: {modelP
             </select>
             <label htmlFor="direct-workflow">工作流</label>
             <select id="direct-workflow" aria-label="远程工作流" value={selectedWorkflowId || ""} onChange={(event) => { const target = connectionWorkflows.find((item) => item.workflow_profile_id === event.target.value); if (target) chooseGenerationTarget(target); }} disabled={!connectionWorkflows.length}>
-              {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}{targetStatus(target) ? ` · ${targetStatus(target)}` : ""}</option>) : <option value="">{targetsBusy ? "正在同步兼容工作流…" : "当前模型无兼容工作流"}</option>}
+              {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{targetLabel(target, connectionWorkflows)}{targetStatus(target) ? ` · ${targetStatus(target)}` : ""}</option>) : <option value="">{targetsBusy ? "正在同步兼容工作流…" : "当前模型无兼容工作流"}</option>}
             </select>
+            {activeTarget && <small>{targetDescription(activeTarget)}</small>}
             {activeTarget?.auth_type === "private_key" && <label className="passphrase-input"><span>私钥口令（可选）</span><input type="password" autoComplete="current-password" value={privateKeyPassphrase} onChange={(event) => setPrivateKeyPassphrase(event.target.value)} placeholder={activeTarget.private_key_passphrase_configured ? "已在本次运行中设置" : "私钥未加密可留空"} /></label>}
           </>}
           {remoteEnabled && activeTarget && !targetReady(activeTarget) && <div className="workspace-notice" role="status">

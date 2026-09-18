@@ -124,12 +124,16 @@ def save_settings(manager, payload: LlmSettingsUpdateRequest) -> None:
 
 async def test_connection() -> dict[str, object]:
     from ..prompt_assistant.services.llm import LLMService
+    from .conversation import parse_turn_output
 
     failure_message = "连接测试失败，请检查 API 地址、Key、模型权限及网络。"
     try:
         result = await asyncio.wait_for(LLMService.complete(
-            messages=[{"role": "system", "content": "Reply with OK only."},
-                      {"role": "user", "content": "Reply with OK only."}],
+            messages=[{"role": "system", "content": (
+                'Verify workbench JSON support. Return only this JSON shape, not plain OK: '
+                '{"touched_layers":[],"layer_updates":{},"positive":"1girl, blue coat","negative":"","warnings":[]}. '
+                'positive and negative must be strings; no extra fields or explanation.')},
+                      {"role": "user", "content": "Compile a girl wearing a blue coat using that JSON shape. Do not reply just OK."}],
             task="rewrite", timeout_s=30,
         ), timeout=30)
     except RuntimeError:
@@ -139,7 +143,14 @@ async def test_connection() -> dict[str, object]:
     text = result.get("text") if isinstance(result, dict) else None
     if not isinstance(text, str) or not text.strip():
         raise RuntimeError(failure_message)
-    return {"ok": True, "message": "模型已成功返回内容；连接可用，不代表生图效果已验证。"}
+    try:
+        output = parse_turn_output(text)
+        compatible = not output.touched_layers and not output.layer_updates and not output.conflicts
+    except (ValueError, TypeError):
+        compatible = False
+    message = ("连接可用，工作台结构化输出测试通过；实际改写仍需检查，不代表生图效果已验证。" if compatible else
+               "连接可用，但工作台结构化输出测试未通过；请重试或更换模型后再用于改写。")
+    return {"ok": True, "workbench_compatible": compatible, "message": message}
 
 
 async def refresh_models(manager, service_id: str) -> dict[str, object]:

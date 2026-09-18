@@ -172,8 +172,11 @@ def test_input_changes_stale_but_manual_prompt_does_not_align_fingerprint(conver
     attempt = client.put(f"/api/v3/workspaces/{first['id']}", json={
         "revision": changed["revision"], "draft": {"prompt_edit": {"positive": "long hair", "negative": ""}},
     })
-    assert attempt.status_code == 422
-    assert client.get(f"/api/v3/workspaces/{first['id']}").json()["draft"]["compile_state"] == "stale"
+    assert attempt.status_code == 200, attempt.text
+    saved = client.get(f"/api/v3/workspaces/{first['id']}").json()
+    assert saved["draft"]["compiled"]["positive"] == "long hair"
+    assert saved["draft"]["compiled"]["inputs_fingerprint"] == first["draft"]["compiled"]["inputs_fingerprint"]
+    assert saved["draft"]["compile_state"] == "stale"
 
 
 def test_manual_prompt_edit_uses_new_token_then_is_context_for_turn(conversation_client):
@@ -288,7 +291,7 @@ def test_cancellation_releases_turn_slot_without_write(tmp_path, monkeypatch):
 @pytest.mark.parametrize("updates,touched", [
     ({"subject": {"text": "two people"}}, []),
     ({"lighting": {"text": "cold", "locked": False}}, ["lighting"]),
-    ({"composition": {"text": "close"}}, ["composition"]),
+    ({"composition": {"text": "close", "shot": None}}, ["composition"]),
     ({"lighting": {"text": "cold"}}, ["lighting", "lighting"]),
     ({"unknown": {"text": "cold"}}, ["unknown"]),
 ])
@@ -320,7 +323,7 @@ def test_pins_copy_content_preserve_locks_and_replace_resources():
         apply_layer_updates(base, ["subject"], {"subject": {"text": "someone else"}})
 
 
-def test_weight_order_and_controls_participate_in_stale_digest():
+def test_generation_inputs_participate_in_stale_digest_but_locks_do_not():
     from anima_prompt_studio_v3.core.requirements import RequirementLora
     canonical = Requirements.model_validate(requirements())
     canonical.loras = [RequirementLora(logical_id="a", file_name="a.safetensors"),
@@ -329,11 +332,12 @@ def test_weight_order_and_controls_participate_in_stale_digest():
     draft["compiled"] = compile_prompt(draft, PromptEdit(positive="detective", negative=""), source="llm")
     assert compile_state(draft) == "fresh"
     for mutate in (lambda d: d["requirements"]["loras"][0].update(weight=0.5),
-                   lambda d: d["requirements"]["loras"].reverse(),
-                   lambda d: d["requirements"]["layers"]["subject"].update(locked=True)):
+                   lambda d: d["requirements"]["loras"].reverse()):
         changed = deepcopy(draft)
         mutate(changed)
         assert compile_state(changed) == "stale"
+    draft["requirements"]["layers"]["subject"]["locked"] = True
+    assert compile_state(draft) == "fresh"
     assert digest({"x": 1, "y": 2}) == digest({"y": 2, "x": 1})
 
 

@@ -134,6 +134,20 @@ def test_acceptance_atomically_saves_manual_prompt_and_retry_precedes_stale_chec
     assert len(executed) == 1
 
 
+def test_generation_prompt_edits_keep_each_workspace_snapshot(harness):
+    store, start, _, _, _, _ = harness
+    _, service = start()
+    workspace, request = workspace_payload(store)
+    first = submit(service, request, key="first")
+    next_request = request.model_copy(update={"workspace_revision": first["workspace_revision"],
+        "compiled_token": first["compiled_token"], "positive_prompt": "second edit"})
+    second = submit(service, next_request, key="second")
+    history = store.list_versions(workspace["id"])
+    assert [item["revision"] for item in history] == [4, 3, 2, 1]
+    assert [item["draft"]["compiled"]["positive"] for item in history[:3]] == ["second edit", "cat", "original"]
+    assert second["workspace_revision"] == 4
+
+
 def reference_source():
     from anima_prompt_studio_v3.core.requirements import Requirements
     return {"id": "ex_abc", "source_version": "2", "requirements_valid": True,
@@ -385,6 +399,7 @@ def test_api_durable_submission_and_global_conflict(harness, reference_db):
         exchange = client.post("/api/v3/session/exchange", json={"bootstrap_token": runtime.bootstrap_token})
         client.headers["X-Anima-Session"] = exchange.json()["session_token"]
         data = request.model_dump(exclude_unset=True)
+        data["settings"] = {"seed": "8798399215689017476"}
         first = client.post("/api/v3/direct-prompt/runs", json=data, headers={"Idempotency-Key": "http"})
         assert first.status_code == 202, first.text
         second = client.post("/api/v3/direct-prompt/runs", json=data, headers={"Idempotency-Key": "http"})
@@ -399,8 +414,25 @@ def test_api_durable_submission_and_global_conflict(harness, reference_db):
         assert availability.json()["availability"] == "ready"
         runs = client.get(f"/api/v3/workspaces/{workspace['id']}/runs")
         assert runs.status_code == 200 and runs.json()["items"][0]["id"] == first.json()["id"]
+        source = runs.json()["items"][0]["source"]
+        assert source["workspace_revision"] == first.json()["workspace_revision"]
+        assert source["positive_prompt"] == "cat"
+        assert source["negative_prompt"] == ""
+        assert source["model_profile"] == "anima_base_v1"
+        assert source["settings"]["seed"] == "8798399215689017476"
+        assert "remote_fingerprint" not in source and "compiled_token" not in source
         assert client.get(f"/api/v3/generation-runs/{first.json()['id']}/artifacts").json() == {"items": []}
         assert client.get("/api/v3/generation-runs/missing/artifacts").status_code == 404
+        data.update(workspace_revision=first.json()["workspace_revision"], compiled_token=first.json()["compiled_token"])
+        newer = client.post("/api/v3/direct-prompt/runs", json=data, headers={"Idempotency-Key": "http-next"})
+        assert newer.status_code == 202, newer.text
+        first_page = client.get(f"/api/v3/workspaces/{workspace['id']}/runs", params={"limit": 1}).json()
+        assert first_page["items"][0]["id"] == newer.json()["id"]
+        assert first_page["next_offset"] == first_page["next_cursor"] == 1
+        second_page = client.get(f"/api/v3/workspaces/{workspace['id']}/runs", params={"limit": 1, "offset": 1}).json()
+        assert second_page["items"][0]["id"] == first.json()["id"]
+        assert second_page["next_offset"] is None
+        assert client.get(f"/api/v3/workspaces/{workspace['id']}/runs", params={"offset": -1}).status_code == 422
 
 
 def test_lost_remote_ack_is_uncertain_and_has_no_resampling_action(harness, tmp_path):

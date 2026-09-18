@@ -16,6 +16,21 @@ it("browses the local catalog with no server and never starts an inspection on m
   expect(fetchMock.mock.calls.map(call => call[0])).toEqual(["/api/v3/workflows/catalog", "/api/v3/settings/remote-profiles"]);
 });
 
+it("finds a built-in through its Chinese name while preserving imported names and template identity", async () => {
+  const builtin = {...item, workflow_id: "v3_aesthetic_v1_1", display_name: "ANIMA Aesthetic - V3 Baseline v1.1", workflow_kind: "txt2img_basic", model_profiles: ["anima_aesthetic_v1_1"]};
+  const custom = {...builtin, workflow_id: "user:copy", origin: "user", display_name: "我的 Baseline 模板", notes: "自定义模板说明"};
+  vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).endsWith("/catalog") ? {items: [builtin, custom]} : {items: []})));
+  render(<MemoryRouter><WorkflowsPage enabled /></MemoryRouter>);
+  await screen.findByText("我的模板说明");
+  fireEvent.change(screen.getByLabelText("搜索模板"), {target: {value: "基础版"}});
+  expect(screen.getByRole("button", {name: /ANIMA Aesthetic v1.1/})).toBeInTheDocument();
+  expect(screen.queryByRole("button", {name: /我的 Baseline 模板/})).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("搜索模板"), {target: {value: "我的 Baseline"}});
+  fireEvent.click(screen.getByRole("button", {name: /我的 Baseline 模板/}));
+  expect(screen.getByRole("heading", {name: "我的 Baseline 模板"})).toBeInTheDocument();
+  expect(screen.getByText("自定义模板说明")).toBeInTheDocument();
+});
+
 it("requires model confirmation and saves a distinct template without an environment", async () => {
   let saved = false;
   const document = {schema: "anima-user-workflow/1", profile: {display_name: "API 模板", compatible_model_profiles: [], api_workflow: {}}};

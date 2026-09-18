@@ -4,6 +4,7 @@ import {apiRequest} from "../lib/api";
 import {modelProfileChoices} from "../lib/modelProfiles";
 import type {ModelProfileOption} from "../lib/types";
 import {WorkflowManager} from "../components/WorkflowManager";
+import {workflowLabel, workflowName} from "../lib/workflowTargets";
 
 type Template = {workflow_id: string; display_name: string; revision: string; origin: string; enabled: boolean;
   experimental: boolean; model_profiles: string[]; workflow_kind: string; notes: string; nodes: string[];
@@ -34,7 +35,7 @@ export function WorkflowsPage({enabled, modelProfiles}: {enabled: boolean; model
   const choices = modelProfileChoices(modelProfiles);
   const selected = items.find(item => item.workflow_id === selectedId);
   const remote = environments.find(item => item.id === remoteId);
-  const filtered = items.filter(item => (!model || item.model_profiles.includes(model)) && `${item.display_name} ${item.notes}`.toLowerCase().includes(query.toLowerCase()));
+  const filtered = items.filter(item => (!model || item.model_profiles.includes(model)) && `${workflowLabel(item)} ${item.display_name} ${item.workflow_id} ${item.notes}`.toLowerCase().includes(query.toLowerCase()));
   const modelLabel = (id: string) => choices.find(item => item.id === id)?.label || id;
 
   async function refresh(select?: string) {
@@ -75,16 +76,17 @@ export function WorkflowsPage({enabled, modelProfiles}: {enabled: boolean; model
         <label>适配模型<select value={model} onChange={e => setModel(e.target.value)}><option value="">全部模型</option>{choices.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
         <p>{filtered.length} 个模板 · 本机保存</p>
         {filtered.map(item => <button className="workflow-template-card" key={item.workflow_id} aria-pressed={selectedId === item.workflow_id} onClick={() => {setSelectedId(item.workflow_id); setVersions([]);}}>
-          <strong>{item.display_name}</strong><span>{item.origin === "official" ? "内置" : "用户副本"} · {item.enabled ? "启用" : "停用"}{item.experimental ? " · 含实验节点" : ""}</span>
+          <strong title={item.display_name}>{workflowLabel(item, items)}</strong><span>{item.enabled ? "启用" : "停用"}</span>
           <small>{item.model_profiles.map(modelLabel).join(" / ") || "模型待确认"}</small>
         </button>)}
         {loaded && !filtered.length && <p>没有匹配的模板。可调整筛选或导入新模板。</p>}
         <button disabled={busy} onClick={() => {setEditor(true); setView("library");}}>导入本地模板</button>
       </aside>
       <div className="workflow-content">
-        {selected && <header><h2>{selected.display_name}</h2><p>本地内容版本 {selected.revision.slice(0, 12)} · {selected.enabled ? "已启用" : "已停用"}</p></header>}
+        {selected && <header><h2>{workflowName(selected)}</h2><p>本地内容版本 {selected.revision.slice(0, 12)} · {selected.enabled ? "已启用" : "已停用"}</p></header>}
         {view === "library" && <>
           {selected && <section aria-label="模板详情">
+            <p>模板标识：{selected.workflow_id}</p>
             <p>{selected.notes || "尚无备注"}</p><p>适配模型：{selected.model_profiles.map(modelLabel).join("、") || "待确认"}</p>
             {selected.source && <p>来源模板：{selected.source.id} · 版本 {selected.source.revision.slice(0, 12)}</p>}
             <div className="workflow-toolbar">

@@ -6,7 +6,7 @@ import {apiRequest, ApiClientError} from "../lib/api";
 import {consumeDirectImport} from "../lib/directPrompt";
 import {seedInput, validSeed, applyAspect, applyGenerationRecipe, changeGenerationModel, defaultGenerationSettings, findGenerationRecipe, markGenerationCustom, resolvedGenerationSettings} from "../lib/generationSettings";
 import {modelProfileChoices, LEGACY_AESTHETIC, resolveLegacyAesthetic} from "../lib/modelProfiles";
-import {targetReady, defaultTarget, targetStatus} from "../lib/workflowTargets";
+import {targetReady, defaultTarget, targetStatus, targetLabel, targetDescription} from "../lib/workflowTargets";
 import type {ArtistComparisonSubmission, ArtistRanking, ArtistSuggestion, CandidateLane, CandidateTag, CompositionChip, CompositionPreset, GenerationRunRecord, GenerationTarget, GenerationTargetListResponse, IntentParseResponse, ModelProfileOption, PromptCandidate, SceneDraft, SceneDraftItem, SceneRelation, TagSuggestion, TranslationResponse, WorkbenchGenerationSettings, WorkbenchResponse, WorkspaceDraft, WorkspaceListResponse, WorkspaceRecord} from "../lib/types";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
 import {LlmSettingsPanel} from "../components/LlmSettingsPanel";
@@ -1113,8 +1113,9 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
               <div className="generation-field generation-field--workflow">
                 <label htmlFor="generation-workflow">工作流</label>
                 <select id="generation-workflow" aria-label="远程工作流" value={selectedWorkflowId || ""} onChange={(event) => { const target = connectionWorkflows.find((item) => item.workflow_profile_id === event.target.value); if (target) chooseGenerationTarget(target); }} disabled={!connectionWorkflows.length}>
-                  {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{target.workflow_display_name}{targetStatus(target) ? ` · ${targetStatus(target)}` : ""}</option>) : <option value="">当前模型无兼容工作流</option>}
+                  {connectionWorkflows.length ? connectionWorkflows.map((target) => <option key={target.workflow_profile_id} value={target.workflow_profile_id}>{targetLabel(target, connectionWorkflows)}{targetStatus(target) ? ` · ${targetStatus(target)}` : ""}</option>) : <option value="">当前模型无兼容工作流</option>}
                 </select>
+                {activeTarget && <small>{targetDescription(activeTarget)}</small>}
               </div>
             </>}
           </div>
@@ -1197,7 +1198,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
             {generationNotice && <p className="workspace-notice workspace-notice--error" role="alert">{generationNotice}</p>}
             {llmPrompt && <div className="llm-prompt-actions">
               <button type="button" className="button generate-button" disabled={profile === LEGACY_AESTHETIC || !llmPrompt.trim() || llmStale || !remoteEnabled || !activeTarget?.host_fingerprint_ready || generationBusy !== null || llmBusy} onClick={() => void submitLlmPrompt()}>{generationBusy === "llm" ? "正在提交…" : "用此提示词远程生图"}</button>
-              <small>{activeTarget ? `目标：${activeTarget.workflow_display_name}${activeTarget.host_fingerprint_ready ? "" : " · 指纹未确认"}` : "当前模型无兼容工作流"}</small>
+              <small>{activeTarget ? `目标：${targetLabel(activeTarget, connectionWorkflows)}${activeTarget.host_fingerprint_ready ? "" : " · 指纹未确认"}` : "当前模型无兼容工作流"}</small>
             </div>}
             <p className="llm-prompt-note">将按上方当前正负提示词原文提交（仅去除首尾空白），不再经过词典编译或补默认负面词。请人工核对主体、数量、空间关系和排除范围。工作流与高级参数使用“生成设置”中的当前选择。</p>
           </section>}
@@ -1228,7 +1229,7 @@ export function WorkbenchPage({modelProfiles, remoteEnabled = false, naturalLang
                   <div className="candidate-status-row">
                     <div className={`validation-strip${(result.scene_draft?.unresolved.length || result.scene_draft?.risk_notes.some((note) => note.includes("已移除的标签仍出现"))) ? " is-warning" : ""}`}><span className="status-dot is-ready" /><strong>结构检查通过</strong><span>语义仍需人工确认 · {result.candidates.length} 条候选 · {result.data_pack_id}</span></div>
                     {remoteEnabled && <div className="generation-submit-bar">
-                      <div><strong>远程生图</strong><span>{generationSummary(generationSettings)}{activeTarget ? ` · ${activeTarget.workflow_display_name}` : ""}{activeTarget?.host_fingerprint_ready ? " · 当前连接已确认指纹" : activeTarget ? " · 当前连接尚未确认指纹，请先前往设置" : " · 当前模型没有兼容工作流"}</span></div>
+                      <div><strong>远程生图</strong><span>{generationSummary(generationSettings)}{activeTarget ? ` · ${targetLabel(activeTarget, connectionWorkflows)}` : ""}{activeTarget?.host_fingerprint_ready ? " · 当前连接已确认指纹" : activeTarget ? " · 当前连接尚未确认指纹，请先前往设置" : " · 当前模型没有兼容工作流"}</span></div>
                       {activeTarget?.auth_type === "private_key" && <label className="passphrase-input"><span>私钥口令（可选，仅本次运行内存）</span><input type="password" autoComplete="current-password" value={privateKeyPassphrase} onChange={(event) => setPrivateKeyPassphrase(event.target.value)} placeholder={activeTarget.private_key_passphrase_configured ? "已在本次运行中设置" : "私钥未加密可留空"} /></label>}
                     </div>}
                   </div>

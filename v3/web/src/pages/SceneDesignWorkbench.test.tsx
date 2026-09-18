@@ -4,10 +4,12 @@ import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {ConversationWorkbenchPage} from "./ConversationWorkbenchPage";
 import {emptyRequirements, type ConversationRecord, type LocalConversation} from "../lib/conversation";
 import {defaultGenerationSettings} from "../lib/generationSettings";
+import {readConversationDraft} from "../lib/conversationDrafts";
 
 let workspace: ConversationRecord;
 let writes: {url: string; body: Record<string, any>}[];
 let failCompilation: boolean;
+let candidate: ConversationRecord["draft"];
 beforeEach(() => {
   localStorage.clear(); sessionStorage.setItem("anima-v3-session", "test-session");
   workspace = {id: "workspace_scene", title: "画面设计接入", revision: 1, created_at: "2026-09-12", updated_at: "2026-09-12",
@@ -40,17 +42,21 @@ beforeEach(() => {
       response = workspace;
     } else if (url === "/api/v3/workbench/turns") {
       if (failCompilation) return new Response(JSON.stringify({error: {code: "llm_generation_failed", message: "这次整理失败"}}), {status: 502});
-      workspace = {...workspace, revision: workspace.revision + 1, draft: {...workspace.draft, compile_state: "fresh",
-        compiled: {positive: "compiled scene intent", negative: body.compiled?.negative || "", compiled_token: "cmp_scene_updated", source: "llm"}}};
+      candidate = {...workspace.draft, compile_state: "fresh",
+        compiled: {positive: "compiled scene intent", negative: body.compiled?.negative || "", compiled_token: "cmp_scene_updated", source: "llm"}};
+      response = {id: "proposal_scene", workspace_id: workspace.id, base_revision: workspace.revision, draft: candidate, changed_layers: [], warnings: [], created_at: "2026-09-18"};
+    } else if (url.endsWith("/proposals/proposal_scene/accept")) {
+      workspace = {...workspace, revision: workspace.revision + 1, draft: candidate};
       response = workspace;
     }
     return new Response(JSON.stringify(response), {status: 200});
   });
 });
 afterEach(() => {cleanup(); vi.restoreAllMocks();});
-function draft(): LocalConversation {return JSON.parse(localStorage.getItem("anima-conversation-draft:workspace_scene")!);}
+function draft(): LocalConversation {return readConversationDraft("workspace_scene")!.local!;}
 async function mount() {
   const view = render(<MemoryRouter><ConversationWorkbenchPage /></MemoryRouter>);
+  fireEvent.click(await screen.findByText("角色、画师与画面设计", {selector: "summary"}));
   await screen.findByRole("region", {name: "画面设计辅助"});
   await waitFor(() => expect(screen.getByRole("combobox", {name: "景别"})).toBeEnabled());
   return view;
@@ -65,15 +71,15 @@ it("keeps choices in the local draft, saves without an LLM call, and reopens wit
   expect(screen.getByLabelText("正向提示词")).toHaveValue("reviewed prompt");
   expect(screen.getByLabelText("负向提示词")).toHaveValue("original exclusions");
   expect(writes).toHaveLength(0);
-  fireEvent.click(screen.getByRole("button", {name: "保存要求与设置"}));
-  await waitFor(() => expect(screen.getByRole("button", {name: "保存要求与设置"})).toBeDisabled());
+  fireEvent.click(screen.getByRole("button", {name: "保存当前版本"}));
+  await waitFor(() => expect(screen.getByRole("button", {name: "保存当前版本"})).toBeDisabled());
   expect(writes.map(item => item.url)).toEqual(["/api/v3/workspaces/workspace_scene"]);
   expect(writes[0].body.draft.requirements_edit.layers.composition.design.shot).toEqual({value: "全身", source: "user"});
   expect(screen.getByLabelText("负向提示词")).toHaveValue("original exclusions");
   view.unmount();
   await mount();
   expect(screen.getByRole("combobox", {name: "景别"})).toHaveValue("全身");
-  expect(screen.getByRole("button", {name: "保存要求与设置"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "保存当前版本"})).toBeDisabled();
   expect(screen.getByRole("button", {name: "更新提示词"})).toBeEnabled();
 });
 
@@ -85,9 +91,12 @@ it("compiles an otherwise empty draft only after the explicit update action", as
   expect(screen.getByRole("button", {name: "更新提示词"})).toBeEnabled();
   expect(writes).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", {name: "更新提示词"}));
-  await waitFor(() => expect(screen.getByLabelText("正向提示词")).toHaveValue("compiled scene intent"));
+  await screen.findByRole("region", {name: "待确认的修改"});
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("");
   expect(writes.map(item => item.url)).toEqual(["/api/v3/workspaces/workspace_scene", "/api/v3/workbench/turns"]);
   expect(writes[1].body).toMatchObject({revision: 2, delta: {text: ""}});
+  fireEvent.click(screen.getByRole("button", {name: "采用修改"}));
+  await waitFor(() => expect(screen.getByLabelText("正向提示词")).toHaveValue("compiled scene intent"));
   expect(draft().requirements.layers.lighting.mood).toEqual({value: "宁静日常", source: "user"});
   expect(screen.getByLabelText("负向提示词")).toHaveValue("");
 });

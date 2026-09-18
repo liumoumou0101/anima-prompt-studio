@@ -51,6 +51,24 @@ it.each(["unchecked", "stale"])("keeps a %s target visible and refreshes its sta
   expect(screen.getByLabelText("远程工作流")).toHaveValue("base");
 });
 
+it("lets users distinguish and select same-name workflow copies without changing their IDs", async () => {
+  const targets = ["user:12345678-a", "user:12345678-b"].map(workflow_profile_id => ({
+    remote_profile_id: "offline", remote_display_name: "离线环境", workflow_profile_id,
+    workflow_display_name: "我的模板", workflow_origin: "user", workflow_kind: "txt2img_basic",
+    compatible_model_profiles: ["anima_base_v1"], host_fingerprint_ready: false, auth_type: "agent",
+    private_key_passphrase_configured: false, availability: "unchecked", experimental: false,
+  }));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({items: targets})));
+  render(<MemoryRouter><DirectPromptPage remoteEnabled /></MemoryRouter>);
+  fireEvent.change(screen.getByLabelText("模型配置"), {target: {value: "anima_base_v1"}});
+  const select = screen.getByLabelText("远程工作流") as HTMLSelectElement;
+  await waitFor(() => expect(select.options).toHaveLength(2));
+  expect(new Set(Array.from(select.options, option => option.textContent)).size).toBe(2);
+  expect(Array.from(select.options, option => option.value)).toEqual(["user:12345678-a", "user:12345678-b"]);
+  fireEvent.change(select, {target: {value: "user:12345678-b"}});
+  expect(select).toHaveValue("user:12345678-b");
+});
+
 it("matches whole comma tokens and sends the Chinese gloss to the workbench", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(preview), {status: 200}));
 

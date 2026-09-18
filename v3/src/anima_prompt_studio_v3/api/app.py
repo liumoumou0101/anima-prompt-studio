@@ -10,10 +10,11 @@ from threading import RLock
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, Query, Request, Response as FastAPIResponse
+from fastapi import Depends, FastAPI, Header, Path as ApiPath, Query, Request, Response as FastAPIResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import Field
 
 from .. import __version__
 try:
@@ -118,15 +119,29 @@ from .models import (
     WorkspaceUpdateRequest,
 )
 from .security import SessionInvalidError, SessionManager
-from .workspace_store import WorkspaceNotFoundError, WorkspaceRevisionConflictError, WorkspaceStore
+from .workspace_store import (
+    WorkspaceCreateConflictError, WorkspaceIdempotencyKeyError,
+    WorkspaceNotFoundError, WorkspaceProposalNotFoundError, WorkspaceRevisionConflictError,
+    WorkspaceStore, WorkspaceVersionNotFoundError,
+)
 from ..runtime.submissions import SubmissionService, payload_digest
 from ..storage.generation_submissions import IdempotencyConflict
 from ..core.lora_resolution import ResourceUnavailable, MappingConflict
-from ..core.requirements import WorkbenchError
+from ..core.requirements import ContractModel, WorkbenchError
 from .conversation import ConversationService, TurnRequest, WorkspaceCommand
 
 
 API_PREFIX = "/api/v3"
+
+
+class WorkspaceRestoreRequest(WorkspaceDeleteRequest):
+    source_revision: int = Field(ge=1)
+
+
+class WorkspaceForkRequest(ContractModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 MAX_JSON_BODY = 1024 * 1024
 TAG_CATEGORIES = {"general", "artist", "copyright", "character", "meta"}
 TAG_BROWSE_CATEGORIES = {"general", "copyright", "character", "meta"}
@@ -337,10 +352,26 @@ def create_api_runtime(
     async def workspace_missing_handler(request: Request, exc: WorkspaceNotFoundError) -> JSONResponse:
         return _error_response(request, 404, "workspace_not_found", "工作台不存在。")
 
+    @app.exception_handler(WorkspaceCreateConflictError)
+    async def workspace_create_conflict_handler(request: Request, exc: WorkspaceCreateConflictError) -> JSONResponse:
+        return _error_response(request, 409, exc.code, str(exc))
+
+    @app.exception_handler(WorkspaceIdempotencyKeyError)
+    async def workspace_idempotency_key_handler(request: Request, exc: WorkspaceIdempotencyKeyError) -> JSONResponse:
+        return _error_response(request, 422, "invalid_idempotency_key", str(exc))
+
     @app.exception_handler(WorkspaceRevisionConflictError)
     async def workspace_conflict_handler(request: Request, exc: WorkspaceRevisionConflictError) -> JSONResponse:
         return _error_response(request, 409, "workspace_revision_conflict", "工作台已在另一处更新。",
                                details={"current_revision": exc.current_revision})
+
+    @app.exception_handler(WorkspaceVersionNotFoundError)
+    async def workspace_version_missing_handler(request: Request, exc: WorkspaceVersionNotFoundError) -> JSONResponse:
+        return _error_response(request, 404, "workspace_version_not_found", "该工作台没有这个历史版本。")
+
+    @app.exception_handler(WorkspaceProposalNotFoundError)
+    async def workspace_proposal_missing_handler(request: Request, exc: WorkspaceProposalNotFoundError) -> JSONResponse:
+        return _error_response(request, 404, "workspace_proposal_not_found", "待审修改不存在或已失效。")
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -1196,9 +1227,12 @@ def create_api_runtime(
     @app.get(f"{API_PREFIX}/workspaces", dependencies=[Depends(require_session)])
     def list_workspaces(
         limit: int = Query(default=50, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        q: str = Query(default="", max_length=200),
+        archived: bool = False,
         store: WorkspaceStore = Depends(require_workspace_store),
     ) -> dict[str, object]:
-        return {"items": store.list(limit=limit)}
+        return {"items": store.list(limit=limit, offset=offset, q=q, archived=archived)}
 
     @app.post(f"{API_PREFIX}/generation-requests/preview", dependencies=[Depends(require_session)])
     def preview_generation_request(payload: GenerationBridgePreviewRequest) -> dict[str, object]:
@@ -1436,7 +1470,11 @@ def create_api_runtime(
         if queue is None:
             raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
         try:
-            return _generation_run_response(queue.get(run_id), queue)
+            response = _generation_run_response(queue.get(run_id), queue)
+            submissions = app.state.submission_service
+            entries = submissions.store.for_runs([run_id]) if submissions is not None else []
+            snapshot = next((entry["snapshot"] for entry in entries if entry["run_id"] == run_id), None)
+            return {**response, "source": _workspace_run_source(snapshot)}
         except GenerationRunNotFoundError as exc:
             raise ApiError(404, "generation_run_not_found", "生成任务不存在。") from exc
 
@@ -2000,17 +2038,22 @@ def create_api_runtime(
 
     @app.get(f"{API_PREFIX}/workspaces/{{workspace_id}}/runs", dependencies=[Depends(require_session)])
     def workspace_runs(workspace_id: str, limit: int = Query(default=20, ge=1, le=100),
-                       cursor: int = Query(default=0, ge=0), store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
+                       cursor: int = Query(default=0, ge=0), offset: int | None = Query(default=None, ge=0),
+                       store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
         store.get(workspace_id)
         submissions = app.state.submission_service
         if submissions is None:
-            return {"items": [], "next_cursor": None}
+            return {"items": [], "next_cursor": None, "next_offset": None}
         runs = [submissions.queue.get(run_id) for run_id in submissions.store.workspace_run_ids(workspace_id)]
         terminal = {"completed", "failed", "canceled", "remote_missing"}
         runs.sort(key=lambda run: (run.state.value in terminal, -run.created_at.timestamp()))
-        page = runs[cursor:cursor + limit]
-        return {"items": [_generation_run_response(run, submissions.queue) for run in page],
-                "next_cursor": cursor + limit if cursor + limit < len(runs) else None}
+        start = offset if offset is not None else cursor
+        page = runs[start:start + limit]
+        snapshots = {entry["run_id"]: entry["snapshot"] for entry in submissions.store.for_runs([run.id for run in page])}
+        return {"items": [{**_generation_run_response(run, submissions.queue),
+                           "source": _workspace_run_source(snapshots.get(run.id))} for run in page],
+                "next_cursor": start + limit if start + limit < len(runs) else None,
+                "next_offset": start + limit if start + limit < len(runs) else None}
 
     @app.get(f"{API_PREFIX}/generation-runs/{{run_id}}/artifacts", dependencies=[Depends(require_session)])
     def generation_artifacts(run_id: str) -> dict:
@@ -2097,6 +2140,52 @@ def create_api_runtime(
         except WorkspaceIdempotencyKeyError as exc:
             raise ApiError(422, "invalid_idempotency_key", str(exc)) from exc
 
+    @app.get(f"{API_PREFIX}/workspaces/{{workspace_id}}/versions", dependencies=[Depends(require_session)])
+    def workspace_versions(workspace_id: str, limit: int = Query(default=50, ge=1, le=100),
+                           offset: int = Query(default=0, ge=0),
+                           store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
+        return {"items": store.list_versions(workspace_id, limit=limit, offset=offset)}
+
+    @app.post(f"{API_PREFIX}/workspaces/{{workspace_id}}/versions/{{revision}}/fork",
+              dependencies=[Depends(require_session)], status_code=201)
+    def fork_workspace_version(workspace_id: str, payload: WorkspaceForkRequest,
+                               revision: int = ApiPath(ge=1),
+                               idempotency_key: str = Header(alias="Idempotency-Key"),
+                               store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
+        from .workspace_store import WorkspaceCreateConflictError, WorkspaceIdempotencyKeyError
+        try:
+            return store.fork_version(workspace_id, source_revision=revision, title=payload.title,
+                                     idempotency_key=idempotency_key)
+        except WorkspaceCreateConflictError as exc:
+            raise ApiError(409, exc.code, str(exc)) from exc
+        except WorkspaceIdempotencyKeyError as exc:
+            raise ApiError(422, "invalid_idempotency_key", str(exc)) from exc
+
+    @app.post(f"{API_PREFIX}/workspaces/{{workspace_id}}/restore", dependencies=[Depends(require_session)])
+    def restore_workspace_version(workspace_id: str, payload: WorkspaceRestoreRequest,
+                                  store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
+        return store.restore(workspace_id, expected_revision=payload.revision, source_revision=payload.source_revision)
+
+    @app.get(f"{API_PREFIX}/workspaces/{{workspace_id}}/proposal", dependencies=[Depends(require_session)])
+    def workspace_proposal(workspace_id: str, store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
+        return {"proposal": store.get_proposal(workspace_id)}
+
+    @app.post(f"{API_PREFIX}/workspaces/{{workspace_id}}/proposals/{{proposal_id}}/accept", dependencies=[Depends(require_session)])
+    def accept_workspace_proposal(workspace_id: str, proposal_id: str, payload: WorkspaceDeleteRequest,
+                                 store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
+        return store.accept_proposal(workspace_id, proposal_id, expected_revision=payload.revision)
+
+    @app.delete(f"{API_PREFIX}/workspaces/{{workspace_id}}/proposals/{{proposal_id}}", dependencies=[Depends(require_session)])
+    def discard_workspace_proposal(workspace_id: str, proposal_id: str, payload: WorkspaceDeleteRequest,
+                                  store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
+        store.discard_proposal(workspace_id, proposal_id, expected_revision=payload.revision)
+        return {"ok": True}
+
+    @app.post(f"{API_PREFIX}/workspaces/{{workspace_id}}/unarchive", dependencies=[Depends(require_session)])
+    def unarchive_workspace(workspace_id: str, payload: WorkspaceDeleteRequest,
+                            store: WorkspaceStore = Depends(require_workspace_store)) -> dict:
+        return store.unarchive(workspace_id, expected_revision=payload.revision)
+
     @app.get(f"{API_PREFIX}/workspaces/{{workspace_id}}", dependencies=[Depends(require_session)])
     def get_workspace(
         workspace_id: str,
@@ -2114,6 +2203,8 @@ def create_api_runtime(
         store: WorkspaceStore = Depends(require_workspace_store),
     ) -> dict[str, object]:
         try:
+            if not payload.draft.model_fields_set and "candidate_snapshot" not in payload.model_fields_set:
+                return store.rename(workspace_id, expected_revision=payload.revision, title=payload.title)
             return store.update(
                 workspace_id,
                 expected_revision=payload.revision,
@@ -2173,6 +2264,20 @@ def create_api_runtime(
             return FileResponse(frontend_dist / "index.html")
 
     return ApiRuntime(app=app, bootstrap_token=bootstrap_token)
+
+
+def _workspace_run_source(snapshot: dict | None) -> dict[str, object] | None:
+    if snapshot is None:
+        return None
+    from ..core.seeds import display_seed
+    job = snapshot.get("job") or {}
+    settings = {key: value for key, value in (job.get("generation_params") or {}).items()
+                if key in {"width", "height", "steps", "cfg", "sampler", "scheduler", "seed", "batch_size", "denoise", "clip_skip"}}
+    if isinstance(settings.get("seed"), int):
+        settings["seed"] = display_seed(settings["seed"])
+    return {"workspace_revision": snapshot.get("workspace_revision"),
+            "positive_prompt": job.get("positive_prompt", ""), "negative_prompt": job.get("negative_prompt", ""),
+            "model_profile": job.get("model_profile_id"), "settings": settings}
 
 
 def _generation_run_response(run, queue) -> dict[str, object]:

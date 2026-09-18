@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Literal
 
-from fastapi import Depends, Query, Request, Response
+from fastapi import Depends, Header, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import Field, ValidationError
 from starlette.formparsers import MultiPartException, MultiPartParser
@@ -15,7 +15,8 @@ from starlette.datastructures import UploadFile
 from .conversation import WorkspaceCommand
 from .reference_ingest import IngestRequest, IngestService
 from ..core.requirements import ContractModel, PinRole, Requirements, apply_pin, dump
-from ..core.requirements import PromptEdit, compile_prompt
+from ..core.requirements import PromptEdit, WorkspaceOrigin, compile_prompt
+from .workspace_store import WorkspaceNotFoundError, WorkspaceVersionNotFoundError
 from .models import WorkspaceDraft, WorkbenchGenerationSettings
 from ..storage.reference_examples import (
     ExampleMetadata, ExampleNotes, ExamplePatch, ExampleStore, MAX_IMAGE_BYTES, fail, now,
@@ -216,7 +217,26 @@ def register_reference_routes(app, workspace_db, require_session):
     def get_example(example_id: str):
         return store.get(example_id)
 
-    def create_generation_workspace(run_id, title=None):
+    def verified_workspace_origin(snapshot, run_id):
+        original = snapshot["provenance"]
+        workspace_id = snapshot.get("workspace_id", original.get("workspace_id"))
+        revision = snapshot.get("workspace_revision", original.get("workspace_revision"))
+        if (original.get("workspace_id", workspace_id) != workspace_id
+                or original.get("workspace_revision", revision) != revision):
+            return None
+        try:
+            origin = WorkspaceOrigin(workspace_id=workspace_id, revision=revision, run_id=run_id)
+            parent = app.state.workspace_store.get_version(workspace_id, revision, include_archived=True)
+        except (ValidationError, WorkspaceNotFoundError, WorkspaceVersionNotFoundError):
+            return None
+        compiled = parent["draft"].get("compiled") or {}
+        if (parent["draft"].get("model_profile") != original["model_profile"]
+                or compiled.get("positive") != original["positive"]
+                or compiled.get("negative") != original["negative"]):
+            return None
+        return dump(origin)
+
+    def create_generation_workspace(run_id, title=None, idempotency_key=None):
         service = app.state.submission_service
         entries = service.store.for_runs([run_id]) if service and run_id else []
         if not entries:
@@ -235,24 +255,26 @@ def register_reference_routes(app, workspace_db, require_session):
             requirements = Requirements.model_validate({**dump(requirements), "loras": snapshot["resources"]})
         prompt = PromptEdit(positive=original["positive"], negative=original["negative"])
         draft = WorkspaceDraft(model_profile=model, generation_settings=settings).persistence_payload()
-        title = title or "继续 · " + (requirements.layers.subject.text or original["positive"])[:40]
-        record = app.state.workspace_store.create(title[:200], draft)
-        def populate(draft):
-            draft["requirements"] = dump(requirements)
-            draft["generation_source"] = dict(run_id=run_id, remote_profile_id=run["remote_profile_id"], workflow_profile_id=run["workflow_profile_id"], model_profile=model)
-            draft["compiled"] = compile_prompt(draft, prompt, source="user")
-            return draft
-        return app.state.workspace_store.transform(record["id"], expected_revision=record["revision"], operation=populate)
+        draft["requirements"] = dump(requirements)
+        draft["generation_source"] = dict(run_id=run_id, remote_profile_id=run["remote_profile_id"], workflow_profile_id=run["workflow_profile_id"], model_profile=model)
+        draft["workspace_origin"] = verified_workspace_origin(snapshot, run_id)
+        draft["compiled"] = compile_prompt(draft, prompt, source="user")
+        resolved_title = title or "继续 · " + (requirements.layers.subject.text or original["positive"])[:40]
+        return app.state.workspace_store.create_snapshot(resolved_title[:200], draft,
+            request_identity={"kind": "generation_run", "run_id": run_id, "title": title}, idempotency_key=idempotency_key)
 
     @app.post("/api/v3/generation-runs/{run_id}/workspace", dependencies=dependencies, status_code=201)
-    def continue_generation(run_id: str, payload: ContinueGeneration):
-        return create_generation_workspace(run_id)
+    def continue_generation(run_id: str, payload: ContinueGeneration,
+                            idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
+        return create_generation_workspace(run_id, idempotency_key=idempotency_key)
 
     @app.post(prefix + "/{example_id}/workspace", dependencies=dependencies, status_code=201)
-    def start_workspace(example_id: str, payload: StartExample):
+    def start_workspace(example_id: str, payload: StartExample,
+                        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
         source = store.get(example_id, payload.source_version)
         if payload.mode == "generation":
-            return create_generation_workspace((source.get("provenance") or {}).get("run_id"), "参考 · " + source["title"])
+            return create_generation_workspace((source.get("provenance") or {}).get("run_id"),
+                                               "参考 · " + source["title"], idempotency_key=idempotency_key)
         if payload.mode == "prompt":
             from ..core.runtime_profiles import V3RuntimeProfiles
             original = source.get("provenance") or {}

@@ -51,6 +51,7 @@ def test_empty_controls_keep_historical_fingerprint_and_no_invented_defaults():
     raw = requirement()
     old = deepcopy(raw)
     old.pop("revision")
+    old.pop("prompt_locks", None)
     for key in ("character_tags", "series_tags", "general_tags"):
         old["layers"]["subject"].pop(key)
     old["layers"]["style"].pop("manual_artist_tags")
@@ -278,7 +279,7 @@ def test_llm_layer_updates_cannot_write_mood_or_replace_its_source():
     raw = requirement()
     raw["layers"]["lighting"]["mood"] = {"value": "宁静日常", "source": "extracted", "evidence": "宁静日常"}
     canonical = Requirements.model_validate(raw)
-    with pytest.raises(WorkbenchError, match="控制字段"):
+    with pytest.raises(WorkbenchError, match="不可自动编辑"):
         apply_layer_updates(canonical, ["lighting"], {"lighting": {"text": "日光", "mood": None}})
     updated = apply_layer_updates(canonical, ["lighting"], {"lighting": {"text": "柔和日光"}})
     assert updated.layers.lighting.mood == canonical.layers.lighting.mood

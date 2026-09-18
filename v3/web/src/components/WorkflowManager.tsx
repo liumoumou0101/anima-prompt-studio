@@ -1,8 +1,9 @@
 import {useEffect, useState} from "react";
 import {apiRequest} from "../lib/api";
+import {workflowLabel, workflowName} from "../lib/workflowTargets";
 
 type Asset = {key: string; value: string; template_value?: string; node_type?: string; choices: string[]; mapped: boolean};
-type Item = {workflow_id: string; display_name: string; revision: string; state: string; errors: string[]; assets: Asset[]};
+type Item = {workflow_id: string; display_name: string; revision: string; state: string; errors: string[]; assets: Asset[]; origin?: string; workflow_kind?: string; experimental?: boolean};
 type Report = {remote_profile_id: string; checked_at: number | null; items: Item[]; inspection?: {state: string; error?: string}};
 const labels: Record<string, string> = {ready: "依赖就绪", unchecked: "未检测", stale: "需重新检测", missing_nodes: "缺少节点", invalid_inputs: "资源或参数不匹配", connection_failed: "连接失败", mapping_stale: "映射需确认", disabled: "模板已停用"};
 
@@ -73,13 +74,13 @@ export function WorkflowManager({remoteId, password, passphrase, workflowId, exp
       {report?.items.filter(item => !workflowId || item.workflow_id === workflowId).map(item => {
         const unavailable = busy || checking || ["unchecked", "stale", "connection_failed", "disabled"].includes(item.state);
         return <div key={item.workflow_id} className="workflow-environment-report">
-          <h4>{item.display_name} · {labels[item.state] || item.state}</h4>
+          <h4>{workflowLabel(item, report.items)} · {labels[item.state] || item.state}</h4>
           <p>模板版本：{item.revision.slice(0, 12)}</p>
           {item.errors.length > 0 && <ul>{item.errors.map((message, index) => <li key={index}>{message}</li>)}</ul>}
           {item.assets.map(asset => <label key={asset.key} className="workflow-asset-field">
             <span>{asset.node_type || "模型文件"} · {asset.key}</span>
             <small>模板文件：{asset.template_value ?? asset.value} · {asset.mapped ? "已确认映射" : "沿用模板"}</small>
-            <select aria-label={`${item.display_name} ${asset.key}`} disabled={unavailable || !asset.choices.length} value={mappings[item.workflow_id]?.[asset.key] ?? asset.value} onChange={event => setMappings(current => ({...current, [item.workflow_id]: {...current[item.workflow_id], [asset.key]: event.target.value}}))}>
+            <select aria-label={`${workflowName(item)} ${asset.key}`} disabled={unavailable || !asset.choices.length} value={mappings[item.workflow_id]?.[asset.key] ?? asset.value} onChange={event => setMappings(current => ({...current, [item.workflow_id]: {...current[item.workflow_id], [asset.key]: event.target.value}}))}>
               {!asset.choices.includes(asset.value) && <option value={asset.value}>{asset.value}（未匹配）</option>}
               {asset.choices.map(choice => <option key={choice} value={choice}>{choice}</option>)}
             </select>

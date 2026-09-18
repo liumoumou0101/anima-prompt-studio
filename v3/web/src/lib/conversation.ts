@@ -16,9 +16,10 @@ export interface RequirementLora {
   logical_id: string; file_name: string; weight: number; trigger_words: string[]; required: boolean;
   source: {kind: "user" | "civitai" | "huggingface" | "official" | "run"; model_version_id?: string | null};
 }
-export interface RequirementsEdit {layers: RequirementLayers; loras: RequirementLora[]}
-export interface CompiledPrompt {positive: string; negative: string; compiled_token: string; source: "llm" | "user"}
-export interface ConversationEvent {id: string; delta: string; changed_layers: LayerName[]; warnings: string[]; created_at: string}
+export interface PromptLock {target: "positive" | "negative"; text: string}
+export interface RequirementsEdit {layers: RequirementLayers; loras: RequirementLora[]; prompt_locks?: PromptLock[]}
+export interface CompiledPrompt {positive: string; negative: string; compiled_token: string; source: "llm" | "user"; requirements_synced?: boolean}
+export interface ConversationEvent {id: string; delta: string; changed_layers: LayerName[]; warnings: string[]; created_at: string; before_revision?: number; after_revision?: number}
 export interface ConversationRecord extends WorkspaceRecord {
   draft: WorkspaceRecord["draft"] & {
     mode: Mode; requirements: (RequirementsEdit & {contract: string; revision: number}) | null;
@@ -26,11 +27,17 @@ export interface ConversationRecord extends WorkspaceRecord {
     conversation_events: ConversationEvent[];
     reference_pin?: {example_id: string; source_version: string; role: string} | null;
     generation_source?: {run_id: string; remote_profile_id: string; workflow_profile_id: string; model_profile: string} | null;
+    workspace_origin?: {workspace_id: string; revision: number; run_id?: string | null} | null;
   };
 }
 export interface LocalConversation {
   baseRevision: number; delta: string; mode: Mode; requirements: RequirementsEdit;
   positive: string; negative: string; model: string; settings: WorkbenchGenerationSettings;
+}
+export function localFromRecord(record: ConversationRecord): LocalConversation {
+  return {baseRevision: record.revision, delta: "", requirements: editableRequirements(record), mode: record.draft.mode,
+    positive: record.draft.compiled?.positive || "", negative: record.draft.compiled?.negative || "",
+    model: record.draft.model_profile, settings: record.draft.generation_settings || defaultGenerationSettings()};
 }
 export function emptyRequirements(): RequirementsEdit {
   return {layers: {subject: {text: "", locked: false}, style: {text: "", medium: "", artists: [], locked: false},
@@ -40,7 +47,8 @@ export function emptyRequirements(): RequirementsEdit {
 }
 export function editableRequirements(record: ConversationRecord): RequirementsEdit {
   const requirement = record.draft.requirements;
-  return requirement ? structuredClone({layers: requirement.layers, loras: requirement.loras}) : emptyRequirements();
+  return requirement ? structuredClone({layers: requirement.layers, loras: requirement.loras,
+    ...(requirement.prompt_locks?.length ? {prompt_locks: requirement.prompt_locks} : {})}) : emptyRequirements();
 }
 export function normalizeIdentityTags(values: string[], artist = false): string[] {
   return [...new Set(values.map(value => (artist ? value.trim().replace(/^@+\s*/, "") : value.trim())
@@ -78,10 +86,25 @@ function comparable(value: unknown): string {
     ? Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right))) : item);
 }
 export function hasUnsavedInputs(record: ConversationRecord, local: LocalConversation): boolean {
-  return hasUncompiledInputs(record, local)
+  return hasUnsavedRequirementsOrSettings(record, local)
+    || local.positive !== (record.draft.compiled?.positive || "")
+    || local.negative !== (record.draft.compiled?.negative || "");
+}
+export function hasUnsavedRequirementsOrSettings(record: ConversationRecord, local: LocalConversation): boolean {
+  const normalize = (value: RequirementsEdit) => ({...cleanRequirements(value), prompt_locks: value.prompt_locks || []});
+  return record.draft.model_profile !== local.model || record.draft.mode !== local.mode
+    || comparable(normalize(editableRequirements(record))) !== comparable(normalize(local.requirements))
     || comparable(record.draft.generation_settings || defaultGenerationSettings()) !== comparable(local.settings);
+}
+function semanticRequirements(value: RequirementsEdit): RequirementsEdit {
+  const clean = cleanRequirements(value);
+  delete clean.prompt_locks;
+  for (const layer of Object.values(clean.layers)) delete (layer as {locked?: boolean}).locked;
+  delete (clean.layers.lighting as {include_with_style_pin?: boolean}).include_with_style_pin;
+  delete (clean.layers.composition as {include_with_style_pin?: boolean}).include_with_style_pin;
+  return clean;
 }
 export function hasUncompiledInputs(record: ConversationRecord, local: LocalConversation): boolean {
   return record.draft.model_profile !== local.model || record.draft.mode !== local.mode
-    || comparable(cleanRequirements(editableRequirements(record))) !== comparable(cleanRequirements(local.requirements));
+    || comparable(semanticRequirements(editableRequirements(record))) !== comparable(semanticRequirements(local.requirements));
 }

@@ -63,6 +63,7 @@ def test_manual_prompt_stays_exact_and_subject_updates_preserve_tags():
 def test_old_empty_fields_do_not_invalidate_fingerprint():
     old = dump(Requirements.empty())
     old.pop('revision')
+    old.pop('prompt_locks', None)
     old['layers']['subject'].pop('character_tags')
     old['layers']['subject'].pop('series_tags')
     old['layers']['subject'].pop('general_tags')
