@@ -142,8 +142,18 @@ or expand their costume/appearance unless requested. Prefer descriptions over re
 these tags inside prose. Current manual tags replace previously declared manual tags.
 Keep counts, identities, actions, ownership and local exclusions. A bareheaded left man
 and a hat-wearing right man must NOT cause hat to enter the global negative prompt.
-Current requirements are binding; current compiled text preserves reviewed user edits
-where compatible. Explicit delta can change unlocked requirements. Report conflicts.
+When prompt_authority is visible_prompt, compiled.positive and compiled.negative are
+the user's current visible image description and the authoritative starting point.
+Apply delta to that prompt. Older UNLOCKED requirement prose is context: it must
+not undo manual prompt edits or restore an earlier color, subject, or scene.
+With a nonempty delta, update stale unlocked content in layer_updates to match the
+visible prompt plus the requested edit in this SAME turn; no separate sync is needed.
+Example: requirements say blue coat, compiled says red coat, delta changes only
+lighting: keep red coat in positive and update unlocked subject prose accordingly.
+Locked layers, literal prompt locks, explicit manual tags and the latest delta
+remain constraints; report a real conflict with these rather than silently undoing
+the current prompt. Without visible_prompt authority, requirements are binding
+and compiled preserves compatible reviewed edits. Delta can change unlocked content.
 No invented artists, LoRA names, camera boilerplate or default negative quality tags.
 In EXPANSION, a general request to expand details is NOT permission to set or change
 composition, shot size, camera angle, or artistic style. Preserve these fields exactly,
@@ -245,7 +255,8 @@ class ConversationService:
         messages = [{"role": "system", "content": (SYNC_REQUIREMENTS_SYSTEM if syncing else
                      REWRITE_SYSTEM + SCENE_DESIGN_COMPILER_RULES + rule)},
                     {"role": "user", "content": json.dumps({"requirements": dump(canonical),
-                     "compiled": current_prompt, "delta": dump(request.delta), "mode": draft["mode"]}, ensure_ascii=False)}]
+                     "compiled": current_prompt, "delta": dump(request.delta), "mode": draft["mode"],
+                     **({"prompt_authority": "visible_prompt"} if request.compiled and not syncing else {})}, ensure_ascii=False)}]
         deadline = asyncio.get_running_loop().time() + 120
         for attempt in range(2):
             if disconnected is not None and await disconnected():

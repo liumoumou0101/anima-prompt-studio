@@ -31,13 +31,16 @@ export interface ConversationRecord extends WorkspaceRecord {
   };
 }
 export interface LocalConversation {
+  workflowSnapshotRunId?: string | null;
+  restoredFrom?: string;
   baseRevision: number; delta: string; mode: Mode; requirements: RequirementsEdit;
   positive: string; negative: string; model: string; settings: WorkbenchGenerationSettings;
 }
 export function localFromRecord(record: ConversationRecord): LocalConversation {
   return {baseRevision: record.revision, delta: "", requirements: editableRequirements(record), mode: record.draft.mode,
     positive: record.draft.compiled?.positive || "", negative: record.draft.compiled?.negative || "",
-    model: record.draft.model_profile, settings: record.draft.generation_settings || defaultGenerationSettings()};
+    model: record.draft.model_profile, settings: record.draft.generation_settings || defaultGenerationSettings(),
+    workflowSnapshotRunId: record.draft.generation_source?.run_id || null};
 }
 export function emptyRequirements(): RequirementsEdit {
   return {layers: {subject: {text: "", locked: false}, style: {text: "", medium: "", artists: [], locked: false},

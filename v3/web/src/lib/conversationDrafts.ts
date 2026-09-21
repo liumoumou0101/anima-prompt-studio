@@ -335,7 +335,9 @@ function localConversation(value: unknown): value is LocalConversation {
   if (!object(value) || !Number.isInteger(value.baseRevision) || Number(value.baseRevision) < 1
       || typeof value.delta !== "string" || !["faithful", "expand"].includes(String(value.mode))
       || !requirements(value.requirements) || typeof value.positive !== "string" || typeof value.negative !== "string"
-      || typeof value.model !== "string" || !object(value.settings)) return false;
+      || typeof value.model !== "string" || !object(value.settings)
+      || (value.workflowSnapshotRunId !== undefined && value.workflowSnapshotRunId !== null && typeof value.workflowSnapshotRunId !== "string")
+      || (value.restoredFrom !== undefined && typeof value.restoredFrom !== "string")) return false;
   const settings = value.settings;
   return typeof settings.preset_id === "string" && typeof settings.aspect === "string"
     && typeof settings.width === "number" && typeof settings.height === "number" && typeof settings.steps === "number"

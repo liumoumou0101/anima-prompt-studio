@@ -37,10 +37,13 @@ beforeEach(() => {
       const candidate = structuredClone(workspace.draft);
       candidate.compiled!.positive = "woman, red coat";
       candidate.requirements!.layers.subject.text = "红色外套";
+      candidate.conversation_events = [...candidate.conversation_events, {id: "event", delta: body.delta.text,
+        before_revision: workspace.revision, after_revision: workspace.revision + 1, changed_layers: ["subject"], warnings: [], created_at: "2026-09-18"}];
       if (body.task === "sync_requirements") {candidate.compiled!.requirements_synced = true; candidate.compiled!.positive = body.compiled.positive;}
       proposal = {id: "proposal_ux", workspace_id: workspace.id, base_revision: workspace.revision, draft: candidate,
         changed_layers: ["subject"], warnings: ["只调整服装颜色"], created_at: "2026-09-18"};
-      response = body.preview ? proposal : {...workspace, revision: 4, draft: candidate};
+      if (body.preview) response = proposal;
+      else {workspace = {...workspace, revision: workspace.revision + 1, draft: candidate}; history.unshift(structuredClone(workspace)); proposal = null; response = workspace;}
     } else if (url.endsWith("/proposals/proposal_ux/accept")) {
       workspace = {...workspace, revision: workspace.revision + 1, draft: proposal!.draft as ConversationRecord["draft"]};
       history.unshift(structuredClone(workspace)); proposal = null; response = workspace;
@@ -61,10 +64,26 @@ beforeEach(() => {
   });
 });
 afterEach(() => {cleanup(); vi.restoreAllMocks();});
+function openSection(name: string | RegExp) {
+  const summary = screen.getByText(name, {selector: "summary"});
+  if (!(summary.parentElement as HTMLDetailsElement).open) fireEvent.click(summary);
+}
+async function openRecovery() {
+  if (!screen.queryByRole("button", {name: "找回本地草稿"})) fireEvent.click(screen.getByRole("button", {name: "创作记录"}));
+  fireEvent.click(await screen.findByRole("button", {name: "找回本地草稿"}));
+}
+function legacyProposal() {
+  const candidate = structuredClone(workspace.draft); candidate.compiled!.positive = "woman, red coat";
+  return {id: "proposal_ux", workspace_id: workspace.id, base_revision: workspace.revision, draft: candidate,
+    changed_layers: ["subject"], warnings: [], created_at: "2026-09-18"};
+}
 async function mount() {
   render(<MemoryRouter><ConversationWorkbenchPage /></MemoryRouter>);
   await screen.findByLabelText("正向提示词");
   await screen.findByText("small", {selector: ".conversation-thinking-model"});
+  openSection("更多创作工具");
+  openSection("分层画面要求与锁定");
+  openSection(/^改词模型/);
 }
 it("previews another local draft before restoring it and keeps the displaced edits recoverable", async () => {
   await mount();
@@ -74,17 +93,17 @@ it("previews another local draft before restoring it and keeps the displaced edi
   localStorage.setItem(conversationDraftKey(workspace.id, "closed-window"), JSON.stringify({version: 1,
     workspaceId: workspace.id, tabId: "closed-window", savedAt: Date.now() - 3600000,
     local: {...savedBase, positive: "woman, green coat", delta: "保留花束"}, base: savedBase}));
-  fireEvent.click(screen.getByRole("button", {name: "找回本地草稿"}));
+  await openRecovery();
   const recovery = await screen.findByRole("region", {name: "本地草稿恢复"});
   fireEvent.change(within(recovery).getByLabelText("选择本地草稿"), {target: {value: conversationDraftKey(workspace.id, "closed-window")}});
   expect(within(recovery).getByText("woman, green coat")).toBeVisible();
   expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, yellow coat");
   fireEvent.click(within(recovery).getByRole("button", {name: "恢复到编辑区"}));
   expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, green coat");
-  expect(screen.getByLabelText("继续追加要求")).toHaveValue("保留花束");
+  expect(screen.getByLabelText("这次想怎么改？")).toHaveValue("保留花束");
   expect(workspace.revision).toBe(3);
   expect(calls).toEqual([]);
-  fireEvent.click(screen.getByRole("button", {name: "找回本地草稿"}));
+  await openRecovery();
   const nextRecovery = await screen.findByRole("region", {name: "本地草稿恢复"});
   const select = within(nextRecovery).getByLabelText("选择本地草稿") as HTMLSelectElement;
   const preserved = [...select.options].find(option => option.textContent?.includes("yellow coat"));
@@ -100,7 +119,7 @@ it("keeps the current editor when preserving it before draft recovery fails", as
   localStorage.setItem(conversationDraftKey(workspace.id, "older-window"), JSON.stringify({version: 1,
     workspaceId: workspace.id, tabId: "older-window", savedAt: Date.now() - 3600000,
     local: {...draft.local, positive: "woman, green coat"}, base: draft.base}));
-  fireEvent.click(screen.getByRole("button", {name: "找回本地草稿"}));
+  await openRecovery();
   const recovery = await screen.findByRole("region", {name: "本地草稿恢复"});
   fireEvent.change(within(recovery).getByLabelText("选择本地草稿"), {target: {value: conversationDraftKey(workspace.id, "older-window")}});
   vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {throw new DOMException("quota", "QuotaExceededError");});
@@ -116,7 +135,7 @@ it("requires conflict resolution when a recovered draft was based on an older se
   localStorage.setItem(conversationDraftKey(workspace.id, "older-revision"), JSON.stringify({version: 1,
     workspaceId: workspace.id, tabId: "older-revision", savedAt: Date.now() - 3600000,
     local: {...draft.local, baseRevision: 2, positive: "woman, green coat"}, base: null}));
-  fireEvent.click(screen.getByRole("button", {name: "找回本地草稿"}));
+  await openRecovery();
   const recovery = await screen.findByRole("region", {name: "本地草稿恢复"});
   fireEvent.change(within(recovery).getByLabelText("选择本地草稿"), {target: {value: conversationDraftKey(workspace.id, "older-revision")}});
   fireEvent.click(within(recovery).getByRole("button", {name: "恢复到编辑区"}));
@@ -142,7 +161,7 @@ it("does not overwrite an unreadable local draft during opening and permits expl
   expect(failed).toBe(true);
   expect(localStorage.getItem(key)).toBe(originalDraft);
   expect(screen.getByText(/原草稿未被覆盖/)).toBeVisible();
-  fireEvent.click(screen.getByRole("button", {name: "找回本地草稿"}));
+  await openRecovery();
   const recovery = await screen.findByRole("region", {name: "本地草稿恢复"});
   fireEvent.change(within(recovery).getByLabelText("选择本地草稿"), {target: {value: key}});
   fireEvent.click(within(recovery).getByRole("button", {name: "恢复到编辑区"}));
@@ -175,44 +194,47 @@ it.each(["woman, scarlet coat", "  woman, scarlet coat\n"])("previews Chinese re
 it("does not discard unsent requests when syncing manual prompts", async () => {
   await mount();
   fireEvent.change(screen.getByLabelText("正向提示词"), {target: {value: "woman, scarlet coat"}});
-  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "还有要补充的要求"}});
+  fireEvent.change(screen.getByLabelText("这次想怎么改？"), {target: {value: "还有要补充的要求"}});
   expect(screen.getByRole("button", {name: "按手工提示词同步画面要求"})).toBeDisabled();
 });
-it("shows highlighted candidate changes without replacing current prompt until acceptance", async () => {
+it("applies updates directly while retaining highlighted changes and an undo action", async () => {
   await mount();
-  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "只改红色"}});
+  fireEvent.change(screen.getByLabelText("这次想怎么改？"), {target: {value: "只改红色"}});
   fireEvent.click(screen.getByRole("button", {name: "更新提示词"}));
-  const review = await screen.findByRole("region", {name: "待确认的修改"});
-  expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, blue coat");
-  expect(workspace.revision).toBe(3);
-  expect(review.querySelector(".conversation-diff ins")).toHaveTextContent("red");
-  expect(review.querySelector(".conversation-diff del")).toHaveTextContent("blue");
-  expect(within(review).getByText("只调整服装颜色")).toBeVisible();
-  fireEvent.click(within(review).getByRole("button", {name: "采用修改"}));
   await waitFor(() => expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, red coat"));
+  openSection("查看本次文字变化");
+  expect(document.querySelector(".conversation-diff ins")).toHaveTextContent("red");
+  expect(document.querySelector(".conversation-diff del")).toHaveTextContent("blue");
+  expect(screen.queryByRole("region", {name: "待确认的修改"})).not.toBeInTheDocument();
   expect(workspace.revision).toBe(4);
-  expect(calls.find(call => call.url.endsWith("/turns"))!.body.preview).toBe(true);
+  expect(calls.find(call => call.url.endsWith("/turns"))!.body.preview).toBe(false);
+  fireEvent.click(screen.getByRole("button", {name: "撤销"}));
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, blue coat");
 });
-it("discards a candidate while retaining original prompt and modification request", async () => {
+it("discards a recovered legacy candidate while retaining original prompt and modification request", async () => {
+  proposal = legacyProposal();
   await mount();
-  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "只改红色"}});
-  fireEvent.click(screen.getByRole("button", {name: "更新提示词"}));
+  fireEvent.change(screen.getByLabelText("这次想怎么改？"), {target: {value: "只改红色"}});
+  openSection("上次未处理的提示词草案");
   fireEvent.click(await screen.findByRole("button", {name: "不采用"}));
   await waitFor(() => expect(screen.queryByRole("region", {name: "待确认的修改"})).not.toBeInTheDocument());
   expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, blue coat");
-  expect(screen.getByLabelText("继续追加要求")).toHaveValue("只改红色");
+  expect(screen.getByLabelText("这次想怎么改？")).toHaveValue("只改红色");
   expect(workspace.revision).toBe(3);
 });
-it("restores an earlier saved version into a new revision without deleting later history", async () => {
+it("restores an earlier saved version into the editor without deleting later history", async () => {
   const older = structuredClone(workspace); older.revision = 2; older.draft.compiled!.positive = "woman, green coat";
   history.push(older);
   await mount();
-  fireEvent.click(screen.getByText(/版本历史 · 当前版本/, {selector: "summary"}));
-  const restore = await screen.findByRole("button", {name: "恢复版本 2"});
+  fireEvent.click(screen.getByRole("button", {name: "创作记录"}));
+  const card = (await screen.findByText("woman, green coat")).closest("article")!;
+  const restore = within(card).getByRole("button", {name: "恢复到这里"});
   fireEvent.click(restore);
   await waitFor(() => expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, green coat"));
-  expect(workspace.revision).toBe(4);
-  expect(history.map(item => item.revision)).toEqual([4, 3, 2]);
+  expect(workspace.revision).toBe(3);
+  expect(history.map(item => item.revision)).toEqual([3, 2]);
+  fireEvent.click(screen.getByRole("button", {name: "撤销"}));
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, blue coat");
 });
 it("forks a historical version with an idempotent request and exposes its parent", async () => {
   const older = structuredClone(workspace); older.revision = 2; older.draft.compiled!.positive = "woman, green coat"; history.push(older);
@@ -227,14 +249,15 @@ it("forks a historical version with an idempotent request and exposes its parent
     return original(input, init);
   });
   await mount();
-  fireEvent.click(screen.getByText(/版本历史 · 当前版本/, {selector:"summary"}));
+  fireEvent.click(screen.getByRole("button", {name: "创作记录"}));
+  for (const summary of await screen.findAllByText("更多操作", {selector: "summary"})) fireEvent.click(summary);
   fireEvent.click(await screen.findByRole("button", {name:"从版本 2 另开会话"}));
   await screen.findByRole("heading", {name:"历史分支", level:1});
   expect(forkKey).not.toBe("");
   expect(workspace.revision).toBe(3);
   expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, green coat");
   expect(screen.getByRole("button", {name:"打开来源会话"})).toBeEnabled();
-  expect(screen.getByText(/分支来自版本 2/)).toBeVisible();
+  expect(screen.getByLabelText("打开已有会话")).toHaveValue("workspace_branch");
 });
 it("retries failed requirement sync with the same task instead of rewriting English", async () => {
   const original = vi.mocked(fetch).getMockImplementation()!;
@@ -254,7 +277,7 @@ it("retries failed requirement sync with the same task instead of rewriting Engl
   await screen.findByRole("region", {name:"待确认的修改"});
   expect(tasks).toEqual(["sync_requirements", "sync_requirements"]);
 });
-it("recovers a server-created candidate when its response is lost", async () => {
+it("recovers an applied server update when its response is lost without submitting another request", async () => {
   const original = vi.mocked(fetch).getMockImplementation()!;
   vi.mocked(fetch).mockImplementation(async (input, init) => {
     const response = await original(input, init);
@@ -262,10 +285,11 @@ it("recovers a server-created candidate when its response is lost", async () => 
     return response;
   });
   await mount();
-  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "改红色"}});
+  fireEvent.change(screen.getByLabelText("这次想怎么改？"), {target: {value: "改红色"}});
   fireEvent.click(screen.getByRole("button", {name: "更新提示词"}));
-  expect(await screen.findByRole("region", {name: "待确认的修改"})).toBeVisible();
-  expect(workspace.revision).toBe(3);
+  await waitFor(() => expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, red coat"));
+  expect(screen.queryByRole("region", {name: "待确认的修改"})).not.toBeInTheDocument();
+  expect(workspace.revision).toBe(4);
   expect(calls.filter(call => call.url.endsWith("/turns"))).toHaveLength(1);
 });
 it("merges edits to different fields after a revision conflict", async () => {
@@ -278,15 +302,15 @@ it("merges edits to different fields after a revision conflict", async () => {
     }
     return original(input, init);
   });
-  await mount(); fireEvent.click(screen.getByRole("tab", {name: "画面要求"}));
+  await mount(); openSection("分层画面要求与锁定");
   fireEvent.change(screen.getByLabelText("构图要求"), {target: {value: "居中"}});
   fireEvent.click(screen.getByRole("button", {name: "保存当前版本"}));
   fireEvent.click(await screen.findByRole("button", {name: "合并双方修改"}));
   expect(screen.getByLabelText("光影要求")).toHaveValue("清晨");
   expect(screen.getByLabelText("构图要求")).toHaveValue("居中");
-  expect(screen.getByRole("button", {name: "撤销编辑"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "撤销"})).toBeDisabled();
   fireEvent.change(screen.getByLabelText("构图要求"), {target: {value: "靠左"}});
-  fireEvent.click(screen.getByRole("button", {name: "撤销编辑"}));
+  fireEvent.click(screen.getByRole("button", {name: "撤销"}));
   expect(screen.getByLabelText("光影要求")).toHaveValue("清晨");
   expect(screen.getByLabelText("构图要求")).toHaveValue("居中");
   fireEvent.click(screen.getByRole("button", {name: "保存当前版本"}));
@@ -295,11 +319,12 @@ it("merges edits to different fields after a revision conflict", async () => {
   expect(workspace.draft.requirements!.layers.composition.text).toBe("居中");
 });
 it("recovers a pending candidate after reopening without replacing current prompt", async () => {
+  proposal = legacyProposal();
   await mount();
-  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "改红色"}});
-  fireEvent.click(screen.getByRole("button", {name: "更新提示词"}));
+  openSection("上次未处理的提示词草案");
   await screen.findByRole("region", {name: "待确认的修改"});
   cleanup(); await mount();
+  openSection("上次未处理的提示词草案");
   await screen.findByRole("region", {name: "待确认的修改"});
   expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, blue coat");
   fireEvent.click(screen.getByRole("button", {name: "采用修改"}));
@@ -308,9 +333,9 @@ it("recovers a pending candidate after reopening without replacing current promp
 it("can undo and redo a manual prompt edit before saving", async () => {
   await mount();
   fireEvent.change(screen.getByLabelText("正向提示词"), {target: {value: "woman, white coat"}});
-  fireEvent.click(screen.getByRole("button", {name: "撤销编辑"}));
+  fireEvent.click(screen.getByRole("button", {name: "撤销"}));
   expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, blue coat");
-  fireEvent.click(screen.getByRole("button", {name: "重做编辑"}));
+  fireEvent.click(screen.getByRole("button", {name: "重做"}));
   expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, white coat");
   expect(calls).toHaveLength(0);
 });
@@ -321,18 +346,19 @@ it("keeps an unpersisted modification request in the current conversation", asyn
     ? new Response(JSON.stringify({items: [{id: "run_previous", state: "completed", artifact_count: 0, status_message: "完成", created_at: "2026-09-18"}]}))
     : originalFetch(input, init));
   await mount();
+  openSection("更多图片操作");
   await screen.findByRole("button", {name: "沿用本次条件，新建会话"});
   const originalSetItem = Storage.prototype.setItem;
   vi.spyOn(Storage.prototype, "setItem").mockImplementation(function(this: Storage, key, value) {
     if (this === localStorage && key.startsWith("anima-conversation-draft:")) throw new DOMException("full", "QuotaExceededError");
     originalSetItem.call(this, key, value);
   });
-  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "这段意见还没有保存"}});
+  fireEvent.change(screen.getByLabelText("这次想怎么改？"), {target: {value: "这段意见还没有保存"}});
   expect(screen.getByRole("alert")).toHaveTextContent("当前草稿无法保留");
   expect(screen.getByRole("button", {name: "新会话"})).toBeDisabled();
   expect(screen.getByLabelText("打开已有会话")).toBeDisabled();
   expect(screen.getByRole("button", {name: "沿用本次条件，新建会话"})).toBeDisabled();
-  expect(screen.getByLabelText("继续追加要求")).toHaveValue("这段意见还没有保存");
+  expect(screen.getByLabelText("这次想怎么改？")).toHaveValue("这段意见还没有保存");
 });
 
 it("opens a linked conversation when persistent storage access is denied", async () => {
@@ -388,13 +414,16 @@ it("blocks accepting an outdated candidate while keeping it available to discard
   expect(workspace.revision).toBe(3);
 });
 
-it("blocks history restoration while an unsent modification request is present", async () => {
-  const older = structuredClone(workspace); older.revision = 2; history.push(older);
+it("restores history with an unsent request and recovers that request through undo", async () => {
+  const older = structuredClone(workspace); older.revision = 2; older.draft.compiled!.positive = "woman, green coat"; history.push(older);
   await mount();
-  fireEvent.click(screen.getByText(/版本历史 · 当前版本/, {selector: "summary"}));
-  await screen.findByRole("button", {name: "恢复版本 2"});
-  fireEvent.change(screen.getByLabelText("继续追加要求"), {target: {value: "保留这段未发送意见"}});
-  expect(screen.getByRole("button", {name: "恢复版本 2"})).toBeDisabled();
-  expect(screen.getByLabelText("继续追加要求")).toHaveValue("保留这段未发送意见");
+  fireEvent.change(screen.getByLabelText("这次想怎么改？"), {target: {value: "保留这段未发送意见"}});
+  fireEvent.click(screen.getByRole("button", {name: "创作记录"}));
+  const card = (await screen.findByText("woman, green coat")).closest("article")!;
+  fireEvent.click(within(card).getByRole("button", {name: "恢复到这里"}));
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, green coat");
+  fireEvent.click(screen.getByRole("button", {name: "撤销"}));
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, blue coat");
+  expect(screen.getByLabelText("这次想怎么改？")).toHaveValue("保留这段未发送意见");
   expect(workspace.revision).toBe(3);
 });

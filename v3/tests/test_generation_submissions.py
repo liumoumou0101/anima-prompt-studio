@@ -64,6 +64,7 @@ def test_large_seed_digest_keeps_legacy_receipt_identity():
     seed = 8798399215689017476
     request = payload(settings={"seed": str(seed)})
     legacy = request.model_dump(mode="json", by_alias=True)
+    legacy.pop("use_current_prompt", None)
     legacy["settings"]["seed"] = seed
     assert payload_digest(request, "direct") == digest({"endpoint": "direct", "payload": legacy})
     assert payload_digest(request, "direct") == payload_digest(payload(settings={"seed": seed}), "direct")

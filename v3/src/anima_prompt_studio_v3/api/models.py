@@ -434,6 +434,7 @@ class GenerationSubmitRequest(GenerationBridgePreviewRequest, SubmissionFields):
 
 
 class DirectPromptSubmitRequest(SubmissionFields):
+    use_current_prompt: bool = False
     workspace_id: str | None = Field(default=None, pattern=r"^workspace_[A-Za-z0-9]+$")
     workspace_revision: int | None = Field(default=None, ge=1)
     positive_prompt: str = Field(min_length=1, max_length=20_000)
@@ -443,6 +444,12 @@ class DirectPromptSubmitRequest(SubmissionFields):
     settings: GenerationBridgeSettings = Field(default_factory=GenerationBridgeSettings)
     remote_profile_id: str = Field(min_length=1, max_length=200)
     workflow_profile_id: str = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_current_prompt(self):
+        if self.use_current_prompt and self.submission_kind != "conversational":
+            raise ValueError("使用当前提示词需要绑定对话工作台。")
+        return self
 
 
 class ArtistComparisonRequest(GenerationBridgePreviewRequest):

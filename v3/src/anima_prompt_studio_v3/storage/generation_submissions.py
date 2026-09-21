@@ -60,7 +60,7 @@ class SubmissionStore:
         return [row["run_id"] for row in rows]
 
     def accept(self, *, submission_id, key, payload_hash, run_id, snapshot, response,
-               workspace_id=None, revision=None, token=None, prompt=None):
+               workspace_id=None, revision=None, token=None, prompt=None, use_current_prompt=False):
         with self.workspaces._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             old = db.execute("SELECT * FROM generation_submissions WHERE idempotency_key=?", (key,)).fetchone()
@@ -76,10 +76,14 @@ class SubmissionStore:
                     raise WorkspaceRevisionConflictError(row["revision"])
                 draft = json.loads(row["draft_json"])
                 compiled = draft.get("compiled")
-                if not compiled or compiled["compiled_token"] != token or compile_state(draft) != "fresh":
+                fresh = compile_state(draft) == "fresh"
+                if not compiled or compiled["compiled_token"] != token or (not use_current_prompt and not fresh):
                     raise WorkbenchError("stale_compiled_prompt", "要求或编译版本已变化，请重新编译。")
                 accepted_revision = revision
-                if any(compiled[name] != value for name, value in dump(prompt).items()):
+                # Explicit generation uses reviewed English even when semantic
+                # requirements/model changed. Rebind it only inside this CAS,
+                # after resource resolution; do not call the language model.
+                if not fresh or any(compiled[name] != value for name, value in dump(prompt).items()):
                     draft["compiled"] = compile_prompt(draft, prompt, source="user")
                     accepted_revision += 1
                     self.workspaces._save_revision(db, row, title=row["title"],

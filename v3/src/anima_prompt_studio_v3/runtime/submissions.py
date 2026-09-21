@@ -21,6 +21,10 @@ from ..core.model_versions import matches_model_declaration
 
 def payload_digest(payload, endpoint):
     data = payload.model_dump(mode="json", by_alias=True)
+    # The opt-in was absent in historical direct submission receipts. Preserve
+    # their identity, including clients that explicitly send the false default.
+    if not data.get("use_current_prompt"):
+        data.pop("use_current_prompt", None)
     # Keep the historical integer canonical form across browser string transport.
     # Existing receipts must remain replayable after the precision fix.
     if hasattr(payload, "settings") and "settings" in data:
@@ -45,6 +49,9 @@ class SubmissionService:
 
     def submit(self, payload, key, endpoint, prepare, *, expected_snapshot=None):
         started = time.monotonic()
+        use_current_prompt = getattr(payload, "use_current_prompt", False)
+        if use_current_prompt and (endpoint != "direct" or payload.submission_kind != "conversational"):
+            raise WorkbenchError("invalid_request", "使用当前提示词仅适用于对话工作台的英文直出。")
         key = key.strip()
         if not key or len(key) > 256:
             raise WorkbenchError("invalid_request", "幂等键必须是 1–256 个字符。")
@@ -74,9 +81,9 @@ class SubmissionService:
                 raise WorkspaceRevisionConflictError(workspace["revision"])
             draft = workspace["draft"]
             if (not draft["compiled"] or draft["compiled"]["compiled_token"] != payload.compiled_token
-                    or compile_state(draft) != "fresh"):
+                    or (not use_current_prompt and compile_state(draft) != "fresh")):
                 raise WorkbenchError("stale_compiled_prompt", "要求或编译版本已变化，请重新编译。")
-            resources = [RequirementLora.model_validate(item) for item in draft["requirements"]["loras"]]
+            resources = [RequirementLora.model_validate(item) for item in (draft.get("requirements") or {}).get("loras", [])]
         elif reference and "lora_selection" not in payload.model_fields_set:
             resources = [RequirementLora.model_validate(item) for item in reference["requirements"]["loras"] if item["required"]]
         else:
@@ -113,6 +120,11 @@ class SubmissionService:
             frozen = run.request_json.get("workflow_snapshot")
             if not frozen:
                 raise WorkbenchError("workflow_snapshot_missing", "原任务没有可用工作流快照。")
+            source_model = (run.request_json.get("prompt_job") or {}).get("model_profile_id")
+            if (run.remote_profile_id != payload.remote_profile_id
+                    or run.workflow_profile_id != payload.workflow_profile_id
+                    or source_model != prepared.job.model_profile_id):
+                raise WorkbenchError("incompatible_workflow", "原图工作流快照与当前模型或执行目标不一致，请选择当前工作流后重试。")
         resolution_started = time.monotonic()
         prepared, target, resolution = self.queue.plan(prepared, payload.remote_profile_id,
                                                       payload.workflow_profile_id, resources, frozen)
@@ -168,6 +180,7 @@ class SubmissionService:
                                      workspace_id=workspace["id"] if workspace else None,
                                      revision=payload.workspace_revision if workspace else None,
                                      token=payload.compiled_token if workspace else None,
+                                     use_current_prompt=use_current_prompt,
                                      prompt=PromptEdit(positive=prepared.job.positive_prompt, negative=prepared.job.negative_prompt))
         try:
             entry = self.queue.accept_durable(

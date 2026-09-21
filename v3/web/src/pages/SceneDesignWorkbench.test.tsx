@@ -44,7 +44,8 @@ beforeEach(() => {
       if (failCompilation) return new Response(JSON.stringify({error: {code: "llm_generation_failed", message: "这次整理失败"}}), {status: 502});
       candidate = {...workspace.draft, compile_state: "fresh",
         compiled: {positive: "compiled scene intent", negative: body.compiled?.negative || "", compiled_token: "cmp_scene_updated", source: "llm"}};
-      response = {id: "proposal_scene", workspace_id: workspace.id, base_revision: workspace.revision, draft: candidate, changed_layers: [], warnings: [], created_at: "2026-09-18"};
+      if (body.preview) response = {id: "proposal_scene", workspace_id: workspace.id, base_revision: workspace.revision, draft: candidate, changed_layers: [], warnings: [], created_at: "2026-09-18"};
+      else {workspace = {...workspace, revision: workspace.revision + 1, draft: candidate}; response = workspace;}
     } else if (url.endsWith("/proposals/proposal_scene/accept")) {
       workspace = {...workspace, revision: workspace.revision + 1, draft: candidate};
       response = workspace;
@@ -56,6 +57,7 @@ afterEach(() => {cleanup(); vi.restoreAllMocks();});
 function draft(): LocalConversation {return readConversationDraft("workspace_scene")!.local!;}
 async function mount() {
   const view = render(<MemoryRouter><ConversationWorkbenchPage /></MemoryRouter>);
+  fireEvent.click(await screen.findByText("更多创作工具", {selector: "summary"}));
   fireEvent.click(await screen.findByText("角色、画师与画面设计", {selector: "summary"}));
   await screen.findByRole("region", {name: "画面设计辅助"});
   await waitFor(() => expect(screen.getByRole("combobox", {name: "景别"})).toBeEnabled());
@@ -91,12 +93,10 @@ it("compiles an otherwise empty draft only after the explicit update action", as
   expect(screen.getByRole("button", {name: "更新提示词"})).toBeEnabled();
   expect(writes).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", {name: "更新提示词"}));
-  await screen.findByRole("region", {name: "待确认的修改"});
-  expect(screen.getByLabelText("正向提示词")).toHaveValue("");
+  await waitFor(() => expect(screen.getByLabelText("正向提示词")).toHaveValue("compiled scene intent"));
+  expect(screen.queryByRole("region", {name: "待确认的修改"})).not.toBeInTheDocument();
   expect(writes.map(item => item.url)).toEqual(["/api/v3/workspaces/workspace_scene", "/api/v3/workbench/turns"]);
   expect(writes[1].body).toMatchObject({revision: 2, delta: {text: ""}});
-  fireEvent.click(screen.getByRole("button", {name: "采用修改"}));
-  await waitFor(() => expect(screen.getByLabelText("正向提示词")).toHaveValue("compiled scene intent"));
   expect(draft().requirements.layers.lighting.mood).toEqual({value: "宁静日常", source: "user"});
   expect(screen.getByLabelText("负向提示词")).toHaveValue("");
 });
