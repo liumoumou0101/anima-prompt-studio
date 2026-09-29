@@ -1,0 +1,106 @@
+.personal-tags-page{padding:clamp(16px,2vw,28px);color:var(--text);min-width:0;max-width:1800px;margin:0 auto}
+.personal-tags-page *{box-sizing:border-box}
+.personal-tags-page button,.personal-tags-page input,.personal-tags-page textarea,.personal-tags-page select{font:inherit}
+.personal-tags-page button{cursor:pointer}
+.personal-tags-page button:disabled{cursor:not-allowed;opacity:.55}
+.personal-tags-page :is(button,input,textarea,select,summary):focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.personal-tags-page .personal-tags-heading,.personal-tags-page .personal-tags-tabs,.personal-tags-page .personal-tags-top-actions,.personal-tags-page .personal-tags-search,.personal-tags-page .personal-tags-result-meta,.personal-tags-page .personal-tags-pagination,.personal-tags-page .personal-tags-panel>header,.personal-tags-page .personal-tags-editor>header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.personal-tags-page .personal-tags-heading{align-items:flex-start;margin-bottom:15px;flex-wrap:wrap}
+.personal-tags-page .personal-tags-heading h1{font-size:clamp(24px,2vw,31px);line-height:1.2;margin:4px 0}
+.personal-tags-page .personal-tags-heading p{margin:0;color:var(--muted)}
+.personal-tags-page .personal-tags-top-actions{flex-wrap:wrap}
+.personal-tags-page .personal-tags-top-actions button,.personal-tags-page .personal-tags-card-actions button,.personal-tags-page .personal-tags-editor-actions button,.personal-tags-page .personal-tags-combinations button,.personal-tags-page .personal-tags-preview button,.personal-tags-page .personal-tags-bulk button,.personal-tags-page .personal-tags-pagination button,.personal-tags-page .personal-tags-dialog-actions button{display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px solid var(--line-bright);background:var(--panel-raised);color:var(--text);border-radius:6px;padding:7px 10px;min-width:0;align-self:auto}
+.personal-tags-page .personal-tags-top-actions .button--primary,.personal-tags-page .personal-tags-editor-actions .button--primary,.personal-tags-page .personal-tags-dialog-actions .button--primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.personal-tags-page .personal-tags-tabs{justify-content:flex-start;border-bottom:1px solid var(--line);margin-bottom:15px;flex-wrap:wrap}
+.personal-tags-page .personal-tags-tabs button{border:0;border-bottom:3px solid transparent;background:transparent;color:var(--muted);padding:10px 14px}
+.personal-tags-page .personal-tags-tabs button.is-active{color:var(--accent);border-bottom-color:var(--accent);font-weight:700}
+.personal-tags-page .personal-tags-tabs span{margin-left:auto;color:var(--muted);font-size:.88rem}
+.personal-tags-page .personal-tags-layout{display:grid;grid-template-columns:minmax(180px,20%) minmax(350px,1fr) minmax(280px,34%);gap:12px;align-items:start;min-width:0}
+.personal-tags-page .personal-tags-layout.is-managing{grid-template-columns:minmax(180px,20%) minmax(360px,1fr) minmax(280px,29%)}
+.personal-tags-page .personal-tags-panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0}
+.personal-tags-page .personal-tags-panel h2{font-size:1.1rem;margin:0 0 12px}
+.personal-tags-page .personal-tags-categories>label{display:flex;gap:6px;margin-top:12px;color:var(--muted);font-size:.9rem}
+.personal-tags-page .personal-tags-categories>button{margin-top:12px;color:var(--accent);border:0;background:transparent;padding:5px}
+.personal-tags-page .personal-tags-categories nav>button{width:100%;text-align:left;border:0;background:transparent;padding:7px;border-radius:5px}
+.personal-tags-page .personal-tags-categories nav>button.is-selected,.personal-tags-page .personal-tags-category-row.is-selected{background:var(--accent-soft);color:var(--accent)}
+.personal-tags-page .personal-tags-categories ul{list-style:none;margin:0;padding:0}
+.personal-tags-page .personal-tags-category-row{display:flex;align-items:center;border-radius:5px;min-width:0}
+.personal-tags-page .personal-tags-category-row button{border:0;background:transparent;color:inherit;padding:6px 3px;min-width:24px}
+.personal-tags-page .personal-tags-category-row button:last-child{display:flex;align-items:center;gap:7px;flex:1;text-align:left;min-width:0;overflow-wrap:anywhere}
+.personal-tags-page .personal-tags-tree-spacer{width:24px;flex:none}
+.personal-tags-page .personal-tags-search{align-items:end;justify-content:stretch;margin-bottom:10px}
+.personal-tags-page .personal-tags-search label:first-child{flex:1}
+.personal-tags-page .personal-tags-search label{min-width:0;font-size:.82rem;color:var(--muted)}
+.personal-tags-page .personal-tags-search input,.personal-tags-page .personal-tags-search select,.personal-tags-page .personal-tags-editor input:not([type=checkbox]),.personal-tags-page .personal-tags-editor textarea,.personal-tags-page .personal-tags-editor select,.personal-tags-page .personal-tags-combinations input,.personal-tags-page .personal-tags-combinations select,.personal-tags-page .personal-tags-weight input,.personal-tags-page .personal-tags-bulk select{width:100%;border:1px solid var(--line-bright);background:var(--input-bg);color:var(--text);border-radius:5px;padding:8px;min-width:0}
+.personal-tags-page .personal-tags-result-meta{color:var(--muted);font-size:.88rem;flex-wrap:wrap;margin:10px 0}
+.personal-tags-page .personal-tags-result-meta button{border:0;color:var(--accent);background:transparent}
+.personal-tags-page .personal-tags-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.personal-tags-page .personal-tags-card{border:1px solid var(--line);border-radius:6px;background:var(--panel-raised);padding:11px;min-width:0}
+.personal-tags-page .personal-tags-card.is-selected{border-color:var(--accent);background:var(--accent-soft)}
+.personal-tags-page .personal-tags-card>div:first-child{display:flex;gap:5px;align-items:center;justify-content:space-between}
+.personal-tags-page .personal-tags-card strong,.personal-tags-page .personal-tags-card p{overflow-wrap:anywhere;white-space:pre-wrap}
+.personal-tags-page .personal-tags-card p{font-size:.85rem;color:var(--muted);min-height:2em;margin:5px 0 10px;max-height:5em;overflow:auto}
+.personal-tags-page .personal-tags-kind{font-size:.7rem;color:var(--accent);background:var(--accent-soft);padding:2px 4px;border-radius:3px}
+.personal-tags-page .personal-tags-card-actions{display:flex;flex-wrap:wrap;gap:4px}
+.personal-tags-page .personal-tags-card-actions button{font-size:.76rem;padding:4px 6px}
+.personal-tags-page .personal-tags-pagination{justify-content:center;margin-top:14px;font-size:.85rem;color:var(--muted)}
+.personal-tags-page .personal-tags-empty{color:var(--muted);padding:40px 8px;text-align:center}
+.personal-tags-page .personal-tags-composition>header h2{margin:0}
+.personal-tags-page .personal-tags-composition>header button{border:0;background:transparent;color:var(--accent)}
+.personal-tags-page .personal-tags-side h3,.personal-tags-page .personal-tags-preview h3,.personal-tags-page .personal-tags-combinations h3{font-size:1rem;margin:14px 0 8px}
+.personal-tags-page .personal-tags-side ol{list-style:none;padding:0;margin:0;border:1px solid var(--line);border-radius:5px}
+.personal-tags-page .personal-tags-side li{padding:8px;border-bottom:1px solid var(--line);min-width:0}
+.personal-tags-page .personal-tags-side li:last-child{border:0}
+.personal-tags-page .personal-tags-side li>div:first-child{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}
+.personal-tags-page .personal-tags-side small{color:var(--muted);white-space:pre-wrap;max-height:4em;overflow:auto}
+.personal-tags-page .personal-tags-item-actions{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-top:5px}
+.personal-tags-page .personal-tags-item-actions button{border:1px solid var(--line);background:var(--panel-raised);color:var(--text);border-radius:4px;min-height:28px}
+.personal-tags-page .personal-tags-weight{display:flex;align-items:center;gap:4px;font-size:.75rem;color:var(--muted);max-width:150px}
+.personal-tags-page .personal-tags-weight input{width:65px;padding:4px}
+.personal-tags-page .personal-tags-weight small{color:var(--danger)}
+.personal-tags-page .personal-tags-preview{border-top:1px solid var(--line);margin-top:14px}
+.personal-tags-page .personal-tags-preview label{display:block;font-size:.82rem;color:var(--muted);margin:9px 0 4px}
+.personal-tags-page .personal-tags-preview pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--input-bg);border:1px solid var(--line);border-radius:5px;color:var(--text);padding:9px;max-height:160px;overflow:auto;font:inherit;margin:4px 0}
+.personal-tags-page .personal-tags-preview button{margin:4px 5px 4px 0}
+.personal-tags-page .personal-tags-warning{color:var(--amber);background:var(--amber-soft);border-radius:4px;padding:7px;overflow-wrap:anywhere}
+.personal-tags-page .personal-tags-combinations{border-top:1px solid var(--line);margin-top:13px}
+.personal-tags-page .personal-tags-combinations label,.personal-tags-page .personal-tags-editor>label{display:block;margin:10px 0;font-size:.86rem}
+.personal-tags-page .personal-tags-combinations label :is(input,select),.personal-tags-page .personal-tags-editor>label :is(input,textarea,select){display:block;margin-top:4px}
+.personal-tags-page .personal-tags-combinations>div{display:flex;gap:5px;flex-wrap:wrap}
+.personal-tags-page .personal-tags-manager{min-width:0}
+.personal-tags-page .personal-tags-table-wrap{overflow-x:auto}
+.personal-tags-page .personal-tags-manager table{border-collapse:collapse;width:100%;font-size:.84rem}
+.personal-tags-page .personal-tags-manager th,.personal-tags-page .personal-tags-manager td{padding:9px 6px;border-bottom:1px solid var(--line);text-align:left;max-width:230px}
+.personal-tags-page .personal-tags-manager th{background:var(--panel-raised);white-space:nowrap}
+.personal-tags-page .personal-tags-content-cell{white-space:pre-wrap;overflow-wrap:anywhere;max-height:4em;overflow:hidden}
+.personal-tags-page .personal-tags-bulk{border-top:1px solid var(--line);padding-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.personal-tags-page .personal-tags-bulk label{max-width:170px;font-size:.8rem}
+.personal-tags-page .personal-tags-editor-column{min-height:200px}
+.personal-tags-page .personal-tags-editor>header{align-items:start}
+.personal-tags-page .personal-tags-editor>header button{border:0;background:transparent;font-size:1.4rem}
+.personal-tags-page .personal-tags-editor textarea{resize:vertical;white-space:pre-wrap}
+.personal-tags-page .personal-tags-editor fieldset{border:1px solid var(--line);border-radius:5px;padding:8px;margin:10px 0}
+.personal-tags-page .personal-tags-editor fieldset legend{font-size:.86rem}
+.personal-tags-page .personal-tags-alias{display:flex;gap:5px;margin:4px 0}
+.personal-tags-page .personal-tags-alias button,.personal-tags-page .personal-tags-editor fieldset>button{border:1px solid var(--line);background:var(--panel-raised);color:var(--text);border-radius:4px}
+.personal-tags-page .personal-tags-editor pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto}
+.personal-tags-page .personal-tags-similar{background:var(--amber-soft);padding:8px;border-radius:5px;overflow-wrap:anywhere}
+.personal-tags-page .personal-tags-editor-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.personal-tags-page .personal-tags-selection-summary{border-top:1px solid var(--line);padding-top:10px;font-size:.83rem;color:var(--muted)}
+.personal-tags-page .personal-tags-selection-summary button{border:0;background:transparent;color:var(--accent)}
+.personal-tags-page .personal-tags-message{color:var(--accent);padding:8px}
+.personal-tags-page .personal-tags-compact-toggle{display:none}
+.personal-tags-page .personal-tags-scrim{position:fixed;inset:0;background:var(--scrim);z-index:1000;display:grid;place-items:center;padding:16px}
+.personal-tags-page .personal-tags-dialog{width:min(620px,100%);max-height:min(85vh,850px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;box-shadow:0 10px 35px var(--shadow-color)}
+.personal-tags-page .personal-tags-dialog>header{display:flex;align-items:center;justify-content:space-between}
+.personal-tags-page .personal-tags-dialog h2{margin:0 0 10px}
+.personal-tags-page .personal-tags-dialog>header button{border:0;background:transparent;font-size:1.4rem}
+.personal-tags-page .personal-tags-dialog>label{display:block;margin:12px 0}
+.personal-tags-page .personal-tags-dialog dl{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.personal-tags-page .personal-tags-dialog dl div{border:1px solid var(--line);padding:6px;border-radius:4px}
+.personal-tags-page .personal-tags-dialog dd{margin:0;font-weight:700}
+.personal-tags-page .personal-tags-dialog fieldset label{display:block;margin:6px 0}
+.personal-tags-page .personal-tags-dialog-actions{display:flex;gap:8px;justify-content:end;margin-top:16px}
+@media(max-width:1220px){.personal-tags-page .personal-tags-layout,.personal-tags-page .personal-tags-layout.is-managing{grid-template-columns:minmax(170px,25%) minmax(0,1fr)}.personal-tags-page .personal-tags-composition-column,.personal-tags-page .personal-tags-editor-column{grid-column:1/-1}.personal-tags-page .personal-tags-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.personal-tags-page .personal-tags-layout,.personal-tags-page .personal-tags-layout.is-managing{display:block}.personal-tags-page .personal-tags-panel,.personal-tags-page .personal-tags-composition-column{margin-bottom:10px}.personal-tags-page .personal-tags-categories nav{max-height:220px;overflow:auto}.personal-tags-page .personal-tags-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.personal-tags-page .personal-tags-compact-toggle{display:block;width:100%;padding:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);text-align:left}.personal-tags-page .personal-tags-composition-column>div{display:none}.personal-tags-page .personal-tags-composition-column>div.is-open{display:block}.personal-tags-page .personal-tags-search{flex-wrap:wrap}.personal-tags-page .personal-tags-search label:first-child{flex-basis:100%}}
+@media(max-width:450px){.personal-tags-page .personal-tags-cards{grid-template-columns:1fr}.personal-tags-page .personal-tags-dialog dl{grid-template-columns:repeat(2,1fr)}}
