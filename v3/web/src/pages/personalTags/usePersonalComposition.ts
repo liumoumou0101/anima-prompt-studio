@@ -138,7 +138,7 @@ export function usePersonalComposition(): PersonalComposition {
         } else {
           writeCache(itemsRef.current, server.revision);
           if (mounted.current) updateSaveState("dirty");
-          if (generation.current !== before) void save();
+          void save();
         }
       } else {
         itemsRef.current = server.items;

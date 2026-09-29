@@ -35,6 +35,23 @@ it("restores_unsaved_composition_after_reload", async () => {
   second.unmount();
 });
 
+it("persists_a_restored_dirty_draft_without_another_edit", async () => {
+  const cacheKey = "anima-personal-composition-draft:v1";
+  const recovered = [entry("recovered")];
+  localStorage.setItem(cacheKey, JSON.stringify({version: 1, baseRevision: 2, items: recovered}));
+  const pending = deferred<DraftRecord>();
+  vi.mocked(personalTagsApi.getDraft).mockResolvedValue(draft([], 2));
+  vi.mocked(personalTagsApi.saveDraft).mockReturnValue(pending.promise);
+
+  const {result} = renderHook(() => usePersonalComposition());
+  expect(result.current.items).toEqual(recovered);
+  await waitFor(() => expect(personalTagsApi.saveDraft).toHaveBeenCalledWith(recovered, 2));
+  expect(localStorage.getItem(cacheKey)).toContain("recovered");
+  await act(async () => pending.resolve(draft(recovered, 3)));
+  await waitFor(() => expect(result.current.saveState).toBe("saved"));
+  expect(localStorage.getItem(cacheKey)).toBeNull();
+});
+
 it("serializes_saves_and_preserves_draft_on_conflict", async () => {
   const firstSave = deferred<DraftRecord>();
   vi.mocked(personalTagsApi.getDraft).mockResolvedValue(draft());
