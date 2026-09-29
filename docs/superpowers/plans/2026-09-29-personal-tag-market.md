@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-29-personal-tag-market-design.md`（用户已于 2026-09-29 确认）。
 
-**状态：** 待用户审核计划及选择执行方式；当前只编写文档，未开始产品实现。
+**状态：** 用户已审核并选择子代理分任务实现＋隔离工作区，2026-09-29 开始执行。
 
 ## Global Constraints
 
@@ -43,7 +43,7 @@
 
 开始前记录原目录状态，并运行下方已有相关回归作为基线。若失败，记录命令与失败原因，区分原有问题和本次变化；不能将基线失败报告为本次通过。
 
-## 任务 1：独立个人库与数据契约
+## Task 1: 独立个人库与数据契约
 
 **Files:** 新增 `v3/src/anima_prompt_studio_v3/core/personal_tags.py`、`v3/src/anima_prompt_studio_v3/storage/personal_tags.py`、`v3/src/anima_prompt_studio_v3/storage/personal_tag_compositions.py`、`v3/tests/test_personal_tags.py`。
 
@@ -73,7 +73,7 @@
 - [ ] 实现上述契约、分类后代查询、稳定分页、回收站和事务；相近项单独按规范化键查询，不能作为唯一索引。
 - [ ] 重跑该测试文件至通过，仅提交本任务文件：`feat(v3): add independent personal tag storage`。
 
-## 任务 2：可预览、可恢复的导入导出
+## Task 2: 可预览、可恢复的导入导出
 
 **Files:** 新增 `v3/src/anima_prompt_studio_v3/storage/personal_tag_import.py`、`v3/src/anima_prompt_studio_v3/tools/export_legacy_tags.py`、`v3/tests/test_personal_tag_import.py`、`v3/tests/fixtures/personal_tags_legacy.json`；必要时扩展任务 1 的模型。
 
@@ -94,7 +94,7 @@
 - [ ] 重跑上述测试与任务 1 测试至通过；用小样验证导出 CLI 的 JSON 编码，不接触真实库写入。
 - [ ] 仅提交相关文件：`feat(v3): add lossless personal tag import and export`。
 
-## 任务 3：受保护 API 与前后端契约
+## Task 3: 受保护 API 与前后端契约
 
 **Files:** 新增 `v3/src/anima_prompt_studio_v3/api/personal_tags.py`、`v3/tests/test_personal_tag_api.py`、`v3/web/src/lib/personalTags.ts`；修改 `v3/src/anima_prompt_studio_v3/api/app.py` 注册。
 
@@ -122,7 +122,7 @@
 - [ ] 重跑个人模块全部后端测试及 session 相关测试至通过，核对 API 导出和任务 2 底层导出内容一致。
 - [ ] 仅提交相关文件：`feat(v3): expose personal library and composition APIs`。
 
-## 任务 4：可恢复组合及精确输出
+## Task 4: 可恢复组合及精确输出
 
 **Files:** 新增 `v3/web/src/lib/personalTagComposition.ts`、其 `.test.ts`、`v3/web/src/pages/personalTags/usePersonalComposition.ts`、其 `.test.tsx`。
 
@@ -139,7 +139,7 @@
 - [ ] 重跑至通过，并运行 `npm run typecheck`。类型错误须在当前任务修复，不能用 any 掩盖接口不一致。
 - [ ] 提交：`feat(v3): add recoverable personal prompt compositions`。
 
-## 任务 5：选词与管理两个视图
+## Task 5: 选词与管理两个视图
 
 **Files:** 新增 `v3/web/src/pages/PersonalTagsPage.tsx`、`PersonalTagsPage.test.tsx`、`personalTags.css`；在 `pages/personalTags/` 新增 `CategoryTree.tsx`、`TagPicker.tsx`、`CompositionPanel.tsx`、`TagManager.tsx`、`TagEditor.tsx`、`CategoryEditor.tsx`、`ImportDialog.tsx` 和 `usePersonalCatalog.ts`；修改 `App.tsx`、`components/AppShell.tsx` 及相应导航测试。
 
@@ -158,7 +158,7 @@
 - [ ] 重跑个人页、原标签页和 AppShell 测试，并执行 `npm run typecheck`；验证所见按钮有实际行为，非首版功能不放空按钮。
 - [ ] 提交：`feat(v3): add personal tag browsing and management views`。
 
-## 任务 6：工作台原文追加、回执与撤销
+## Task 6: 工作台原文追加、回执与撤销
 
 **Files:** 新增 `v3/src/anima_prompt_studio_v3/api/personal_prompt_transfer.py`、`v3/tests/test_personal_prompt_transfer.py`、`v3/web/src/lib/personalPromptTransfer.ts` 及 `.test.ts`、`v3/web/src/components/PersonalPromptTransfer.tsx`；修改 `v3/src/anima_prompt_studio_v3/api/workspace_store.py`、`v3/src/anima_prompt_studio_v3/api/app.py`、`v3/web/src/pages/ConversationWorkbenchPage.tsx` 及其测试。不更改旧 `contentTransfer.ts` 的单标签契约。
 
@@ -182,7 +182,7 @@
 - [ ] 运行 `python -m pytest tests/test_personal_prompt_transfer.py tests/test_workspace_creation_idempotency.py tests/test_workspace_history.py tests/test_workbench_direct_generation.py tests/test_manual_identity_tags.py -q`，以及 `npm test -- src/lib/personalPromptTransfer.test.ts src/lib/contentTransfer.test.ts src/pages/ConversationWorkbenchPage.test.tsx` 至通过。
 - [ ] 提交：`feat(v3): append personal prompts with durable receipts and undo`。
 
-## 任务 7：真实迁移、界面检查与交付
+## Task 7: 真实迁移、界面检查与交付
 
 **Files:** 更新 `v3/STATUS.md` 和 `v3/README.md`；新增 `docs/v3/PERSONAL_TAG_MARKET_20260929.md` 记录用法、迁移统计及检查结果。用户数据、备份和截图预览用本地数据/审计目录，不混入产品源码。
 
