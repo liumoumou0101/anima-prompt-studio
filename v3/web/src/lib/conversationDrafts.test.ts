@@ -518,6 +518,8 @@ describe("document-owned draft and pending recovery", () => {
     expect(clone.recoverConversationPending("workspace_test", cloneStorage)).toEqual(pending());
     clone.clearConversationPending("workspace_test", pending(), cloneStorage);
     expect(original.recoverConversationPending("workspace_test", storage)).toBeNull();
+    expect(typeof original.ConversationRequestSettledError).toBe("function");
+    expect(() => original.saveConversationPending("workspace_test", pending(), storage)).toThrow(original.ConversationRequestSettledError);
     expect(() => original.saveConversationPending("workspace_test", pending(), storage)).toThrow(/完成|核对/);
     const reload = await document(storage, "document-c");
     expect(reload.recoverConversationPending("workspace_test", storage)).toBeNull();

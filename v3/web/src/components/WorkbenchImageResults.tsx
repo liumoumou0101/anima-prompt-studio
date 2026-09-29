@@ -1,9 +1,12 @@
-import {useEffect, useState} from "react";
+import {useEffect, useRef, useState} from "react";
+import {Copy} from "@phosphor-icons/react";
 import type {ConversationRecord, LocalConversation} from "../lib/conversation";
 import type {GenerationRunRecord} from "../lib/types";
 import {canRestoreRun, canUseRunPrompt, runSeedNote, runVersion, useWorkbenchArtifacts, useWorkbenchVersions, versionIntent, type WorkbenchHistoryVersion} from "../lib/workbenchHistory";
 import {ImagePreview} from "./ImagePreview";
+import {GallerySourcePreview} from "./GallerySourcePreview";
 import {RunInputDetails} from "./WorkbenchHistory";
+import {copyImageFileToClipboard} from "../lib/copyImage";
 import "./workbenchResults.css";
 
 export interface WorkbenchImageResultsProps {
@@ -25,6 +28,9 @@ export function WorkbenchImageResults({record, local, runs, run, onSelectRun, on
   const [compare, setCompare] = useState(false), [baselineId, setBaselineId] = useState("");
   const [baselineImages, setBaselineImages] = useState<Record<string, string>>({});
   const [showInput, setShowInput] = useState(false), [preview, setPreview] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [copyResult, setCopyResult] = useState<{key: string; error?: string} | null>(null);
+  const copyInFlight = useRef(false);
   const pictures = useWorkbenchArtifacts(selectedRun);
   const baselineRun = compare ? choices.find(item => item.id === baselineId) || choices.find(item => item.id !== selectedRun?.id) || selectedRun : null;
   const baseline = useWorkbenchArtifacts(baselineRun);
@@ -33,15 +39,34 @@ export function WorkbenchImageResults({record, local, runs, run, onSelectRun, on
   const selectedId = selectedRun ? selectedImages[selectedRun.id] : "";
   const image = pictures.items.find(item => item.id === selectedId) || pictures.items[0];
   const selectedIndex = image ? pictures.items.indexOf(image) : -1;
+  const imageKey = `${record.id}:${selectedRun?.id}:${image?.id}:${image?.content_url}`;
+  const currentCopyResult = copyResult?.key === imageKey ? copyResult : null;
+  async function copyOriginal() {
+    if (!image?.content_url || !image.path || copyInFlight.current) return;
+    copyInFlight.current = true; setCopying(true); setCopyResult(null);
+    try {
+      await copyImageFileToClipboard(image.path);
+      setCopyResult({key: imageKey});
+    } catch (error) {
+      setCopyResult({key: imageKey, error: error instanceof Error ? error.message : "复制失败，请重试。"});
+    } finally {copyInFlight.current = false; setCopying(false);}
+  }
   const baselineImage = baseline.items.find(item => item.id === (baselineRun ? baselineImages[baselineRun.id] : "")) || baseline.items[0];
   const baselineIndex = baselineImage ? baseline.items.indexOf(baselineImage) : -1;
   const matchingPrompt = selectedRun?.source && local.positive === selectedRun.source.positive_prompt && local.negative === selectedRun.source.negative_prompt;
+  if (!selectedRun && record.draft.gallery_source) return <GallerySourcePreview
+    key={`${record.id}:${record.draft.gallery_source.path}`} source={record.draft.gallery_source} />;
   if (!selectedRun) return <section className="workbench-image-results workbench-image-empty" aria-label="图片预览"><div><h2>图片会出现在这里</h2>
     <p>写下画面或修改意见，更新提示词后即可生成。</p></div></section>;
   const version = runVersion(selectedRun, versions.items);
   return <section className="workbench-image-results" aria-label="图片预览">
     <header className="workbench-result-heading"><div><h2>图片预览</h2><p>{versionIntent(version)}</p></div>
+      <button type="button" className="workbench-copy-original" disabled={copying || !image?.content_url || !image?.path}
+        title={image?.content_url && image.path ? "复制当前原图文件，可粘贴到文件夹或图片应用" : "暂无可复制的原图文件"}
+        onClick={() => void copyOriginal()}><Copy size={16} aria-hidden="true" />{copying ? "复制中…" : "复制原图"}</button>
       <button type="button" aria-pressed={compare} onClick={() => setCompare(value => !value)} disabled={!pictures.items.length}>{compare ? "结束对比" : "对比图片"}</button></header>
+    {currentCopyResult && <p className="workbench-copy-feedback" role={currentCopyResult.error ? "alert" : "status"}>
+      {currentCopyResult.error || "已复制原图文件，可粘贴到文件夹。"}</p>}
     {choices.length > 1 && <label className="workbench-batch-select">查看生成批次<select aria-label="查看生成批次" value={selectedRun.id} onChange={event => {
       const next = choices.find(item => item.id === event.target.value); if (next) onSelectRun(next);
     }}>{choices.map(item => <option key={item.id} value={item.id}>{batchLabel(item, versions.items)}</option>)}</select></label>}

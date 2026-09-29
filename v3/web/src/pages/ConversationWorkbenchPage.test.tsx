@@ -670,9 +670,12 @@ it("opens dock generation settings while retaining the same edited prompt node",
   expect(writes).toHaveLength(0);
 });
 
-it("creates a new workspace and updates its prompt from the initial idea without generating", async () => {
+it.each(["faithful", "expand"] as const)("creates a new workspace in %s mode and rewrites the initial idea without generating", async mode => {
   localStorage.removeItem("anima-conversation-active");
   render(<MemoryRouter><ConversationWorkbenchPage /></MemoryRouter>);
+  expect(screen.getByRole("radio", {name: "忠实还原"})).toBeChecked();
+  fireEvent.click(screen.getByRole("radio", {name: mode === "expand" ? "适度扩写" : "忠实还原"}));
+  expect(writes).toHaveLength(0);
   fireEvent.change(screen.getByLabelText("创作想法"), {target: {value: "双手捧花的魔女"}});
   await waitFor(() => expect(screen.getByRole("button", {name: "开始整理想法"})).toBeEnabled());
   fireEvent.click(screen.getByRole("button", {name: "开始整理想法"}));
@@ -681,7 +684,10 @@ it("creates a new workspace and updates its prompt from the initial idea without
   expect(writes).toHaveLength(2);
   expect(writes[0].url).toBe("/api/v3/workspaces");
   expect(writes[0].body.title).toBe("双手捧花的魔女");
+  expect(writes[0].body.draft).toMatchObject({mode});
+  expect(writes[1].body.mode).toBe(mode);
   expect(writes[1].body.preview).toBe(false);
+  expect(screen.getByRole("radio", {name: mode === "expand" ? "适度扩写" : "忠实还原"})).toBeChecked();
   expect(writes.some(item => item.url.endsWith("/runs"))).toBe(false);
   expect(readConversationDraft("workspace_new")!.local!.delta).toBe("");
 });
@@ -717,12 +723,32 @@ it("retains the exact idempotency key and payload after a lost acceptance respon
 
 it("keeps a tentative mode local if the model fails", async () => {
   await mount(); failure = "turn";
-  fireEvent.change(screen.getByLabelText("改写方式"), {target: {value: "expand"}});
+  fireEvent.click(screen.getByRole("radio", {name: "适度扩写"}));
   fireEvent.click(screen.getByRole("button", {name: "更新提示词"}));
   await screen.findByText("模型分析失败");
   expect(writes).toHaveLength(1);
   expect(writes[0].body.mode).toBe("expand");
   expect(workspace.draft.mode).toBe("faithful");
+  expect(screen.getByRole("radio", {name: "适度扩写"})).toBeChecked();
+});
+
+it("keeps rewrite choices visible and restores a locally selected mode without calling the model", async () => {
+  render(<MemoryRouter><ConversationWorkbenchPage remoteEnabled /></MemoryRouter>);
+  await screen.findByLabelText("正向提示词");
+  const expand = screen.getByRole("radio", {name: "适度扩写"});
+  expect(expand.closest("details")).toBeNull();
+  expect(screen.getByRole("radio", {name: "忠实还原"})).toBeChecked();
+  fireEvent.click(expand);
+  expect(readConversationDraft(workspace.id)!.local!.mode).toBe("expand");
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("cat");
+  expect(writes).toHaveLength(0);
+  cleanup();
+  render(<MemoryRouter><ConversationWorkbenchPage remoteEnabled /></MemoryRouter>);
+  await screen.findByLabelText("正向提示词");
+  expect(screen.getByRole("radio", {name: "适度扩写"})).toBeChecked();
+  expect(writes).toHaveLength(0);
+  fireEvent.click(screen.getByRole("radio", {name: "忠实还原"}));
+  expect(readConversationDraft(workspace.id)!.local!.mode).toBe("faithful");
 });
 
 it("restores unsent text on reopen without overwriting it with the server copy", async () => {

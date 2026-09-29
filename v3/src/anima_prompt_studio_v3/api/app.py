@@ -91,6 +91,7 @@ from .models import (
     ArtistRecommendRequest,
     GenerationBridgePreviewRequest,
     GalleryPathsRequest,
+    GalleryClipboardRequest,
     GalleryProcessActionRequest,
     GalleryProcessRequest,
     GalleryStateRequest,
@@ -1898,6 +1899,24 @@ def create_api_runtime(
         if refresh:
             return service.list_assets(limit=limit, refresh=True)
         return service.list_assets(limit=limit)
+
+    @app.post(f"{API_PREFIX}/gallery/assets/clipboard", dependencies=[Depends(require_session)])
+    def copy_gallery_asset(payload: GalleryClipboardRequest) -> dict[str, object]:
+        from ..runtime.image_clipboard import ClipboardUnsupportedError, ClipboardWriteError, copy_image_file
+
+        service = app.state.gallery_service
+        if service is None:
+            raise ApiError(503, "gallery_not_configured", "画廊尚未连接图片目录。")
+        resolved = service.resolve_content(payload.path)
+        if resolved is None:
+            raise ApiError(404, "gallery_asset_not_found", "原图不存在或路径不在画廊目录中。")
+        try:
+            copy_image_file(resolved)
+        except ClipboardUnsupportedError as exc:
+            raise ApiError(501, "clipboard_not_supported", str(exc)) from exc
+        except ClipboardWriteError as exc:
+            raise ApiError(503, "clipboard_write_failed", str(exc), retryable=True) from exc
+        return {"copied": True, "file_name": resolved.name}
 
     @app.get(f"{API_PREFIX}/gallery/assets/content", dependencies=[Depends(require_session)])
     def gallery_asset_content(path: str = Query(min_length=1, max_length=2000)) -> FileResponse:

@@ -81,7 +81,7 @@ def test_first_compile_persists_and_restart_restores(conversation_client):
     call = captured[0]
     assert call["disable_thinking"] is True and call["images"] is None
     context = json.loads(call["messages"][-1]["content"])
-    assert set(context) == {"requirements", "compiled", "delta", "mode"}
+    assert set(context) == {"requirements", "compiled", "delta", "mode", "model_guidance", "rewrite_goal", "preservation_sources"}
     reopened = WorkspaceStore(client.app.state.workspace_store.path).get(workspace["id"])
     assert reopened["draft"] == saved["draft"]
     assert turn(client, saved).status_code == 422

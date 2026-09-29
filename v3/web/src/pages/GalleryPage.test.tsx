@@ -1,4 +1,5 @@
-import {fireEvent, render, screen} from "@testing-library/react";
+import {fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {MemoryRouter, Route, Routes, useLocation} from "react-router-dom";
 import type {ReactNode} from "react";
 import {beforeEach, expect, it, vi} from "vitest";
 import {resetGalleryStoreForTests} from "../lib/galleryStore";
@@ -27,11 +28,96 @@ const assets = [
     thumbnail_url: "/api/v3/gallery/assets/thumbnail?path=two.jpg&size=640",
   },
 ];
+const galleryResponse = {root: "D:/gallery", items: assets, projects: ["雨夜项目", "外部图片"],
+  models: ["anima_base_v1"], trash_count: 0};
 
 beforeEach(() => {
   resetGalleryStoreForTests();
+  for (const key of Object.keys(sessionStorage)) if (key.startsWith("anima-gallery-workspace:")) sessionStorage.removeItem(key);
   sessionStorage.setItem("anima-v3-session", "session-token");
   vi.restoreAllMocks();
+});
+
+function WorkspaceDestination() {
+  return <h1>工作台地址：{useLocation().search}</h1>;
+}
+
+it("opens the selected gallery image in a new workspace directly without creating a reference", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input).startsWith("/api/v3/gallery/assets?")) return new Response(JSON.stringify(galleryResponse));
+    expect(String(input)).toBe("/api/v3/gallery/assets/workspace");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({path: "项目/batch/one.png"});
+    return new Response(JSON.stringify({id: "workspace_gallery"}), {status: 201});
+  });
+  render(<MemoryRouter initialEntries={["/gallery"]}><Routes>
+    <Route path="/gallery" element={<GalleryPage enabled />} />
+    <Route path="/workbench" element={<WorkspaceDestination />} />
+  </Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole("button", {name: "查看 one.png"}));
+  fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
+  expect(await screen.findByRole("heading", {name: "工作台地址：?workspace=workspace_gallery"})).toBeInTheDocument();
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+});
+
+it("keeps the same creation key on retry and blocks duplicate gallery transfers", async () => {
+  let rejectRequest!: (error: Error) => void;
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (String(input).startsWith("/api/v3/gallery/assets?")) return new Response(JSON.stringify(galleryResponse));
+    return new Promise<Response>((_, reject) => {rejectRequest = reject;});
+  });
+  render(<GalleryPage enabled />);
+  fireEvent.click(await screen.findByRole("button", {name: "查看 one.png"}));
+  fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
+  const pendingButton = screen.getByRole("button", {name: "正在转入…"});
+  expect(pendingButton).toBeDisabled();
+  fireEvent.click(pendingButton);
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  rejectRequest(new Error("网络中断"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("无法连接本地服务");
+  fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
+  await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2));
+  const requests = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+  const firstKey = new Headers(requests[0][1]?.headers).get("Idempotency-Key");
+  expect(firstKey).toBeTruthy();
+  expect(new Headers(requests[1][1]?.headers).get("Idempotency-Key")).toBe(firstKey);
+  rejectRequest(new Error("网络中断"));
+  await screen.findByRole("alert");
+});
+
+it("explains why a gallery image without saved prompts cannot be transferred directly", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(galleryResponse)));
+  render(<GalleryPage enabled />);
+  fireEvent.click(await screen.findByRole("button", {name: "查看 two.jpg"}));
+  expect(screen.getByRole("button", {name: "转入工作台"})).toBeDisabled();
+  expect(screen.getByText(/没有保存提示词，无法直接转入/)).toBeInTheDocument();
+  expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+});
+
+it("recovers the same gallery creation request after its detail was closed mid-request", async () => {
+  let finishFirst!: (response: Response) => void;
+  let posts = 0;
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (init?.method !== "POST") return new Response(JSON.stringify(galleryResponse));
+    expect(String(input)).toBe("/api/v3/gallery/assets/workspace");
+    if (++posts === 1) return new Promise<Response>(resolve => {finishFirst = resolve;});
+    return new Response(JSON.stringify({id: "workspace_recovered"}), {status: 201});
+  });
+  render(<MemoryRouter initialEntries={["/gallery"]}><Routes>
+    <Route path="/gallery" element={<GalleryPage enabled />} />
+    <Route path="/workbench" element={<WorkspaceDestination />} />
+  </Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole("button", {name: "查看 one.png"}));
+  fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
+  fireEvent.click(screen.getByRole("button", {name: "关闭图片详情"}));
+  finishFirst(new Response(JSON.stringify({id: "workspace_recovered"}), {status: 201}));
+  fireEvent.click(screen.getByRole("button", {name: "查看 one.png"}));
+  fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
+  await screen.findByRole("heading", {name: "工作台地址：?workspace=workspace_recovered"});
+  const requests = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+  expect(new Headers(requests[1][1]?.headers).get("Idempotency-Key"))
+    .toBe(new Headers(requests[0][1]?.headers).get("Idempotency-Key"));
+  expect(Object.keys(sessionStorage).some(key => key.startsWith("anima-gallery-workspace:"))).toBe(false);
 });
 
 it("filters local assets and opens traceable image details", async () => {

@@ -63,7 +63,10 @@ Current controls replace older control values, not independently written require
 If a control contradicts independently written text or locked requirements, do not
 silently choose a side: return conflicts as a brief string array describing the exact
 conflict for the user to resolve. Otherwise conflicts=[]. The server rejects conflicts.
-Do not infer missing scene controls, quality phrases, artists, LoRAs or negative tags.
+Never write inferred values into missing scene controls. In faithful mode missing
+choices remain unspecified; expansion may add compatible prompt-only details under
+its mode rules, without changing these controls or explicit user choices.
+Do not invent quality phrases, artists, LoRAs or negative tags.
 Clearing a control removes its prior request; do not recover it from compiled text.
 compiled.scene_intent records the controls used by the previous compilation. Compare
 it with current controls to remove superseded/cleared control intent while retaining

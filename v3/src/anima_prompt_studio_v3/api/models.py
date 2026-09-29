@@ -540,6 +540,10 @@ class RemoteConnectionTestRequest(ApiModel):
     passphrase: SecretStr | None = Field(default=None, max_length=4096)
 
 
+class GalleryClipboardRequest(ApiModel):
+    path: str = Field(min_length=1, max_length=2000)
+
+
 class GalleryPathsRequest(ApiModel):
     paths: list[str] = Field(min_length=1, max_length=1000)
 

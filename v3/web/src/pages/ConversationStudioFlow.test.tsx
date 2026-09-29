@@ -4,7 +4,7 @@ import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {ConversationWorkbenchPage} from "./ConversationWorkbenchPage";
 import {emptyRequirements, type ConversationRecord} from "../lib/conversation";
 import {defaultGenerationSettings} from "../lib/generationSettings";
-import {listConversationDraftCandidates, readConversationDraft, recoverConversationPending} from "../lib/conversationDrafts";
+import {clearConversationPending, getConversationPendingKey, listConversationDraftCandidates, readConversationDraft, recoverConversationPending, saveConversationPending} from "../lib/conversationDrafts";
 
 vi.mock("../components/ArtistRecommendations", () => ({ArtistRecommendations: () => null}));
 vi.mock("../components/ManualIdentityTags", () => ({ManualIdentityTags: () => null}));
@@ -79,10 +79,56 @@ it("does not generate if the combined update fails",async()=>{
 });
 it("reuses a frozen submission after an unknown acceptance result",async()=>{
   failGenerate=true;await mount();fireEvent.click(screen.getByRole("button",{name:"生成图片"}));
-  await screen.findByRole("button",{name:"查询本次提交"});failGenerate=false;
+  await screen.findByRole("button",{name:"查询本次提交"});
+  expect(recoverConversationPending("studio")?.key).toBe(writes.find(x=>x.url.endsWith("/direct-prompt/runs"))?.key);
+  expect(screen.getByRole("button",{name:"生成图片"})).toBeDisabled();
+  failGenerate=false;
   fireEvent.click(screen.getByRole("button",{name:"查询本次提交"}));
   await waitFor(()=>expect(writes.filter(x=>x.url.endsWith("/direct-prompt/runs"))).toHaveLength(2));
   const calls=writes.filter(x=>x.url.endsWith("/direct-prompt/runs"));expect(calls[1].key).toBe(calls[0].key);expect(calls[1].body).toEqual(calls[0].body);
+});
+it("reconciles a request settled in another page without resubmitting or losing the draft",async()=>{
+  failGenerate=true;await mount();
+  fireEvent.change(screen.getByLabelText("正向提示词"),{target:{value:"my manual prompt"}});
+  fireEvent.change(delta(),{target:{value:"未提交的意见"}});
+  fireEvent.click(screen.getByRole("button",{name:"生成图片"}));
+  await screen.findByRole("button",{name:"查询本次提交"});
+  clearConversationPending("studio",recoverConversationPending("studio")!);
+  fireEvent.click(screen.getByRole("button",{name:"查询本次提交"}));
+  await screen.findByText(/这次请求已完成或已明确拒绝.*全部任务/);
+  expect(screen.queryByRole("button",{name:"查询本次提交"})).not.toBeInTheDocument();
+  expect(screen.getByRole("button",{name:"生成图片"})).toBeEnabled();
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("my manual prompt");expect(delta()).toHaveValue("未提交的意见");
+  expect(writes.filter(x=>x.url.endsWith("/direct-prompt/runs"))).toHaveLength(1);
+  expect(recoverConversationPending("studio")).toBeNull();
+});
+it("keeps a different unresolved request when reconciling a settled request",async()=>{
+  failGenerate=true;await mount();fireEvent.click(screen.getByRole("button",{name:"生成图片"}));
+  await screen.findByRole("button",{name:"查询本次提交"});
+  const previous=recoverConversationPending("studio")!;
+  clearConversationPending("studio",previous);
+  const unresolved={...previous,key:"another-unresolved-request"};saveConversationPending("studio",unresolved);
+  fireEvent.click(screen.getByRole("button",{name:"查询本次提交"}));
+  await screen.findByText(/这次请求已完成或已明确拒绝.*全部任务/);
+  expect(screen.getByRole("button",{name:"查询本次提交"})).toBeEnabled();
+  expect(screen.getByRole("button",{name:"生成图片"})).toBeDisabled();
+  expect(recoverConversationPending("studio")).toEqual(unresolved);
+  expect(writes.filter(x=>x.url.endsWith("/direct-prompt/runs"))).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button",{name:"查询本次提交"}));
+  await waitFor(()=>expect(writes.filter(x=>x.url.endsWith("/direct-prompt/runs"))).toHaveLength(2));
+  expect(writes.filter(x=>x.url.endsWith("/direct-prompt/runs"))[1].key).toBe(unresolved.key);
+});
+it("blocks new submissions if recovery fails after another page settles the displayed request",async()=>{
+  failGenerate=true;await mount();fireEvent.click(screen.getByRole("button",{name:"生成图片"}));
+  await screen.findByRole("button",{name:"查询本次提交"});
+  clearConversationPending("studio",recoverConversationPending("studio")!);
+  localStorage.setItem(getConversationPendingKey("studio"),"{broken");
+  fireEvent.click(screen.getByRole("button",{name:"查询本次提交"}));
+  await screen.findByText(/上次生成请求的恢复记录无法读取或迁移/);
+  expect(screen.queryByRole("button",{name:"查询本次提交"})).not.toBeInTheDocument();
+  expect(screen.getByRole("button",{name:"生成图片"})).toBeDisabled();
+  expect(writes.filter(x=>x.url.endsWith("/direct-prompt/runs"))).toHaveLength(1);
+  expect(localStorage.getItem(getConversationPendingKey("studio"))).toBe("{broken");
 });
 it("leaves settings editable after a known missing resource rejection",async()=>{
   const original=vi.mocked(fetch).getMockImplementation()!;

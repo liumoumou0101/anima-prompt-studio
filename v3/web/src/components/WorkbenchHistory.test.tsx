@@ -1,9 +1,12 @@
-import {act, cleanup, fireEvent, render, screen, within} from "@testing-library/react";
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {WorkbenchHistory} from "./WorkbenchHistory";
 import {WorkbenchImageResults} from "./WorkbenchImageResults";
 import {emptyRequirements, localFromRecord, type ConversationRecord} from "../lib/conversation";
 import type {GenerationRunRecord} from "../lib/types";
+import {copyImageFileToClipboard} from "../lib/copyImage";
+
+vi.mock("../lib/copyImage", () => ({copyImageFileToClipboard: vi.fn()}));
 
 const record: ConversationRecord = {id: "history-test", title: "外套练习", revision: 3,
   created_at: "2026-09-21T10:00:00Z", updated_at: "2026-09-21T10:03:00Z", draft: {
@@ -21,6 +24,7 @@ const second: GenerationRunRecord = {...first, id: "run-second", created_at: "20
 const versions = [record, {...record, revision: 2}, {...record, revision: 1, draft: {...record.draft,
   compiled: {...record.draft.compiled!, positive: "blue coat"}, conversation_events: []}}];
 beforeEach(() => {
+  vi.mocked(copyImageFileToClipboard).mockReset().mockResolvedValue(undefined);
   sessionStorage.setItem("anima-v3-session", "test");
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     expect(init?.method || "GET").toBe("GET");
@@ -33,6 +37,70 @@ beforeEach(() => {
   });
 });
 afterEach(() => {cleanup(); vi.restoreAllMocks();});
+
+it("shows the selected gallery original before this new workspace has generated images", async () => {
+  const fromGallery: ConversationRecord = {...record, draft: {...record.draft,
+    gallery_source: {path: "旧图/selected.png", name: "selected.png", mode: "prompt"}}};
+  const props = {record: fromGallery, local: localFromRecord(fromGallery),
+    onSelectRun: () => {}, onRestoreRun: () => {}};
+  const view = render(<WorkbenchImageResults {...props} runs={[]} run={null} />);
+  expect(screen.getByRole("img", {name: "selected.png"})).toHaveAttribute("src", "/api/v3/gallery/assets/content?path=%E6%97%A7%E5%9B%BE%2Fselected.png");
+  expect(screen.queryByText("图片会出现在这里")).not.toBeInTheDocument();
+  // Once this workspace produces a new result, the result panel should show it.
+  view.rerender(<WorkbenchImageResults {...props} runs={[first]} run={first} />);
+  expect(await screen.findByAltText("当前图片：第 1 张")).toBeInTheDocument();
+  expect(screen.queryByRole("img", {name: "selected.png"})).not.toBeInTheDocument();
+});
+
+it("copies the selected original, including while comparing, and clears feedback when changing pictures", async () => {
+  render(<WorkbenchImageResults record={record} local={localFromRecord(record)} runs={[first, second]} run={first} onSelectRun={() => {}} onRestoreRun={() => {}} />);
+  await screen.findByAltText("当前图片：第 1 张");
+  fireEvent.click(screen.getByRole("button", {name: "查看第 2 张图片"}));
+  fireEvent.click(screen.getByRole("button", {name: "对比图片"}));
+  fireEvent.click(screen.getByRole("button", {name: "复制原图"}));
+  expect(copyImageFileToClipboard).toHaveBeenCalledExactlyOnceWith("run-first/2.png");
+  expect(await screen.findByRole("status")).toHaveTextContent("已复制原图文件，可粘贴到文件夹");
+  fireEvent.click(screen.getByRole("button", {name: "查看第 1 张图片"}));
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+});
+
+it("prevents duplicate copies and does not report an older image as the newly selected image", async () => {
+  let finish!: () => void;
+  vi.mocked(copyImageFileToClipboard).mockReturnValue(new Promise(resolve => {finish = resolve;}));
+  render(<WorkbenchImageResults record={record} local={localFromRecord(record)} runs={[first]} run={first} onSelectRun={() => {}} onRestoreRun={() => {}} />);
+  await screen.findByAltText("当前图片：第 1 张");
+  fireEvent.click(screen.getByRole("button", {name: "复制原图"}));
+  expect(screen.getByRole("button", {name: "复制中…"})).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", {name: "复制中…"}));
+  fireEvent.click(screen.getByRole("button", {name: "查看第 2 张图片"}));
+  await act(async () => finish());
+  expect(copyImageFileToClipboard).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "复制原图"})).toBeEnabled();
+});
+
+it("reports copy failures and allows retrying the same original", async () => {
+  vi.mocked(copyImageFileToClipboard).mockRejectedValueOnce(new Error("无法写入剪贴板，请允许复制图片后重试。"));
+  render(<WorkbenchImageResults record={record} local={localFromRecord(record)} runs={[first]} run={first} onSelectRun={() => {}} onRestoreRun={() => {}} />);
+  await screen.findByAltText("当前图片：第 1 张");
+  fireEvent.click(screen.getByRole("button", {name: "复制原图"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("无法写入剪贴板");
+  expect(screen.queryByText("已复制原图文件，可粘贴到文件夹。")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "复制原图"}));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("已复制原图"));
+  expect(copyImageFileToClipboard).toHaveBeenCalledTimes(2);
+});
+
+it("does not copy a thumbnail when the original is unavailable", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation((input, init) => String(input).includes("/artifacts")
+    ? Promise.resolve(new Response(JSON.stringify({items: [{id: "thumb-only", path: null, content_url: null, thumbnail_url: "/thumb/only.png", removed: false}]})))
+    : original(input, init));
+  render(<WorkbenchImageResults record={record} local={localFromRecord(record)} runs={[first]} run={first} onSelectRun={() => {}} onRestoreRun={() => {}} />);
+  await screen.findByAltText("当前图片：第 1 张");
+  expect(screen.getByRole("button", {name: "复制原图"})).toBeDisabled();
+  expect(copyImageFileToClipboard).not.toHaveBeenCalled();
+});
 
 it("links Chinese intent and a thumbnail to exact submitted prompts, and permits restoring a version without images", async () => {
   const restoreVersion = vi.fn(), restoreRun = vi.fn();

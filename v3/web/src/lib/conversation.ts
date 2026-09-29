@@ -27,6 +27,7 @@ export interface ConversationRecord extends WorkspaceRecord {
     conversation_events: ConversationEvent[];
     reference_pin?: {example_id: string; source_version: string; role: string} | null;
     generation_source?: {run_id: string; remote_profile_id: string; workflow_profile_id: string; model_profile: string} | null;
+    gallery_source?: {path: string; name: string; mode: "generation" | "prompt"} | null;
     workspace_origin?: {workspace_id: string; revision: number; run_id?: string | null} | null;
   };
 }

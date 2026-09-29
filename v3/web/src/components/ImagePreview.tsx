@@ -10,18 +10,25 @@ export type PreviewImage = {src: string; alt: string; width?: number; height?: n
 /** One viewer for gallery originals and generation results. No image is fetched until opened. */
 export function ImagePreview({images, index, onClose}: {images: PreviewImage[]; index: number; onClose: () => void}) {
   const [current, setCurrent] = useState(index);
+  const [initialIndex, setInitialIndex] = useState(index);
   const [details, setDetails] = useState(false);
   useBodyScrollLock(index >= 0 && images.length > 0);
+  if (index !== initialIndex) {
+    setInitialIndex(index);
+    setCurrent(index);
+  }
   if (index < 0 || !images.length) return null;
-  const item = images[Math.max(0, Math.min(current, images.length - 1))];
-  return <Lightbox open close={onClose} index={index} slides={images} plugins={[Zoom]}
+  const currentIndex = Math.max(0, Math.min(current, images.length - 1));
+  const item = images[currentIndex];
+  // Polling recreates slides; Lightbox must reapply the browsing position, not the opening index.
+  return <Lightbox open close={onClose} index={currentIndex} slides={images} plugins={[Zoom]}
     noScroll={{disabled: true}}
     carousel={{finite: true, preload: 1}} zoom={{scrollToZoom: true}}
     on={{view: ({index: next}) => setCurrent(next)}}
     labels={{Close: "关闭预览", Previous: "上一张", Next: "下一张", "Zoom in": "放大", "Zoom out": "缩小"}}
     toolbar={{buttons: [<button key="details" className="yarl__button" aria-pressed={details} onClick={() => setDetails(value => !value)}>图片信息</button>, "close"]}}
     render={{controls: () => <>
-      <div className="image-preview-caption">{current + 1} / {images.length} · {item.alt}</div>
+      <div className="image-preview-caption">{currentIndex + 1} / {images.length} · {item.alt}</div>
       {details && <aside className="image-preview-info" aria-label="预览图片信息"><h2>{item.alt}</h2>
         {item.width && item.height && <p>{item.width} × {item.height}</p>}
         <dl>{Object.entries(item.parameters || {}).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl>

@@ -33,6 +33,13 @@ interface DocumentIdentity extends DocumentContext {recoveryError?: string; reco
 export interface ConversationPending {key: string; body: string}
 export type ConversationBranchSource = "draft" | `version:${number}` | `run:${string}`;
 
+export class ConversationRequestSettledError extends Error {
+  constructor() {
+    super("这次请求已完成或已明确拒绝，请刷新页面核对全部任务，暂勿重复提交。");
+    this.name = "ConversationRequestSettledError";
+  }
+}
+
 interface DraftEnvelope {
   version: typeof CONVERSATION_DRAFT_SCHEMA_VERSION;
   workspaceId: string;
@@ -239,7 +246,7 @@ function saveConversationRequest(workspaceId: string, source: ConversationBranch
   const slot = requestSlot(workspaceId, target, source); // Fail closed if preserving recovery is impossible.
   if (!slot.valid(request)) throw new Error("请求的恢复记录不完整，尚未提交。");
   if (target.localStorage.getItem(slot.doneKey(request)) === "1") {
-    throw new Error("这次请求已完成或已明确拒绝，请刷新页面核对全部任务，暂勿重复提交。");
+    throw new ConversationRequestSettledError();
   }
   const currentRaw = target.localStorage.getItem(slot.currentKey);
   if (currentRaw !== null) {

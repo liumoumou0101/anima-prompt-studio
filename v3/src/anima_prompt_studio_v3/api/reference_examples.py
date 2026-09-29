@@ -15,7 +15,7 @@ from starlette.datastructures import UploadFile
 from .conversation import WorkspaceCommand
 from .reference_ingest import IngestRequest, IngestService
 from ..core.requirements import ContractModel, PinRole, Requirements, apply_pin, dump
-from ..core.requirements import PromptEdit, WorkspaceOrigin, compile_prompt
+from ..core.requirements import GallerySource, PromptEdit, WorkspaceOrigin, compile_prompt
 from .workspace_store import WorkspaceNotFoundError, WorkspaceVersionNotFoundError
 from .models import WorkspaceDraft, WorkbenchGenerationSettings
 from ..storage.reference_examples import (
@@ -236,7 +236,8 @@ def register_reference_routes(app, workspace_db, require_session):
             return None
         return dump(origin)
 
-    def create_generation_workspace(run_id, title=None, idempotency_key=None):
+    def create_generation_workspace(run_id, title=None, idempotency_key=None, *,
+                                    gallery_source=None, request_identity=None):
         service = app.state.submission_service
         entries = service.store.for_runs([run_id]) if service and run_id else []
         if not entries:
@@ -258,10 +259,67 @@ def register_reference_routes(app, workspace_db, require_session):
         draft["requirements"] = dump(requirements)
         draft["generation_source"] = dict(run_id=run_id, remote_profile_id=run["remote_profile_id"], workflow_profile_id=run["workflow_profile_id"], model_profile=model)
         draft["workspace_origin"] = verified_workspace_origin(snapshot, run_id)
+        if gallery_source is not None:
+            draft["gallery_source"] = dump(GallerySource.model_validate(gallery_source))
         draft["compiled"] = compile_prompt(draft, prompt, source="user")
         resolved_title = title or "继续 · " + (requirements.layers.subject.text or original["positive"])[:40]
         return app.state.workspace_store.create_snapshot(resolved_title[:200], draft,
-            request_identity={"kind": "generation_run", "run_id": run_id, "title": title}, idempotency_key=idempotency_key)
+            request_identity=request_identity if request_identity is not None else {
+                "kind": "generation_run", "run_id": run_id, "title": title}, idempotency_key=idempotency_key)
+
+    @app.post("/api/v3/gallery/assets/workspace", dependencies=dependencies, status_code=201)
+    def continue_gallery(payload: GalleryCopy,
+                         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
+        from ..core.runtime_profiles import V3RuntimeProfiles
+        from ..runtime import GenerationRunNotFoundError
+
+        gallery = app.state.gallery_service
+        path = gallery.resolve_content(payload.path) if gallery is not None else None
+        if path is None:
+            fail("reference_preset_not_found", "原图不存在或路径不在画廊目录中。")
+        relative = Path(payload.path).as_posix()
+        assets = gallery.list_assets(limit=1000)["items"]
+        asset = next((item for item in assets if item["path"] == relative), None)
+        if asset is None:
+            fail("reference_preset_not_found", "画廊中没有这张图片的记录，请刷新画廊后重试。")
+        source = {"path": asset["path"], "name": asset.get("name") or path.name}
+        # Identity follows the requested image, including two images from one run.
+        # It stays stable if legacy metadata later acquires a generation snapshot.
+        identity = {"kind": "gallery_asset", "path": source["path"]}
+        run_id = asset.get("batch_id")
+        service = app.state.submission_service
+        entries = service.store.for_runs([run_id]) if service and run_id else []
+        if entries and entries[0]["snapshot"].get("workflow"):
+            try:
+                artifacts = service.queue.artifacts(run_id)
+            except GenerationRunNotFoundError:
+                fail("reference_preset_not_found", "原始生成任务不存在。")
+            if not any(Path(item.local_path).resolve() == path.resolve() for item in artifacts):
+                fail("reference_preset_not_found", "这张图片不属于记录中的生成任务。")
+            positive = entries[0]["snapshot"]["provenance"].get("positive") or ""
+            if not positive.strip():
+                fail("empty_requirements", "这张图片没有已记录的正向提示词，无法直接转入工作台。")
+            return create_generation_workspace(run_id, idempotency_key=idempotency_key,
+                gallery_source={**source, "mode": "generation"}, request_identity=identity)
+
+        positive = asset.get("positive_prompt") or ""
+        if not positive.strip():
+            fail("empty_requirements", "这张图片没有已记录的正向提示词，无法直接转入工作台。")
+        profiles = V3RuntimeProfiles()
+        model = asset.get("model_profile")
+        if model not in profiles.profiles:
+            model = "anima_aesthetic_v1_1"
+        defaults = profiles.get_model(model)
+        settings = WorkbenchGenerationSettings(steps=defaults.steps, cfg=defaults.cfg,
+            sampler=defaults.sampler, scheduler=defaults.scheduler,
+            width=defaults.default_width, height=defaults.default_height)
+        draft = WorkspaceDraft(model_profile=model, generation_settings=settings).persistence_payload()
+        draft["requirements"] = dump(Requirements.empty())
+        draft["gallery_source"] = dump(GallerySource(**source, mode="prompt"))
+        draft["compiled"] = compile_prompt(draft, PromptEdit(positive=positive,
+            negative=asset.get("negative_prompt") or ""), source="user")
+        return app.state.workspace_store.create_snapshot(("图片提示词 · " + source["name"])[:200], draft,
+            request_identity=identity, idempotency_key=idempotency_key)
 
     @app.post("/api/v3/generation-runs/{run_id}/workspace", dependencies=dependencies, status_code=201)
     def continue_generation(run_id: str, payload: ContinueGeneration,

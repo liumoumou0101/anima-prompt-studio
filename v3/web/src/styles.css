@@ -1322,6 +1322,11 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .gallery-page--migrated .gallery-detail-actions > button { min-height: 38px; border-radius: 5px; padding: 0 10px; font-size: 13px; }
 .gallery-page--migrated .gallery-detail-actions > .is-primary:not(:disabled) { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .gallery-page--migrated .gallery-detail-actions > [aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.gallery-page--migrated .gallery-detail-actions > .gallery-workspace-action { display: block; grid-column: 1 / -1; }
+.gallery-page--migrated .gallery-workspace-action > button { width: 100%; min-height: 38px; border: 1px solid var(--accent); border-radius: 5px; background: var(--accent); color: var(--on-accent); font-size: 13px; cursor: pointer; }
+.gallery-page--migrated .gallery-workspace-action > button:disabled { opacity: .5; cursor: not-allowed; }
+.gallery-workspace-action > p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.gallery-workspace-action > p[role="alert"] { color: var(--danger); }
 .gallery-detail-more { position: relative; }
 .gallery-detail-more > summary { height: 38px; display: grid; place-items: center; list-style: none; border: 1px solid var(--line-bright); border-radius: 5px; color: var(--text); background: var(--panel-raised); cursor: pointer; }
 .gallery-detail-menu { position: absolute; right: 0; bottom: calc(100% + 8px); width: 240px; max-height: 60dvh; overflow: auto; padding: 6px; border: 1px solid var(--line-bright); border-radius: 7px; background: var(--panel); box-shadow: 0 -8px 28px var(--shadow-color); }

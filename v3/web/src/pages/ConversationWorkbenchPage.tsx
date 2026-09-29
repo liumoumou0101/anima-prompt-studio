@@ -20,6 +20,7 @@ import {cleanRequirements, editableRequirements, emptyRequirements, hasUncompile
 import {applySelectedContent, consumeTransfer, readTransfer, undoSelectedContent, type ContentTransfer, type SelectedContent} from "../lib/contentTransfer";
 import "./conversationWorkbench.css";
 import {ConversationStudioView} from "../components/ConversationStudioView";
+import {RewriteModeSelector} from "../components/RewriteModeSelector";
 import {WorkbenchHistory} from "../components/WorkbenchHistory";
 import {WorkbenchImageResults} from "../components/WorkbenchImageResults";
 import {type WorkbenchHistoryVersion, canRestoreRun} from "../lib/workbenchHistory";
@@ -30,7 +31,7 @@ import {ConversationVersions} from "../components/ConversationVersions";
 import {PromptLocks} from "../components/PromptLocks";
 import {GenerationComparison} from "../components/GenerationComparison";
 import {ConversationDraftRecovery} from "../components/ConversationDraftRecovery";
-import {readConversationDraft, saveConversationDraft, initializeConversationTab, recoverConversationPending, saveConversationPending, clearConversationPending, recoverConversationBranch, saveConversationBranch, clearConversationBranch, preserveConversationDraft, readConversationDraftCandidate, type ConversationDraftCandidate} from "../lib/conversationDrafts";
+import {readConversationDraft, saveConversationDraft, initializeConversationTab, recoverConversationPending, saveConversationPending, clearConversationPending, recoverConversationBranch, saveConversationBranch, clearConversationBranch, preserveConversationDraft, readConversationDraftCandidate, ConversationRequestSettledError, type ConversationDraftCandidate} from "../lib/conversationDrafts";
 import {mergeConversation, resolveConversationConflicts} from "../lib/conversationMerge";
 import {migrateWorkflowSnapshot, reconcileWorkflowSnapshot} from "../lib/conversationSnapshot";
 import {LoraMappingPanel, type ResourceIdentity} from "./LoraMappingPanel";
@@ -109,6 +110,7 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
     return () => window.cancelAnimationFrame(frame);
   }, [inspectorTab]);
   const [idea, setIdea] = useState("");
+  const [initialMode, setInitialMode] = useState<LocalConversation["mode"]>("faithful");
   const [copied, setCopied] = useState("");
   const [conflict, setConflict] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -491,11 +493,11 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
   async function create(initialIdea = "") {
     await act("创建工作台", async () => {
       const next = await apiRequest<ConversationRecord>("/api/v3/workspaces", {method: "POST", body: JSON.stringify({
-        title: initialIdea.trim().slice(0, 40) || `新创作 ${new Date().toLocaleString()}`, draft: {model_profile: profiles.find(p => p.id === "anima_aesthetic_v1_1")?.id || profiles[0].id, generation_settings: defaultGenerationSettings()}})});
+        title: initialIdea.trim().slice(0, 40) || `新创作 ${new Date().toLocaleString()}`, draft: {mode: initialMode, model_profile: profiles.find(p => p.id === "anima_aesthetic_v1_1")?.id || profiles[0].id, generation_settings: defaultGenerationSettings()}})});
       adopt(next); write(ACTIVE, next.id); setWorkspaces(items => [next, ...items.filter(item => item.id !== next.id)]); setPending(null); setRun(null); setRecentRuns([]);
       if (requestedWorkspace) clearWorkspaceLink();
       if (initialIdea.trim()) {
-        const value = {...localFrom(next), delta: initialIdea};
+        const value = {...localFrom(next), mode: initialMode, delta: initialIdea};
         setLocal(value); persistDraft(next.id, value, localFrom(next));
         if (!llmUnavailableReason) await requestProposal(next, value, false);
         else setNotice(`想法已保留。${llmUnavailableReason}；配置就绪后点击更新提示词。`);
@@ -664,7 +666,7 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
     if (draftAtRisk) return;
     draftPersistenceBlocked.current = null; setInvalidDraftRaw(""); setStorageWarning(""); setPendingRecoveryBlocked(false);
     current.current = null; base.current = null; setRecord(null); setLocal(null); setProposal(null);
-    setConflict(false); setPending(null); setNotice(""); setError(""); setIdea(""); remove(ACTIVE);
+    setConflict(false); setPending(null); setNotice(""); setError(""); setIdea(""); setInitialMode("faithful"); remove(ACTIVE);
     if (requestedWorkspace) clearWorkspaceLink();
   }
   async function searchSessions(query = sessionSearch, archive = archived, append = false) {
@@ -738,7 +740,17 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
       compiled_token:saved.draft.compiled?.compiled_token,positive_prompt:value.positive,negative_prompt:value.negative,
       model_profile:value.model,remote_profile_id:chosen?.remote_profile_id,workflow_profile_id:chosen?.workflow_profile_id,
       ...(snapshotRun?{workflow_snapshot_run_id:snapshotRun}:{}),settings:resolvedGenerationSettings(value.settings)})};
-    saveConversationPending(saved.id,request);setPending(request);
+    try {saveConversationPending(saved.id,request);}
+    catch(caught) {
+      if(!(caught instanceof ConversationRequestSettledError))throw caught;
+      // Another document may have settled this request while this page kept it in memory.
+      setPending(null);
+      try {setPending(recoverConversationPending(saved.id));setPendingRecoveryBlocked(false);}
+      catch(recoveryError) {setPendingRecoveryBlocked(true);throw recoveryError;}
+      setNotice("这次请求已完成或已明确拒绝，已停止重复查询。当前草稿已保留，请先到全部任务核对结果。");
+      return;
+    }
+    setPending(request);
     let accepted:Accepted;
     try {accepted=await apiRequest<Accepted>("/api/v3/direct-prompt/runs",{method:"POST",body:request.body,headers:{"Idempotency-Key":request.key}});}
     catch(caught) {
@@ -825,8 +837,9 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
         edit({requirements: undoSelectedContent(local.requirements, transferNotice.added)}); setTransferNotice(null);
       }}>撤销本次带入</button>}</p>}
     {!local || !record ? <section className="conversation-empty"><Sparkle size={30} aria-hidden="true" /><h2>这次，想画些什么？</h2><p>人物、动作、场景或一种氛围，从你最在意的部分开始。</p>
-      <label htmlFor="conversation-idea" className="conversation-sr-only">创作想法</label><textarea id="conversation-idea" rows={4} value={idea} maxLength={4000} onChange={event => setIdea(event.target.value)} placeholder="例如：栗色长发的女孩坐在窗边，双手捧着咖啡杯，窗外樱花盛开。" />
+      <label htmlFor="conversation-idea" className="conversation-sr-only">创作想法</label><textarea id="conversation-idea" rows={3} value={idea} maxLength={4000} onChange={event => setIdea(event.target.value)} placeholder="例如：栗色长发的女孩坐在窗边，双手捧着咖啡杯，窗外樱花盛开。" />
       <div className="conversation-starters">{[{title: "日常人物", text: "栗色长发的女孩坐在窗边，双手捧着咖啡杯，清透赛璐璐风格。"}, {title: "幻想场景", text: "身穿白金盔甲的骑士站在空中花园，披着蓝色披风，远处是浮空城堡。"}, {title: "水彩插画", text: "戴尖帽的魔女双手捧着小白花，站在有蕨类和萤火虫的森林，透明水彩风格。"}].map(item => <button key={item.title} disabled={Boolean(busy)} onClick={() => setIdea(item.text)}>{item.title}</button>)}</div>
+      <RewriteModeSelector value={initialMode} onChange={setInitialMode} disabled={Boolean(busy)} initial />
       <button className="conversation-primary" onClick={() => void create(idea)} disabled={Boolean(busy || thinking.loading) || !idea.trim()}>开始整理想法 <PaperPlaneRight size={17} aria-hidden="true" /></button>
       <p className="conversation-empty-note">提示词更新后，点击生成图片；修改不满意可以撤销。</p></section> : <>
       {conflict && <section role="alert" className="conversation-conflict"><strong>其他窗口已保存了更新，你的编辑仍在这里。</strong>
@@ -902,6 +915,7 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
           {target&&Boolean(availability?.resource_requirements?.length)&&<LoraMappingPanel key={JSON.stringify(availability?.resource_requirements)} remote={target.remote_profile_id} workflow={target.workflow_profile_id} resources={availability!.resource_requirements!} disabled={Boolean(busy||pending||conflict)} onSaved={()=>setMappingEpoch(value=>value+1)}/>}
         </fieldset>}
         composer={<div className="studio-composer">
+          <RewriteModeSelector value={local.mode} onChange={mode => edit({mode})} disabled={Boolean(busy || pending || conflict)} />
           <div className="conversation-field-heading"><label htmlFor="conversation-delta">这次想怎么改？</label><span className="conversation-muted">{local.delta.trim()?"意见尚未应用；直接生图仍使用当前提示词":"输入修改意见，再更新提示词"}</span></div>
           <div className="conversation-studio__composer-row"><textarea id="conversation-delta" rows={2} maxLength={4000} value={local.delta} disabled={Boolean(pending||conflict)} onChange={event=>edit({delta:event.target.value})} placeholder="描述人物、动作、场景，或这次希望改变的地方"/>
             <div className="conversation-studio__buttons">
@@ -910,7 +924,7 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
               <button className="conversation-studio__combined" disabled={Boolean(executionReason||proposal||llmUnavailableReason||adviceBusy)||!local.delta.trim()} onClick={()=>void turn(false,true)}>更新并生图</button>
             </div>
           </div>
-          <div className="conversation-studio__composer-meta"><label>改写方式<select disabled={Boolean(busy||pending||conflict)} value={local.mode} onChange={event=>edit({mode:event.target.value as LocalConversation["mode"]})}><option value="faithful">忠实还原</option><option value="expand">适度扩写</option></select></label>
+          <div className="conversation-studio__composer-meta">
             <Link to="/references">从参考借用</Link>
             <details className="studio-llm-options"><summary>改词模型 · {thinking.current?.model||"尚未配置"}</summary>              <div className="conversation-thinking-control">
                 <button type="button" role="switch" aria-label="深度思考" aria-checked={thinking.enabled} aria-describedby="conversation-thinking-status"

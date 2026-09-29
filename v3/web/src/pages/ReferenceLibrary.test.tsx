@@ -252,7 +252,7 @@ it("loads the next page once for repeated observer notifications, deduplicates, 
   });
   render(<ReferenceLibrary standalone onStart={async () => {}} />);
   await screen.findByRole("button", {name: "加载更多"});
-  expect(observerOptions).toMatchObject({root: null, rootMargin: "300px 0px"});
+  await waitFor(() => expect(observerOptions).toMatchObject({root: null, rootMargin: "300px 0px"}));
   act(() => {
     const entry = {isIntersecting: true} as IntersectionObserverEntry;
     observerCallback([entry], {} as IntersectionObserver);

@@ -99,12 +99,12 @@
 .conversation-error { color:var(--danger); border-color:var(--danger); background:var(--danger-soft); }
 .conversation-conflict pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:160px; overflow-y:auto; }
 .conversation-conflict button { margin:0 8px 8px 0; }
-.conversation-empty { max-width:720px; margin:60px auto; padding:40px; border:1px solid var(--line); border-radius:7px; background:var(--panel); text-align:center; }
+.conversation-empty { max-width:720px; margin:24px auto; padding:24px; border:1px solid var(--line); border-radius:7px; background:var(--panel); text-align:center; }
 .conversation-empty > svg { color:var(--accent); }
 .conversation-empty h2 { font-size:24px; font-weight:600; margin:16px 0; }
 .conversation-empty p { color:var(--muted); font-size:14px; line-height:1.8; }
 .conversation-empty textarea { text-align:left; padding:14px; }
-.conversation-starters { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin:18px 0 24px; }
+.conversation-starters { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin:12px 0 18px; }
 .conversation-starters button { font-size:12px; color:var(--muted); }
 .conversation-empty .conversation-empty-note { font-size:12px; }
 .conversation-sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }

@@ -112,7 +112,16 @@
 .conversation-studio__history .conversation-diff { grid-template-columns:minmax(0,1fr); }
 .conversation-studio__history :is(pre,p) { overflow-wrap:anywhere; }
 .conversation-workbench:has(.conversation-studio) :is(input,textarea,select,button,summary,[tabindex]) { scroll-margin-bottom:20px; }
-@media(min-width:1600px) { .conversation-studio__workspace { grid-template-columns:420px minmax(0,1fr); } .conversation-studio__results { padding-left:38px; } }
+/* Wide monitors need a readable editor as well as a larger image preview. */
+@media(min-width:1600px) {
+  .conversation-workbench:has(.conversation-studio),[data-layout='editorial'] .conversation-workbench:has(.conversation-studio) { max-width:none; padding-inline:clamp(28px,2vw,48px); }
+  .conversation-studio__workspace { grid-template-columns:clamp(480px,32vw,760px) minmax(0,1fr); }
+  .conversation-studio__editor { padding-right:clamp(24px,2vw,40px); }
+  .conversation-studio__results { padding-left:clamp(24px,2vw,40px); }
+}
+@media(min-width:1600px) and (min-height:900px) {
+  .conversation-studio .studio-editor-fields > .conversation-prompt { height:clamp(280px,30dvh,420px); font-size:16px; }
+}
 @media(max-width:1250px) { .conversation-studio__workspace { grid-template-columns:minmax(290px,.9fr) minmax(0,1.3fr); } .conversation-studio__editor { padding-right:20px; } .conversation-studio__results { padding-left:20px; } .conversation-studio__dock { padding-inline:16px; } .conversation-studio__composer-row { gap:12px; } .conversation-studio__buttons > button { padding-inline:10px; font-size:12px; } .conversation-studio__dock .conversation-settings-choices { gap:8px 14px; } .conversation-studio__dock .conversation-settings-choices > label select { max-width:185px; } }
 @media(max-width:1050px) { .conversation-studio__composer-row { align-items:stretch; flex-direction:column; gap:8px; } .conversation-studio__buttons { justify-content:flex-end; } }
 @media(min-width:1100px) {

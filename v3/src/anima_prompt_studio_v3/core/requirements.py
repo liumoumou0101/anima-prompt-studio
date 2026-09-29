@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
 from .scene_design import SceneChoice, SceneDesign, SceneField, declared_scene_choices
+from .prompt_guidance import PROMPT_GUIDANCE_VERSION
 
 
 Mode = Literal["faithful", "expand"]
@@ -204,6 +205,7 @@ class CompiledPrompt(PromptEdit):
     inputs_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     prompt_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     compiler_contract: Literal["anima-rewrite/1"] = COMPILER_CONTRACT
+    guidance_version: str | None = Field(default=None, max_length=100)
     manual_tags: list[str] = Field(default_factory=list, max_length=192)
     scene_intent: dict[SceneField, SceneChoice] = Field(default_factory=dict, max_length=5)
     exclusions_fingerprint: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
@@ -257,6 +259,12 @@ class WorkspaceOrigin(ContractModel):
     run_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
+class GallerySource(ContractModel):
+    path: str = Field(min_length=1, max_length=2000)
+    name: str = Field(min_length=1, max_length=500)
+    mode: Literal["generation", "prompt"]
+
+
 class ConversationFields(ContractModel):
     mode: Mode = "faithful"
     requirements: Requirements | None = None
@@ -264,6 +272,7 @@ class ConversationFields(ContractModel):
     reference_pin: ReferencePin | None = None
     generation_source: GenerationSource | None = None
     workspace_origin: WorkspaceOrigin | None = None
+    gallery_source: GallerySource | None = None
     reference_preset_id: str | None = None
     conversation_events: list[ConversationEvent] = Field(default_factory=list, max_length=100)
     session_previews: list[SessionPreview] = Field(default_factory=list, max_length=100)
@@ -327,6 +336,10 @@ def compile_state(draft: dict[str, Any]) -> Literal["missing", "fresh", "stale"]
     compiled = draft.get("compiled")
     if compiled is None:
         return "missing"
+    # Offer an explicit refresh for old LLM output, without rewriting reviewed text
+    # on load or invalidating prompts authored by the user.
+    if compiled.get("source") == "llm" and compiled.get("guidance_version") != PROMPT_GUIDANCE_VERSION:
+        return "stale"
     fingerprint = compiled["inputs_fingerprint"]
     # Existing locked workspaces may carry the pre-normalization fingerprint.
     # Accept it only against the exact current inputs, never against changed text.
@@ -358,6 +371,7 @@ def compile_prompt(draft: dict[str, Any], prompt: PromptEdit, *, source: Literal
         prompt = PromptEdit(positive=render_manual_tags(prompt.positive, tags, previous), negative=prompt.negative)
     validate_prompt_locks(draft.get("requirements"), dump(prompt))
     return dump(CompiledPrompt(**dump(prompt), mode=draft.get("mode", "faithful"), source=source,
+                               guidance_version=PROMPT_GUIDANCE_VERSION if source == "llm" else None,
                                manual_tags=tags,
                                scene_intent=declared_scene_choices(draft.get("requirements")),
                                exclusions_fingerprint=exclusions_fingerprint(draft.get("requirements")),

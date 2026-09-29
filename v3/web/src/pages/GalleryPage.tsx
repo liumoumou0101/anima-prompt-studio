@@ -1,4 +1,5 @@
 import {GalleryReferenceButton} from "../components/GalleryReferenceButton";
+import {GalleryWorkspaceButton} from "../components/GalleryWorkspaceButton";
 import {GalleryCompare} from "../components/GalleryCompare";
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from "react";
 import {ArrowClockwise, ArrowsOutSimple, CaretLeft, CaretRight, Check, ClockCounterClockwise, Copy, DotsThree, FolderOpen, Funnel, Heart, Images, ListChecks, MagicWand, Question, SelectionAll, SlidersHorizontal, SortAscending, SquaresFour, Trash, X} from "@phosphor-icons/react";
@@ -454,6 +455,7 @@ function Detail({asset, busy, docked, returnFocus, position, total, onPrevious, 
       <details className="gallery-file-details"><summary>文件与来源</summary><dl><div><dt>项目</dt><dd>{asset.project}</dd></div><div><dt>来源</dt><dd>{asset.source === "external" ? "外部图片" : "ANIMA 生成"}</dd></div><div><dt>批次</dt><dd>{asset.batch_title}</dd></div><div><dt>时间</dt><dd>{dateTime(asset.created_at)}</dd></div><div><dt>文件大小</dt><dd>{bytes(asset.byte_size)}</dd></div>{asset.artist_comparison && <><div><dt>{asset.artist_comparison.derived_from === "gallery_regenerate" ? "画师 Tag" : "画师对照"}</dt><dd>{asset.artist_comparison.rendered_artist}{comparisonPosition ? `（${comparisonPosition}）` : ""}</dd></div>{(typeof asset.artist_comparison.seed === "number" || typeof asset.artist_comparison.seed === "string") && <div><dt>固定 Seed</dt><dd>{asset.artist_comparison.seed}</dd></div>}</>}{asset.candidate.versions.data_pack && <div><dt>数据包</dt><dd>{asset.candidate.versions.data_pack}</dd></div>}</dl></details>
     </div>
     <footer className="legacy-detail-actions gallery-detail-actions">
+      <GalleryWorkspaceButton key={asset.path} path={asset.path} hasPrompt={Boolean(asset.positive_prompt?.trim())} disabled={busy} />
       <button type="button" className="is-primary" aria-label="再生成" disabled={busy || !processing?.regenAvailable || !asset.positive_prompt} onClick={onRegen}><Images size={16} />沿用条件再出图</button>
       <button type="button" disabled={busy} aria-pressed={asset.state === "kept"} onClick={() => onState(asset.state === "kept" ? "" : "kept")}><Heart size={16} weight={asset.state === "kept" ? "fill" : "regular"} />{asset.state === "kept" ? "已保留" : "保留"}</button>
       <details ref={moreRef} className="gallery-detail-more"><summary aria-label="更多图片操作"><DotsThree size={22} /></summary><div className="gallery-detail-menu">
