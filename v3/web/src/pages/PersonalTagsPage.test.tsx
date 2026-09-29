@@ -36,7 +36,8 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("personal tag market", () => {
   it("browses_descendants_and_searches_aliases", async () => {
-    mount(); fireEvent.click(await screen.findByRole("button", {name: "选择分类 头发"}));
+    mount(); fireEvent.click(await screen.findByRole("button", {name: "展开分类 人物"}));
+    fireEvent.click(screen.getByRole("button", {name: "选择分类 头发"}));
     await waitFor(() => expect(api.listTags).toHaveBeenCalledWith(expect.objectContaining({category_id: "child", include_descendants: true})));
     fireEvent.change(screen.getByRole("searchbox", {name: "搜索标签"}), {target: {value: "longhair"}});
     await waitFor(() => expect(api.listTags).toHaveBeenCalledWith(expect.objectContaining({q: "longhair"})));
@@ -95,6 +96,25 @@ describe("personal tag market", () => {
     await waitFor(() => expect(api.previewImport).toHaveBeenCalledWith(expect.any(Object), {use_legacy_weights: true, fragment_ids: []}));
     await screen.findByRole("button", {name: "确认导入"}); fireEvent.click(screen.getByRole("button", {name: "确认导入"}));
     await waitFor(() => expect(api.commitImport).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({use_legacy_weights: true}), "with-weight", 7));
+  });
+  it("uses_only_the_latest_selected_file_for_import_preview_and_commit", async () => {
+    let finishOld!: (value: string) => void;
+    api.previewImport.mockImplementation(async (document: {source_key: string}) => ({digest: document.source_key, library_revision: 4, counts: {new: 1, existing: 0, invalid: 0, similar: 0, unmapped: 0, fragment_candidates: 0, legacy_weights: 0}, issues: []}));
+    api.commitImport.mockResolvedValue({counts: {new: 1, existing: 0}, issues: [], library_revision: 5});
+    mount(); fireEvent.click(screen.getByRole("button", {name: /导入 JSON/}));
+    const oldFile = new File(["{}"], "old.json", {type: "application/json"});
+    const newFile = new File(["{}"], "new.json", {type: "application/json"});
+    Object.defineProperty(oldFile, "text", {value: () => new Promise(resolve => {finishOld = resolve;})});
+    Object.defineProperty(newFile, "text", {value: async () => JSON.stringify({source_key: "new"})});
+    const chooser = screen.getByLabelText("选择本地 JSON 文件");
+    fireEvent.change(chooser, {target: {files: [oldFile]}});
+    fireEvent.change(chooser, {target: {files: [newFile]}});
+    await waitFor(() => expect(api.previewImport).toHaveBeenCalledWith({source_key: "new"}, expect.any(Object)));
+    finishOld(JSON.stringify({source_key: "old"}));
+    await waitFor(() => expect(screen.getByText("文件：new.json")).toBeInTheDocument());
+    expect(api.previewImport).not.toHaveBeenCalledWith({source_key: "old"}, expect.any(Object));
+    fireEvent.click(await screen.findByRole("button", {name: "确认导入"}));
+    await waitFor(() => expect(api.commitImport).toHaveBeenCalledWith({source_key: "new"}, expect.any(Object), "new", 4));
   });
   it("copies_exact_positive_and_negative_text", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -166,5 +186,26 @@ describe("personal tag market", () => {
     await router.navigate(-1);
     expect(router.state.location.pathname).toBe("/personal-tags");
     expect(await screen.findByText(/组合草稿尚未保存/)).toBeInTheDocument();
+  });
+  it("allows_mode_switch_and_pop_when_initial_draft_load_failed_without_local_edits", async () => {
+    api.getDraft.mockRejectedValue(new Error("draft unavailable"));
+    const router = mount(["/workbench", "/personal-tags"]);
+    await screen.findByText("draft unavailable");
+    fireEvent.click(screen.getByRole("button", {name: "管理词库"}));
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    await router.navigate(-1);
+    expect(await screen.findByText("工作台内容")).toBeInTheDocument();
+    expect(api.saveDraft).not.toHaveBeenCalled();
+  });
+  it("never_offers_deleted_tags_in_picker_after_leaving_trash", async () => {
+    api.listTags.mockImplementation(async ({trash}: {trash?: boolean}) => ({items: trash ? [{...tags[0], deleted_at: "now"}] : [tags[1]], total: 1, offset: 0, limit: 40, has_more: false}));
+    mount(); fireEvent.click(screen.getByRole("button", {name: "管理词库"}));
+    await screen.findByRole("table");
+    fireEvent.click(screen.getByRole("checkbox", {name: "回收站"}));
+    await waitFor(() => expect(api.listTags).toHaveBeenCalledWith(expect.objectContaining({trash: true})));
+    fireEvent.click(screen.getByRole("button", {name: "挑选标签"}));
+    await waitFor(() => expect(api.listTags).toHaveBeenLastCalledWith(expect.objectContaining({trash: false})));
+    expect(screen.queryByRole("button", {name: "加入正向 长发"})).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", {name: "加入正向 短发"})).toBeInTheDocument();
   });
 });

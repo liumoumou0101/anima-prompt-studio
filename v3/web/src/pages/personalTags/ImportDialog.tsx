@@ -6,13 +6,14 @@ export function ImportDialog({onClose, onImported}: {onClose: () => void; onImpo
   const container = useRef<HTMLDivElement>(null);
   const previousFocus = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null);
   const request = useRef(0);
+  const readSequence = useRef(0);
   const [documentValue, setDocumentValue] = useState<Record<string, unknown> | null>(null);
   const [filename, setFilename] = useState("");
   const [options, setOptions] = useState<ImportOptions>({use_legacy_weights: false, fragment_ids: []});
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [pending, setPending] = useState(false); const [error, setError] = useState(""); const [result, setResult] = useState("");
   useBodyScrollLock();
-  useEffect(() => {container.current?.querySelector<HTMLButtonElement>("button")?.focus(); return () => previousFocus.current?.focus();}, []);
+  useEffect(() => {container.current?.querySelector<HTMLButtonElement>("button")?.focus(); return () => {readSequence.current++; request.current++; previousFocus.current?.focus();};}, []);
   useEffect(() => {
     if (!documentValue) return;
     const current = ++request.current; setPreview(null); setPending(true); setError("");
@@ -22,9 +23,20 @@ export function ImportDialog({onClose, onImported}: {onClose: () => void; onImpo
     return () => {request.current++;};
   }, [documentValue, options]);
   const read = async (file?: File) => {
-    if (!file) return; setFilename(file.name); setPreview(null); setError("");
-    try {const value: unknown = JSON.parse(await file.text()); if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("JSON 顶层应为对象"); setDocumentValue(value as Record<string, unknown>);}
-    catch (cause) {setDocumentValue(null); setError(`无法读取 JSON：${cause instanceof Error ? cause.message : String(cause)}`);}
+    const current = ++readSequence.current;
+    request.current++;
+    setDocumentValue(null); setPreview(null); setPending(Boolean(file)); setError(""); setResult("");
+    setFilename(file?.name ?? "");
+    setOptions(previous => ({...previous, fragment_ids: []}));
+    if (!file) return;
+    try {
+      const value: unknown = JSON.parse(await file.text());
+      if (current !== readSequence.current) return;
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("JSON 顶层应为对象");
+      setDocumentValue(value as Record<string, unknown>);
+    } catch (cause) {
+      if (current === readSequence.current) setError(`无法读取 JSON：${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {if (current === readSequence.current) setPending(false);}
   };
   const commit = async () => {
     if (!documentValue || !preview) return; setPending(true); setError("");

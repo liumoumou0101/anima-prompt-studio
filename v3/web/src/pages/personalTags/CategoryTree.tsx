@@ -1,11 +1,16 @@
-import {useEffect, useRef, useState} from "react";
+import {useEffect, useState} from "react";
 import {CaretDown, CaretRight, Folder} from "@phosphor-icons/react";
 import type {CategoryRecord} from "../../lib/personalTags";
 
 export function CategoryTree({categories, selected, onSelect}: {categories: CategoryRecord[]; selected: string | null; onSelect: (id: string | null) => void}) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(categories.filter(item => item.parent_id === null).map(item => item.id)));
-  const knownRoots = useRef(new Set<string>());
-  useEffect(() => {const fresh = categories.filter(item => item.parent_id === null && !knownRoots.current.has(item.id)).map(item => item.id); if (fresh.length) {fresh.forEach(id => knownRoots.current.add(id)); setExpanded(previous => new Set([...previous, ...fresh]));}}, [categories]);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!selected) return;
+    const ancestors: string[] = [];
+    let current = categories.find(item => item.id === selected);
+    while (current?.parent_id) {ancestors.push(current.parent_id); current = categories.find(item => item.id === current?.parent_id);}
+    if (ancestors.length) setExpanded(previous => new Set([...previous, ...ancestors]));
+  }, [categories, selected]);
   const children = (parent: string | null) => categories.filter(item => item.parent_id === parent).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
   const branch = (parent: string | null, depth = 0): React.ReactNode => children(parent).map(item => {
     const hasChildren = children(item.id).length > 0;

@@ -32,7 +32,8 @@ export function PersonalTagsPage() {
   const guard = () => !editorDirty || window.confirm("编辑表单有未保存修改，确定离开吗？");
   const switchMode = async (next: "pick" | "manage") => {
     if (next === mode || !guard()) return;
-    if (!await composition.flush()) {setMessage("组合草稿尚未保存，请重试或处理保存错误"); return;}
+    if (composition.hasPendingChanges() && !await composition.flush()) {setMessage("组合草稿尚未保存，请重试或处理保存错误"); return;}
+    if (next === "pick") catalog.setTrash(false);
     setEditor(null); setEditorDirty(false); setMode(next);
   };
   useEffect(() => {
@@ -40,16 +41,16 @@ export function PersonalTagsPage() {
     handlingBlock.current = true;
     void (async () => {
       if (editorDirty && !window.confirm("编辑表单有未保存修改，确定离开吗？")) {blocker.reset(); return;}
-      if (await composition.flush()) blocker.proceed();
+      if (!composition.hasPendingChanges() || await composition.flush()) blocker.proceed();
       else {setMessage("组合草稿尚未保存，请重试或处理保存错误"); blocker.reset();}
     })().finally(() => {handlingBlock.current = false;});
-  }, [blocker, editorDirty, composition.flush]);
+  }, [blocker, editorDirty, composition.flush, composition.hasPendingChanges]);
   useEffect(() => {
-    const onUnload = (event: BeforeUnloadEvent) => {if (editorDirty || ["dirty", "saving", "error", "conflict"].includes(composition.saveState)) {event.preventDefault(); event.returnValue = "";}};
+    const onUnload = (event: BeforeUnloadEvent) => {if (editorDirty || composition.hasPendingChanges()) {event.preventDefault(); event.returnValue = "";}};
     window.addEventListener("beforeunload", onUnload);
     return () => window.removeEventListener("beforeunload", onUnload);
-  }, [editorDirty, composition.saveState]);
-  const openEditor = (tag: TagRecord | null) => {if (!guard()) return; void composition.flush().then(ok => {if (!ok) {setMessage("组合草稿尚未保存，请重试或处理保存错误"); return;} setEditor({kind: "tag", tag}); setEditorDirty(false); setMode("manage");});};
+  }, [editorDirty, composition.hasPendingChanges]);
+  const openEditor = (tag: TagRecord | null) => {if (!guard()) return; void (async () => {if (composition.hasPendingChanges() && !await composition.flush()) {setMessage("组合草稿尚未保存，请重试或处理保存错误"); return;} setEditor({kind: "tag", tag}); setEditorDirty(false); setMode("manage");})();};
   const saveTag = async (value: TagWrite, expectedRevision?: number) => {
     if (editor?.kind !== "tag") return;
     if (editor.tag) await personalTagsApi.updateTag(editor.tag.id, value, expectedRevision ?? editor.tag.revision);
@@ -64,7 +65,7 @@ export function PersonalTagsPage() {
     try {const bundle = await personalTagsApi.export(); const blob = new Blob([JSON.stringify(bundle, null, 2)], {type: "application/json"}); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "anima-personal-tags.json"; document.body.append(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); setMessage("已下载当前个人标签数据");}
     catch (cause) {setMessage(cause instanceof Error ? cause.message : String(cause));}
   };
-  const ordered = [...catalog.items].sort((a, b) => sort === "name" ? a.display_name.localeCompare(b.display_name, "zh") : sort === "updated" ? b.updated_at.localeCompare(a.updated_at) : 0);
+  const ordered = catalog.items.filter(item => mode !== "pick" || !item.deleted_at).sort((a, b) => sort === "name" ? a.display_name.localeCompare(b.display_name, "zh") : sort === "updated" ? b.updated_at.localeCompare(a.updated_at) : 0);
   const categoryName = catalog.categories.find(item => item.id === catalog.categoryId)?.name ?? "全部分类";
   return <div className="personal-tags-page">
     <header className="personal-tags-heading"><div><p className="eyebrow">PERSONAL TAG MARKET</p><h1>私人标签库</h1><p>搜索、整理并组合自己的提示词素材</p></div><div className="personal-tags-top-actions"><button type="button" className="button button--primary" onClick={() => openEditor(null)}><Plus />新增标签</button><button type="button" onClick={() => setImportOpen(true)}><UploadSimple />导入 JSON</button><button type="button" onClick={() => void exportBundle()}><DownloadSimple />导出 JSON</button></div></header>

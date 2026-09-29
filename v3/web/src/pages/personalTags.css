@@ -21,6 +21,7 @@
 .personal-tags-page .personal-tags-panel h2{font-size:1.1rem;margin:0 0 12px}
 .personal-tags-page .personal-tags-categories>label{display:flex;gap:6px;margin-top:12px;color:var(--muted);font-size:.9rem}
 .personal-tags-page .personal-tags-categories>button{margin-top:12px;color:var(--accent);border:0;background:transparent;padding:5px}
+.personal-tags-page .personal-tags-categories nav{max-height:min(70vh,720px);overflow:auto;overscroll-behavior:contain}
 .personal-tags-page .personal-tags-categories nav>button{width:100%;text-align:left;border:0;background:transparent;padding:7px;border-radius:5px}
 .personal-tags-page .personal-tags-categories nav>button.is-selected,.personal-tags-page .personal-tags-category-row.is-selected{background:var(--accent-soft);color:var(--accent)}
 .personal-tags-page .personal-tags-categories ul{list-style:none;margin:0;padding:0}

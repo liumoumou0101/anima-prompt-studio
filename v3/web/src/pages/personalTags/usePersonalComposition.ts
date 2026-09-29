@@ -12,6 +12,8 @@ export interface PersonalComposition {
   error: Error | null;
   /** Resolves true only when all edits made before and during this call reached the server. */
   flush: () => Promise<boolean>;
+  /** True only while local changes still need server acknowledgement. */
+  hasPendingChanges: () => boolean;
   /** Explicitly discards local edits and loads the current server draft. */
   reload: () => Promise<void>;
 }
@@ -166,5 +168,6 @@ export function usePersonalComposition(): PersonalComposition {
   }, [save]);
 
   const reload = useCallback(async (): Promise<void> => {await load(true);}, [load]);
-  return {items, setItems, saveState, error, flush, reload};
+  const hasPendingChanges = useCallback(() => dirty.current, []);
+  return {items, setItems, saveState, error, flush, hasPendingChanges, reload};
 }
