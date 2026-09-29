@@ -183,3 +183,38 @@ def test_composition_rejects_output_over_twenty_thousand_characters(tmp_path):
         compositions.save_draft([first, second], expected_revision=0)
     assert compositions.list() == []
     assert compositions.get_draft()["revision"] == 0
+
+
+def test_find_similar_matches_only_live_exact_normalized_content(tmp_path):
+    store = PersonalTagStore(tmp_path / "personal-tags.db")
+    first = store.create_tag(tag("甲", "long hair"))
+    second = store.create_tag(tag("乙", "long_hair"))
+    store.create_tag(tag("long hair", "different", aliases=["long hair"]))
+    store.create_tag(tag("丙", "long hair, extra"))
+
+    assert [x.id for x in store.find_similar("LONG_HAIR")] == [second.id, first.id]
+    assert [x.id for x in store.find_similar("long hair", exclude_id=first.id)] == [second.id]
+    store.set_tag_deleted(second.id, True, expected_revision=second.revision)
+    assert [x.id for x in store.find_similar("long hair")] == [first.id]
+    assert store.find_similar("long hair", exclude_id=first.id) == []
+
+
+def test_malformed_bulk_move_field_types_preserve_rows(tmp_path):
+    store = PersonalTagStore(tmp_path / "personal-tags.db")
+    original = store.create_tag(tag("原名", "raw"))
+    for malformed in ({"id": [], "revision": 1}, {"id": original.id, "revision": "1"}):
+        with pytest.raises(ValueError):
+            store.move_tags([malformed], None)
+    assert store.get_tag(original.id).revision == original.revision
+    assert store.get_tag(original.id).content == "raw"
+
+
+def test_long_import_alias_is_preserved_and_searchable(tmp_path):
+    store = PersonalTagStore(tmp_path / "personal-tags.db")
+    alias = "旧" * 418 + "名"
+    created = store.create_tag(tag("中文", "raw", aliases=[alias]))
+    assert store.get_tag(created.id).aliases == [alias]
+    assert [x.id for x in store.list_tags(q="旧名")["items"]] == [created.id]
+    assert [x.id for x in store.list_tags(q=alias[-20:])["items"]] == [created.id]
+    with pytest.raises(ValueError):
+        store.create_tag(tag("过长", "raw", aliases=["x" * 20_001]))

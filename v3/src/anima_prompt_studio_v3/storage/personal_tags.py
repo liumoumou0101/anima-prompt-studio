@@ -97,6 +97,7 @@ class PersonalTagStore:
     def _connect(self, *, write: bool = False):
         db = sqlite3.connect(self.path, timeout=5)
         db.row_factory = sqlite3.Row
+        db.create_function("normalized_content", 1, normalize_search, deterministic=True)
         db.execute("PRAGMA foreign_keys = ON")
         db.execute("PRAGMA busy_timeout = 5000")
         try:
@@ -207,6 +208,26 @@ class PersonalTagStore:
         return {"items": [_tag(row) for row in rows], "total": total, "offset": offset,
                 "limit": limit, "has_more": offset + len(rows) < total}
 
+    def find_similar(self, content: str, *, exclude_id: str | None = None,
+                     limit: int = 20) -> list[TagRecord]:
+        """Find live content variants using exact normalized equality."""
+        if not isinstance(content, str) or not content.strip() or len(content) > 20_000:
+            raise ValueError("content must be nonempty and at most 20000 characters")
+        if exclude_id is not None and not isinstance(exclude_id, str):
+            raise ValueError("exclude_id must be a string")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+            raise ValueError("limit must be 1..200")
+        sql = """SELECT * FROM personal_tags
+            WHERE deleted_at IS NULL AND normalized_content(content)=?"""
+        params: list[object] = [normalize_search(content)]
+        if exclude_id is not None:
+            sql += " AND id<>?"
+            params.append(exclude_id)
+        sql += " ORDER BY display_sort, display_name, id LIMIT ?"
+        params.append(limit)
+        with self._connect() as db:
+            return [_tag(row) for row in db.execute(sql, params).fetchall()]
+
     def list_categories(self, *, trash: bool = False) -> list[CategoryRecord]:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM personal_categories WHERE deleted_at IS NOT NULL" if trash
@@ -262,8 +283,11 @@ class PersonalTagStore:
             return _category(self._require(db, "personal_categories", category_id))
 
     def move_tags(self, items: list[dict], category_id: str | None) -> int:
-        if any(not isinstance(entry, dict) or "id" not in entry or "revision" not in entry for entry in items):
-            raise ValueError("Each batch item needs id and revision")
+        if any(not isinstance(entry, dict)
+               or not isinstance(entry.get("id"), str) or not entry["id"]
+               or isinstance(entry.get("revision"), bool)
+               or not isinstance(entry.get("revision"), int) for entry in items):
+            raise ValueError("Each batch item needs a string id and integer revision")
         if len({entry.get("id") for entry in items}) != len(items):
             raise ValueError("Duplicate tag IDs in batch")
         with self._connect(write=True) as db:

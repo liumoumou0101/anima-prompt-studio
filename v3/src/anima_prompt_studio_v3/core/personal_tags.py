@@ -53,7 +53,7 @@ class TagWrite(_Model):
     @classmethod
     def aliases_valid(cls, value: list[str]) -> list[str]:
         for alias in value:
-            _text(alias, 200, "alias")
+            _text(alias, 20_000, "alias")
         return value
 
     @field_validator("notes")
