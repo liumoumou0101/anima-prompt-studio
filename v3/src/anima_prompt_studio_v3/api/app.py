@@ -295,7 +295,13 @@ def create_api_runtime(
                     parsed_length = int(content_length)
                     if parsed_length < 0:
                         return _error_response(request, 400, "invalid_request", "Content-Length 无效。")
-                    if parsed_length > (21 * 1024 * 1024 if is_reference_upload else MAX_JSON_BODY):
+                    is_personal_import = request.url.path in {
+                        f"{API_PREFIX}/personal-tags/imports/preview",
+                        f"{API_PREFIX}/personal-tags/imports/commit",
+                    }
+                    body_limit = (21 * 1024 * 1024 if is_reference_upload else
+                                  50 * 1024 * 1024 if is_personal_import else MAX_JSON_BODY)
+                    if parsed_length > body_limit:
                         return _error_response(request, 413, "invalid_request", "请求体超过允许大小。")
                 except ValueError:
                     return _error_response(request, 400, "invalid_request", "Content-Length 无效。")
@@ -425,6 +431,8 @@ def create_api_runtime(
     register_prompt_tag_routes(app, require_reference_db, require_session)
 
     if workspace_db is not None:
+        from .personal_tags import register_personal_tag_routes
+        register_personal_tag_routes(app, workspace_db, require_session)
         from .reference_examples import register_reference_routes
         register_reference_routes(app, workspace_db, require_session)
         from .identities import register_identity_routes
