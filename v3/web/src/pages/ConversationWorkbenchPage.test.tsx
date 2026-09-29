@@ -3,10 +3,261 @@ import {MemoryRouter} from "react-router-dom";
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {ConversationWorkbenchPage} from "./ConversationWorkbenchPage";
 import {transferUrl} from "../lib/contentTransfer";
-import {emptyRequirements, hasUncompiledInputs} from "../lib/conversation";
+import {editableRequirements, emptyRequirements, hasUncompiledInputs} from "../lib/conversation";
 import type {ConversationRecord} from "../lib/conversation";
 import {readConversationDraft, recoverConversationPending} from "../lib/conversationDrafts";
 import {defaultGenerationSettings} from "../lib/generationSettings";
+
+function personalTransfer(positive = " Blue_Sky,\n(Cat:1.2) ", negative = "bad_hands") {
+  const id = "personal-test";
+  localStorage.setItem("anima-personal-prompt-transfer:" + id, JSON.stringify({version: 1, id, positive, negative}));
+  return "/workbench?personal_transfer=" + id;
+}
+function personalServer() {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let saved: {id: string; workspace_id: string; result_revision: number; state: "applied" | "undone"; can_undo: boolean; undo_revision: number | null} | null = null;
+  let before: ConversationRecord["draft"]["compiled"] = null;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (!url.includes("/personal-prompt-transfers")) return original(input, init);
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if (body) writes.push({url, method: init?.method || "GET", body, key: null});
+    if (!body && !saved) return new Response(JSON.stringify({error: {code: "personal_prompt_transfer_not_found", message: "未找到回执"}}), {status: 404});
+    if (url.endsWith("/undo") && saved) {
+      workspace = {...workspace, revision: workspace.revision + 1, draft: {...workspace.draft, compiled: before}};
+      saved = {...saved, state: "undone", can_undo: false, undo_revision: workspace.revision};
+    } else if (body && !saved) {
+      before = workspace.draft.compiled;
+      workspace = {...workspace, revision: workspace.revision + 1, draft: {...workspace.draft, compiled: {
+        positive: (before?.positive && body.positive ? before.positive + "\n" : before?.positive || "") + body.positive,
+        negative: (before?.negative && body.negative ? before.negative + "\n" : before?.negative || "") + body.negative,
+        source: "user", compiled_token: "personal-token"}}};
+      saved = {id: body.transfer_id, workspace_id: workspace.id, result_revision: workspace.revision, state: "applied", can_undo: true, undo_revision: null};
+    }
+    return new Response(JSON.stringify({workspace, receipt: saved, replayed: !body}));
+  });
+}
+async function confirmPersonal() {
+  await waitFor(() => expect(screen.getByRole("button", {name: "确认追加原文"})).toBeEnabled(), {timeout: 3000});
+  fireEvent.click(screen.getByRole("button", {name: "确认追加原文"}));
+}
+it("retries opening the existing workspace after load failure without creating a replacement", async () => {
+  personalServer();
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let unavailable = true;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    if (unavailable && String(input).endsWith("/workspaces/workspace_test")) throw new TypeError("offline");
+    return original(input, init);
+  });
+  render(<MemoryRouter initialEntries={[personalTransfer()]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await screen.findByText(/无法连接本地服务/);
+  unavailable = false;
+  fireEvent.click(screen.getByRole("button", {name: "保存并重新预览"}));
+  await screen.findByLabelText("追加后正向提示词");
+  expect(screen.getByLabelText("追加前正向提示词")).toHaveValue("cat");
+  expect(writes).toHaveLength(0);
+});
+it("reloads unresolved proposal state before retrying personal preview with a dirty recovered draft", async () => {
+  personalServer();
+  pendingProposal = {id: "proposal_test", workspace_id: workspace.id, base_revision: 3, draft: workspace.draft,
+    changed_layers: [], warnings: [], created_at: "2026-09-29"};
+  localStorage.setItem("anima-conversation-draft:workspace_test", JSON.stringify({baseRevision: 3, delta: "keep idea",
+    mode: "faithful", requirements: editableRequirements(workspace), positive: "unsaved local cat", negative: "",
+    model: "anima_base_v1", settings: workspace.draft.generation_settings}));
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let proposalReads = 0;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    if (String(input).endsWith("/proposal") && ++proposalReads === 1) throw new TypeError("proposal temporarily unavailable");
+    return original(input, init);
+  });
+  render(<MemoryRouter initialEntries={[personalTransfer()]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await screen.findByText(/无法连接本地服务/);
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("unsaved local cat");
+  fireEvent.click(screen.getByRole("button", {name: "保存并重新预览"}));
+  await screen.findByText("请先接受或放弃待处理的提示词草案。");
+  expect(proposalReads).toBe(2);
+  expect(writes).toHaveLength(0);
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("unsaved local cat");
+  expect(screen.getByLabelText("这次想怎么改？")).toHaveValue("keep idea");
+  expect(screen.getByRole("button", {name: "确认追加原文"})).toBeDisabled();
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).not.toBeNull();
+});
+it("does not consume a transfer for a malformed success without a durable receipt", async () => {
+  personalServer();
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith("/personal-prompt-transfers") && init?.method === "POST"
+    ? new Response(JSON.stringify({workspace, replayed: false})) : original(input, init));
+  render(<MemoryRouter initialEntries={[personalTransfer()]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await confirmPersonal();
+  await screen.findByText("追加回执未确认，请重试查询。");
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).not.toBeNull();
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("cat");
+});
+it("recovers a lost personal append response without overwriting later server changes", async () => {
+  personalServer(); const url = personalTransfer();
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const response = await original(input, init);
+    if (String(input).endsWith("/personal-prompt-transfers") && init?.method === "POST") {
+      workspace = {...workspace, revision: workspace.revision + 1, draft: {...workspace.draft, compiled: {...workspace.draft.compiled!, positive: "later remote cat"}}};
+      throw new TypeError("lost");
+    }
+    return response;
+  });
+  const view = render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await confirmPersonal();
+  await screen.findByText(/无法连接本地服务/);
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).not.toBeNull();
+  view.unmount();
+  render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await screen.findByRole("button", {name: "撤销本次追加"});
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("later remote cat");
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).toBeNull();
+  expect(writes).toHaveLength(1);
+});
+it("late personal replay preserves new local prompt edits through the conflict workflow", async () => {
+  personalServer(); const url = personalTransfer();
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let release!: () => void;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const response = await original(input, init);
+    if (String(input).endsWith("/personal-prompt-transfers") && init?.method === "POST") {
+      await new Promise<void>(resolve => {release = resolve;});
+      return new Response(JSON.stringify({...await response.json(), replayed: true}));
+    }
+    return response;
+  });
+  render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await confirmPersonal();
+  await waitFor(() => expect(release).toBeTypeOf("function"));
+  expect(screen.getByRole("button", {name: "确认追加原文"})).toBeDisabled();
+  // An editor event queued before the request lock settles must not be lost to a late response.
+  fireEvent.change(screen.getByLabelText("正向提示词"), {target: {value: "new local cat"}});
+  await act(async () => release());
+  await screen.findByText("其他窗口已保存了更新，你的编辑仍在这里。");
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("new local cat");
+  expect(screen.getByRole("button", {name: "撤销本次追加"})).toBeDisabled();
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).toBeNull();
+});
+it.each(["workspace_busy", "workspace_proposal_pending", "workspace_revision_conflict"])("keeps personal preview and transfer after %s", async code => {
+  personalServer();
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith("/personal-prompt-transfers") && init?.method === "POST"
+    ? new Response(JSON.stringify({error: {code, message: "暂不能追加"}}), {status: 409}) : original(input, init));
+  render(<MemoryRouter initialEntries={[personalTransfer()]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await confirmPersonal(); await screen.findByText("暂不能追加");
+  expect(screen.getByLabelText("追加后正向提示词")).toHaveValue("cat\n Blue_Sky,\n(Cat:1.2) ");
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).not.toBeNull();
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("cat");
+});
+it("keeps a pending proposal and does not flush or append personal text", async () => {
+  personalServer();
+  pendingProposal = {id: "proposal_test", workspace_id: workspace.id, base_revision: 3, draft: workspace.draft, changed_layers: [], warnings: [], created_at: "2026-09-29"};
+  render(<MemoryRouter initialEntries={[personalTransfer()]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await screen.findByText("请先接受或放弃待处理的提示词草案。");
+  expect(screen.getByRole("button", {name: "确认追加原文"})).toBeDisabled();
+  expect(writes).toHaveLength(0);
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).not.toBeNull();
+});
+it("retries personal workspace creation with the same frozen body and transfer-derived key", async () => {
+  personalServer(); localStorage.removeItem("anima-conversation-active");
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let lost = true;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const response = await original(input, init);
+    if (String(input) === "/api/v3/workspaces" && init?.method === "POST" && lost) {lost = false; throw new TypeError("lost");}
+    return response;
+  });
+  render(<MemoryRouter initialEntries={[personalTransfer()]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await screen.findByText(/无法连接本地服务/);
+  fireEvent.click(screen.getByRole("button", {name: "保存并重新预览"}));
+  await screen.findByLabelText("追加后正向提示词");
+  const created = writes.filter(item => item.url === "/api/v3/workspaces");
+  expect(created).toHaveLength(2);
+  expect(created[0].key).toBe("personal-prompt:personal-test");
+  expect(created[1].key).toBe(created[0].key);
+  expect(created[1].body).toEqual(created[0].body);
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).not.toBeNull();
+});
+it("disables snapshot undo after local prompt edits and keeps those edits", async () => {
+  personalServer();
+  render(<MemoryRouter initialEntries={[personalTransfer()]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await confirmPersonal();
+  await waitFor(() => expect(screen.getByRole("button", {name: "撤销本次追加"})).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("正向提示词"), {target: {value: "later local cat"}});
+  expect(screen.getByRole("button", {name: "撤销本次追加"})).toBeDisabled();
+  expect(screen.getByText("追加后已继续编辑，请在提示词中手动移除")).toBeInTheDocument();
+  expect(writes).toHaveLength(1);
+});
+it("previews_cancels_and_recovers_personal_transfer", async () => {
+  personalServer(); const url = personalTransfer();
+  const view = render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await screen.findByLabelText("追加后正向提示词");
+  expect(screen.getByLabelText("追加后正向提示词")).toHaveValue("cat\n Blue_Sky,\n(Cat:1.2) ");
+  expect(writes).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", {name: "取消追加"}));
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("cat");
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).not.toBeNull();
+  view.unmount();
+  const remount = render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await waitFor(() => expect(screen.getByRole("button", {name: "确认追加原文"})).toBeEnabled(), {timeout: 3000});
+  fireEvent.click(screen.getByRole("button", {name: "确认追加原文"}));
+  await screen.findByRole("button", {name: "撤销本次追加"});
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("cat\n Blue_Sky,\n(Cat:1.2) ");
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).toBeNull();
+  expect(writes).toHaveLength(1);
+  expect(writes[0].body).toEqual({transfer_id: "personal-test", revision: 3, positive: " Blue_Sky,\n(Cat:1.2) ", negative: "bad_hands"});
+  remount.unmount();
+  render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await waitFor(() => expect(screen.getByRole("button", {name: "撤销本次追加"})).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", {name: "撤销本次追加"}));
+  await waitFor(() => expect(screen.getByLabelText("正向提示词")).toHaveValue("cat"));
+  expect(writes).toHaveLength(2);
+  expect(writes.every(item => !item.url.includes("/turns") && !item.url.includes("/runs"))).toBe(true);
+});
+it("flushes workbench edits before showing the preview and preserves unsent ideas and settings", async () => {
+  personalServer(); const url = personalTransfer();
+  localStorage.setItem("anima-conversation-draft:workspace_test", JSON.stringify({baseRevision: 3, delta: "keep idea", mode: "faithful", requirements: editableRequirements(workspace), positive: "local cat", negative: "local bad", model: "anima_base_v1", settings: {...workspace.draft.generation_settings, cfg: 7}}));
+  render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await screen.findByLabelText("追加后正向提示词");
+  expect(writes).toHaveLength(1);
+  expect(writes[0].method).toBe("PUT");
+  expect(writes[0].body.draft).toMatchObject({prompt_edit: {positive: "local cat", negative: "local bad"}, generation_settings: {cfg: 7}});
+  expect(screen.getByLabelText("追加前正向提示词")).toHaveValue("local cat");
+  await waitFor(() => expect(screen.getByRole("button", {name: "确认追加原文"})).toBeEnabled(), {timeout: 3000});
+  fireEvent.click(screen.getByRole("button", {name: "确认追加原文"}));
+  await screen.findByRole("button", {name: "撤销本次追加"});
+  expect(screen.getByLabelText("这次想怎么改？")).toHaveValue("keep idea");
+  expect(workspace.draft.generation_settings?.cfg).toBe(7);
+});
+it("keeps_transfer_on_save_failure", async () => {
+  personalServer(); const url = personalTransfer();
+  localStorage.setItem("anima-conversation-draft:workspace_test", JSON.stringify({baseRevision: 3, delta: "", mode: "faithful", requirements: editableRequirements(workspace), positive: "local cat", negative: "", model: "anima_base_v1", settings: workspace.draft.generation_settings}));
+  failure = "conflict";
+  render(<MemoryRouter initialEntries={[url]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await screen.findByText("已有更新");
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).not.toBeNull();
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("local cat");
+  expect(writes.some(item => item.url.endsWith("/personal-prompt-transfers"))).toBe(false);
+});
+it("negative_only_empty_target_is_not_false_success", async () => {
+  personalServer(); workspace.draft.compiled = null;
+  render(<MemoryRouter initialEntries={[personalTransfer("", "bad_hands")]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await screen.findByText("请先在工作台填写正向提示词，再追加这段负向内容");
+  expect(screen.getByRole("button", {name: "确认追加原文"})).toBeDisabled();
+  expect(writes).toHaveLength(0);
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).not.toBeNull();
+});
+it("undo restores an originally empty compiled prompt without fabricating positive text", async () => {
+  personalServer(); workspace.draft.compiled = null;
+  render(<MemoryRouter initialEntries={[personalTransfer("cat", "bad")]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await waitFor(() => expect(screen.getByRole("button", {name: "确认追加原文"})).toBeEnabled(), {timeout: 3000});
+  fireEvent.click(screen.getByRole("button", {name: "确认追加原文"}));
+  await waitFor(() => expect(screen.getByRole("button", {name: "撤销本次追加"})).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", {name: "撤销本次追加"}));
+  await waitFor(() => expect(screen.getByLabelText("正向提示词")).toHaveValue(""));
+  expect(workspace.draft.compiled).toBeNull();
+});
 
 let workspace: ConversationRecord;
 let pendingProposal: {id: string; workspace_id: string; base_revision: number; draft: ConversationRecord["draft"]; changed_layers: string[]; warnings: string[]; created_at: string} | null;

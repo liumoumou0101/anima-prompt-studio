@@ -295,7 +295,13 @@ def create_api_runtime(
                     parsed_length = int(content_length)
                     if parsed_length < 0:
                         return _error_response(request, 400, "invalid_request", "Content-Length 无效。")
-                    if parsed_length > (21 * 1024 * 1024 if is_reference_upload else MAX_JSON_BODY):
+                    is_personal_import = request.url.path in {
+                        f"{API_PREFIX}/personal-tags/imports/preview",
+                        f"{API_PREFIX}/personal-tags/imports/commit",
+                    }
+                    body_limit = (21 * 1024 * 1024 if is_reference_upload else
+                                  50 * 1024 * 1024 if is_personal_import else MAX_JSON_BODY)
+                    if parsed_length > body_limit:
                         return _error_response(request, 413, "invalid_request", "请求体超过允许大小。")
                 except ValueError:
                     return _error_response(request, 400, "invalid_request", "Content-Length 无效。")
@@ -333,6 +339,9 @@ def create_api_runtime(
         status = {"rate_limited": 429, "llm_generation_failed": 502,
                   "workspace_contract_unsupported": 409, "reference_preset_not_found": 404,
                   "example_revision_conflict": 409, "reference_version_conflict": 409,
+                  "personal_prompt_transfer_conflict": 409, "personal_prompt_undo_conflict": 409,
+                  "workspace_proposal_pending": 409, "workspace_busy": 409,
+                  "personal_prompt_transfer_not_found": 404,
                   "ingest_superseded": 409}.get(exc.code, 422)
         return _error_response(request, status, exc.code, str(exc))
 
@@ -425,6 +434,8 @@ def create_api_runtime(
     register_prompt_tag_routes(app, require_reference_db, require_session)
 
     if workspace_db is not None:
+        from .personal_tags import register_personal_tag_routes
+        register_personal_tag_routes(app, workspace_db, require_session)
         from .reference_examples import register_reference_routes
         register_reference_routes(app, workspace_db, require_session)
         from .identities import register_identity_routes
@@ -438,6 +449,8 @@ def create_api_runtime(
 
     from .scene_design import register_scene_design_routes
     register_scene_design_routes(app, require_workspace_store, require_session)
+    from .personal_prompt_transfer import register_personal_prompt_transfer_routes
+    register_personal_prompt_transfer_routes(app, require_workspace_store, require_session)
 
     def require_v2_settings_database() -> Path:
         database = app.state.v2_database

@@ -9,7 +9,9 @@ import sqlite3
 from typing import Any, Callable
 from uuid import uuid4
 
-from ..core.requirements import apply_workspace_edit, project_conversation
+from pydantic import ValidationError
+
+from ..core.requirements import PromptEdit, WorkbenchError, apply_workspace_edit, project_conversation
 
 
 class WorkspaceNotFoundError(LookupError):
@@ -45,6 +47,7 @@ class WorkspaceStore:
 
     def __init__(self, path: Path) -> None:
         self.path = path.resolve()
+        self.prepare_personal_prompt_write: Callable[[str], Callable[[sqlite3.Connection], None]] | None = None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.executescript(
@@ -65,6 +68,18 @@ class WorkspaceStore:
                     idempotency_key TEXT PRIMARY KEY,
                     payload_hash TEXT NOT NULL,
                     workspace_id TEXT NOT NULL UNIQUE REFERENCES workspaces(id)
+                );
+                CREATE TABLE IF NOT EXISTS workspace_prompt_transfers (
+                    transfer_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+                    payload_hash TEXT NOT NULL,
+                    before_compiled_json TEXT NOT NULL,
+                    after_positive TEXT NOT NULL,
+                    after_negative TEXT NOT NULL,
+                    result_revision INTEGER NOT NULL,
+                    state TEXT NOT NULL CHECK (state IN ('applied', 'undone')),
+                    undo_revision INTEGER,
+                    created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS workspace_versions (
                     workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -192,6 +207,104 @@ class WorkspaceStore:
             result = self._save_revision(connection, row, title=title, draft_json=serialized,
                                          candidate_snapshot_json=serialized_snapshot)
         return result
+
+    def append_personal_prompt(self, workspace_id: str, *, transfer_id: str,
+                               expected_revision: int, positive: str, negative: str) -> dict[str, Any]:
+        if not isinstance(transfer_id, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", transfer_id) is None:
+            raise WorkbenchError("invalid_request", "传递标识格式不正确。")
+        if (not isinstance(positive, str) or not isinstance(negative, str)
+                or len(positive) > 20_000 or len(negative) > 20_000
+                or not (positive.strip() or negative.strip())):
+            raise WorkbenchError("invalid_request", "正负内容不能都为空，每段最多 20,000 字符。")
+        payload_hash = hashlib.sha256(_serialize_draft({"positive": positive, "negative": negative}).encode("utf-8")).hexdigest()
+        guard = self.prepare_personal_prompt_write(workspace_id) if self.prepare_personal_prompt_write else None
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = connection.execute("SELECT * FROM workspace_prompt_transfers WHERE transfer_id=?", (transfer_id,)).fetchone()
+            if previous is not None:
+                if previous["workspace_id"] != workspace_id or previous["payload_hash"] != payload_hash:
+                    raise WorkbenchError("personal_prompt_transfer_conflict", "同一传递标识不能用于不同内容或工作台。")
+                return self._prompt_transfer_result(connection, previous, replayed=True)
+            row = self._require_row(connection, workspace_id, expected_revision)
+            self._require_personal_prompt_writable(connection, workspace_id, guard)
+            current = project_conversation(json.loads(row["draft_json"]))
+            before = current.get("compiled")
+            old = before or {"positive": "", "negative": ""}
+            # A newline is the only inserted text. Even whitespace-only sides
+            # retain their original bytes when the other side has content.
+            after = {key: old[key] + ("\n" if old[key] and addition else "") + addition
+                     for key, addition in (("positive", positive), ("negative", negative))}
+            if not after["positive"].strip():
+                raise WorkbenchError("personal_prompt_positive_required", "请先在工作台填写正向提示词，再追加这段负向内容")
+            try:
+                PromptEdit.model_validate(after)
+            except ValidationError:
+                raise WorkbenchError("invalid_request", "追加后的正负提示词每段最多 20,000 字符。") from None
+            # Full current input preserves model, generation settings and
+            # arbitrary persistent fields under apply_workspace_edit's contract.
+            draft = apply_workspace_edit(current, {**current, "prompt_edit": after})
+            result = self._save_revision(connection, row, title=row["title"],
+                draft_json=_serialize_draft(_persistent_draft(draft)), candidate_snapshot_json=row["candidate_snapshot_json"])
+            connection.execute("""INSERT INTO workspace_prompt_transfers
+                (transfer_id,workspace_id,payload_hash,before_compiled_json,after_positive,after_negative,result_revision,state,created_at)
+                VALUES(?,?,?,?,?,?,?,'applied',?)""", (transfer_id, workspace_id, payload_hash,
+                    json.dumps(before, ensure_ascii=False, allow_nan=False), after["positive"], after["negative"], result["revision"], _utc_now()))
+            receipt = connection.execute("SELECT * FROM workspace_prompt_transfers WHERE transfer_id=?", (transfer_id,)).fetchone()
+            return self._prompt_transfer_result(connection, receipt, replayed=False)
+
+    def undo_personal_prompt(self, workspace_id: str, *, transfer_id: str,
+                             expected_revision: int) -> dict[str, Any]:
+        guard = self.prepare_personal_prompt_write(workspace_id) if self.prepare_personal_prompt_write else None
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            receipt = self._require_prompt_transfer(connection, workspace_id, transfer_id)
+            if receipt["state"] == "undone":
+                return self._prompt_transfer_result(connection, receipt, replayed=True)
+            row = self._require_row(connection, workspace_id, expected_revision)
+            self._require_personal_prompt_writable(connection, workspace_id, guard)
+            draft = json.loads(row["draft_json"])
+            if not self._prompt_transfer_matches(receipt, draft):
+                raise WorkbenchError("personal_prompt_undo_conflict", "追加后已继续编辑，请在提示词中手动移除")
+            draft["compiled"] = json.loads(receipt["before_compiled_json"])
+            result = self._save_revision(connection, row, title=row["title"],
+                draft_json=_serialize_draft(_persistent_draft(draft)), candidate_snapshot_json=row["candidate_snapshot_json"])
+            connection.execute("UPDATE workspace_prompt_transfers SET state='undone',undo_revision=? WHERE transfer_id=?",
+                               (result["revision"], transfer_id))
+            return self._prompt_transfer_result(connection, self._require_prompt_transfer(connection, workspace_id, transfer_id), replayed=False)
+
+    def get_personal_prompt_transfer(self, workspace_id: str, transfer_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            return self._prompt_transfer_result(connection, self._require_prompt_transfer(connection, workspace_id, transfer_id), replayed=True)
+
+    def _require_personal_prompt_writable(self, connection: sqlite3.Connection, workspace_id: str,
+                                         guard: Callable[[sqlite3.Connection], None] | None) -> None:
+        if connection.execute("SELECT 1 FROM workspace_proposals WHERE workspace_id=?", (workspace_id,)).fetchone():
+            raise WorkbenchError("workspace_proposal_pending", "请先接受或放弃工作台中待处理的建议。")
+        if guard is not None:
+            guard(connection)
+
+    def _require_prompt_transfer(self, connection: sqlite3.Connection, workspace_id: str, transfer_id: str) -> sqlite3.Row:
+        self._require_row(connection, workspace_id)
+        receipt = connection.execute("SELECT * FROM workspace_prompt_transfers WHERE transfer_id=?", (transfer_id,)).fetchone()
+        if receipt is None:
+            raise WorkbenchError("personal_prompt_transfer_not_found", "追加回执不存在。")
+        if receipt["workspace_id"] != workspace_id:
+            raise WorkbenchError("personal_prompt_transfer_conflict", "传递标识属于另一个工作台。")
+        return receipt
+
+    @staticmethod
+    def _prompt_transfer_matches(receipt: sqlite3.Row, draft: dict[str, Any]) -> bool:
+        compiled = draft.get("compiled") or {}
+        return all(compiled.get(key) == receipt[f"after_{key}"] for key in ("positive", "negative"))
+
+    def _prompt_transfer_result(self, connection: sqlite3.Connection, receipt: sqlite3.Row, *, replayed: bool) -> dict[str, Any]:
+        workspace = self._record(self._require_row(connection, receipt["workspace_id"]))
+        return {"workspace": workspace, "replayed": replayed, "receipt": {
+            "id": receipt["transfer_id"], "workspace_id": receipt["workspace_id"],
+            "result_revision": receipt["result_revision"], "state": receipt["state"],
+            "undo_revision": receipt["undo_revision"], "created_at": receipt["created_at"],
+            "can_undo": receipt["state"] == "applied" and self._prompt_transfer_matches(receipt, workspace["draft"])}}
 
     def transform(
         self, workspace_id: str, *, expected_revision: int,

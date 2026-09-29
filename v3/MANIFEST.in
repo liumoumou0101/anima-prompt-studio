@@ -1,1 +1,2 @@
 recursive-include example-packs *.json *.txt *.webp *.md
+recursive-include src/anima_prompt_studio_v3/seed_data *.json

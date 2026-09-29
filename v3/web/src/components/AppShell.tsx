@@ -9,6 +9,7 @@ const primaryNav = [
   {to: "/references", icon: Images, label: "参考案例"},
   {to: "/artists", icon: PaintBrush, label: "画师"},
   {to: "/tags", icon: Hash, label: "标签"},
+  {to: "/personal-tags", icon: Hash, label: "个人标签超市"},
   {to: "/gallery", icon: Images, label: "画廊"},
 ];
 const toolNav = [

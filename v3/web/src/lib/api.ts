@@ -6,18 +6,25 @@ let initialization: Promise<BootstrapResponse> | null = null;
 let recovery: Promise<void> | null = null;
 let pendingBootstrap: string | null = null;
 type SessionResponse = {session_token: string; recovery_token?: string};
+export type ApiErrorDetails = Record<string, unknown> & {
+  current_revision?: number;
+  current?: unknown;
+};
 
 export class ApiClientError extends Error {
   readonly code: string;
   readonly requestId?: string;
   readonly retryable: boolean;
+  readonly details?: ApiErrorDetails;
 
-  constructor(message: string, code = "network_error", requestId?: string, retryable = false) {
+  constructor(message: string, code = "network_error", requestId?: string, retryable = false,
+              details?: ApiErrorDetails) {
     super(message);
     this.name = "ApiClientError";
     this.code = code;
     this.requestId = requestId;
     this.retryable = retryable;
+    this.details = details;
   }
 }
 
@@ -164,6 +171,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
       apiError.error?.code || "request_failed",
       apiError.error?.request_id,
       apiError.error?.retryable || false,
+      apiError.error?.details,
     );
   }
   return payload as T;

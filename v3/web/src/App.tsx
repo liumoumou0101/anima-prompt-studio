@@ -1,5 +1,5 @@
 import {useEffect, useState} from "react";
-import {BrowserRouter, Navigate, Route, Routes} from "react-router-dom";
+import {Navigate, Route, Routes} from "react-router-dom";
 import {apiRequest, ApiClientError, initializeApp} from "./lib/api";
 import {loadGallery, primeGallery} from "./lib/galleryStore";
 import type {BootstrapResponse, GalleryProcessJob, GenerationRunListResponse} from "./lib/types";
@@ -18,6 +18,7 @@ import {WorkflowsPage} from "./pages/WorkflowsPage";
 import {ReferencesPage} from "./pages/ReferencesPage";
 import {ArtistSearchPage} from "./pages/ArtistSearchPage";
 import {ArtistDetailPage} from "./pages/ArtistDetailPage";
+import {PersonalTagsPage} from "./pages/PersonalTagsPage";
 
 export default function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapResponse | null>(null);
@@ -81,7 +82,6 @@ export default function App() {
   }} /></StartupFrame>;
   if (!bootstrap) return <StartupFrame><LoadingState label="正在建立本地安全会话…" /></StartupFrame>;
   return (
-    <BrowserRouter>
       <Routes>
         <Route element={<AppShell bootstrap={bootstrap} />}>
           <Route index element={<Navigate to="/workbench" replace />} />
@@ -89,6 +89,7 @@ export default function App() {
           <Route path="workbench/conversation" element={<ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="direct" element={<DirectPromptPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="tags" element={<TagSearchPage />} />
+          <Route path="personal-tags" element={<PersonalTagsPage />} />
           <Route path="tags/groups/:groupName" element={<TagGroupPage />} />
           <Route path="tags/ungrouped" element={<TagUngroupedPage />} />
           <Route path="tags/:name" element={<TagDetailPage />} />
@@ -102,7 +103,6 @@ export default function App() {
           <Route path="*" element={<Navigate to="/workbench" replace />} />
         </Route>
       </Routes>
-    </BrowserRouter>
   );
 }
 

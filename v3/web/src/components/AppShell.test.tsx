@@ -36,7 +36,7 @@ describe("shared appearance shell", () => {
   it("keeps every prior route available and shares controls without a provider", () => {
     render(<MemoryRouter><Routes><Route path="*" element={<AppShell bootstrap={bootstrap} />} /></Routes><section aria-label="设置外观"><AppearanceControls /></section></MemoryRouter>);
     fireEvent.click(screen.getByText("更多工具"));
-    for (const label of ["工作台", "参考案例", "画师", "标签", "画廊", "英文直出", "生成", "工作流", "设置"]) expect(screen.getByRole("link", {name: label})).toBeInTheDocument();
+    for (const label of ["工作台", "参考案例", "画师", "标签", "个人标签超市", "画廊", "英文直出", "生成", "工作流", "设置"]) expect(screen.getByRole("link", {name: label})).toBeInTheDocument();
     const layouts = screen.getAllByLabelText("界面布局"); const themes = screen.getAllByLabelText("明暗主题");
     fireEvent.change(layouts[1], {target: {value: "editorial"}});
     fireEvent.change(themes[0], {target: {value: "light"}});
