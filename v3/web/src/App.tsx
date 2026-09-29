@@ -1,5 +1,5 @@
 import {useEffect, useState} from "react";
-import {BrowserRouter, Navigate, Route, Routes} from "react-router-dom";
+import {Navigate, Route, Routes} from "react-router-dom";
 import {apiRequest, ApiClientError, initializeApp} from "./lib/api";
 import {loadGallery, primeGallery} from "./lib/galleryStore";
 import type {BootstrapResponse, GalleryProcessJob, GenerationRunListResponse} from "./lib/types";
@@ -82,7 +82,6 @@ export default function App() {
   }} /></StartupFrame>;
   if (!bootstrap) return <StartupFrame><LoadingState label="正在建立本地安全会话…" /></StartupFrame>;
   return (
-    <BrowserRouter>
       <Routes>
         <Route element={<AppShell bootstrap={bootstrap} />}>
           <Route index element={<Navigate to="/workbench" replace />} />
@@ -104,7 +103,6 @@ export default function App() {
           <Route path="*" element={<Navigate to="/workbench" replace />} />
         </Route>
       </Routes>
-    </BrowserRouter>
   );
 }
 

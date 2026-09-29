@@ -1,5 +1,5 @@
-import {useCallback, useEffect, useState} from "react";
-import {useNavigate} from "react-router-dom";
+import {useCallback, useEffect, useRef, useState} from "react";
+import {useBlocker} from "react-router-dom";
 import {DownloadSimple, Plus, UploadSimple} from "@phosphor-icons/react";
 import {addCompositionItem} from "../lib/personalTagComposition";
 import {personalTagsApi, type TagRecord, type TagWrite} from "../lib/personalTags";
@@ -19,7 +19,8 @@ type Editor = {kind: "tag"; tag: TagRecord | null} | {kind: "category"} | null;
 export function PersonalTagsPage() {
   const catalog = usePersonalCatalog();
   const composition = usePersonalComposition();
-  const navigate = useNavigate();
+  const blocker = useBlocker(({currentLocation, nextLocation}) => currentLocation.pathname === "/personal-tags" && nextLocation.pathname !== currentLocation.pathname);
+  const handlingBlock = useRef(false);
   const [mode, setMode] = useState<"pick" | "manage">("pick");
   const [editor, setEditor] = useState<Editor>(null);
   const [editorDirty, setEditorDirty] = useState(false);
@@ -34,21 +35,20 @@ export function PersonalTagsPage() {
     if (!await composition.flush()) {setMessage("组合草稿尚未保存，请重试或处理保存错误"); return;}
     setEditor(null); setEditorDirty(false); setMode(next);
   };
-  // BrowserRouter has no data-router blocker. Capture ordinary in-app links before
-  // NavLink handles them, so pending drafts can be flushed and editor changes checked.
   useEffect(() => {
-    const onLink = (event: MouseEvent) => {
-      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      const anchor = (event.target as Element | null)?.closest("a[href]") as HTMLAnchorElement | null;
-      if (!anchor || anchor.target || anchor.origin !== location.origin || anchor.pathname === location.pathname) return;
-      event.preventDefault(); event.stopPropagation();
-      if (!guard()) return;
-      void composition.flush().then(ok => {if (ok) navigate(anchor.pathname + anchor.search + anchor.hash); else setMessage("组合草稿尚未保存，请重试或处理保存错误");});
-    };
+    if (blocker.state !== "blocked" || handlingBlock.current) return;
+    handlingBlock.current = true;
+    void (async () => {
+      if (editorDirty && !window.confirm("编辑表单有未保存修改，确定离开吗？")) {blocker.reset(); return;}
+      if (await composition.flush()) blocker.proceed();
+      else {setMessage("组合草稿尚未保存，请重试或处理保存错误"); blocker.reset();}
+    })().finally(() => {handlingBlock.current = false;});
+  }, [blocker, editorDirty, composition.flush]);
+  useEffect(() => {
     const onUnload = (event: BeforeUnloadEvent) => {if (editorDirty || ["dirty", "saving", "error", "conflict"].includes(composition.saveState)) {event.preventDefault(); event.returnValue = "";}};
-    document.addEventListener("click", onLink, true); window.addEventListener("beforeunload", onUnload);
-    return () => {document.removeEventListener("click", onLink, true); window.removeEventListener("beforeunload", onUnload);};
-  }, [editorDirty, composition, navigate]);
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
+  }, [editorDirty, composition.saveState]);
   const openEditor = (tag: TagRecord | null) => {if (!guard()) return; void composition.flush().then(ok => {if (!ok) {setMessage("组合草稿尚未保存，请重试或处理保存错误"); return;} setEditor({kind: "tag", tag}); setEditorDirty(false); setMode("manage");});};
   const saveTag = async (value: TagWrite, expectedRevision?: number) => {
     if (editor?.kind !== "tag") return;

@@ -1,5 +1,5 @@
 import {fireEvent, render, screen, waitFor, within} from "@testing-library/react";
-import {MemoryRouter, Route, Routes} from "react-router-dom";
+import {createMemoryRouter, RouterProvider} from "react-router-dom";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import {PersonalTagsPage} from "./PersonalTagsPage";
 import {personalTagsApi, type CategoryRecord, type TagRecord} from "../lib/personalTags";
@@ -14,7 +14,14 @@ const tag = (id: string, display_name: string, content: string, category_id = "c
 const categories = [category("root", "人物"), category("child", "头发", "root"), category("grand", "长发", "child")];
 const tags = [tag("one", "长发", "long hair"), tag("two", "短发", "short hair")];
 const api = personalTagsApi as unknown as Record<string, ReturnType<typeof vi.fn>>;
-function mount() {render(<MemoryRouter initialEntries={["/personal-tags"]}><Routes><Route path="personal-tags" element={<PersonalTagsPage />} /></Routes></MemoryRouter>);}
+function mount(initialEntries = ["/personal-tags"], initialIndex = initialEntries.length - 1) {
+  const router = createMemoryRouter([
+    {path: "/personal-tags", element: <PersonalTagsPage />},
+    {path: "/workbench", element: <p>工作台内容</p>},
+  ], {initialEntries, initialIndex});
+  render(<RouterProvider router={router} />);
+  return router;
+}
 beforeEach(() => {
   localStorage.clear(); vi.clearAllMocks();
   vi.stubGlobal("confirm", vi.fn(() => true));
@@ -124,5 +131,40 @@ describe("personal tag market", () => {
     fireEvent.click(screen.getByRole("button", {name: "保存分类"}));
     expect(await screen.findByRole("alert")).toHaveTextContent("category_cycle");
     expect(screen.getByLabelText("分类名称")).toHaveValue("人物新版");
+  });
+  it("cancels_history_pop_without_losing_dirty_editor_then_confirms", async () => {
+    const router = mount(["/workbench", "/personal-tags"]);
+    fireEvent.click(await screen.findByRole("button", {name: "管理词库"}));
+    await screen.findByRole("table");
+    fireEvent.click(screen.getByRole("button", {name: "编辑 长发"}));
+    fireEvent.change(await screen.findByRole("textbox", {name: "英文原文"}), {target: {value: "unsaved exact,\ncontent"}});
+    const confirm = vi.mocked(window.confirm);
+    confirm.mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await router.navigate(-1);
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+    expect(router.state.location.pathname).toBe("/personal-tags");
+    expect(screen.getByRole("textbox", {name: "英文原文"})).toHaveValue("unsaved exact,\ncontent");
+    await router.navigate(-1);
+    expect(await screen.findByText("工作台内容")).toBeInTheDocument();
+  });
+  it("holds_history_pop_until_draft_flush_and_stays_on_failed_flush", async () => {
+    let resolveSave!: (value: unknown) => void;
+    api.saveDraft.mockImplementationOnce(() => new Promise(resolve => {resolveSave = resolve;}));
+    const router = mount(["/workbench", "/personal-tags"]);
+    fireEvent.click(await screen.findByRole("button", {name: "加入正向 长发"}));
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalled());
+    void router.navigate(-1);
+    await waitFor(() => expect(router.state.blockers.size).toBeGreaterThan(0));
+    expect(router.state.location.pathname).toBe("/personal-tags");
+    resolveSave({items: [], revision: 2, updated_at: ""});
+    expect(await screen.findByText("工作台内容")).toBeInTheDocument();
+
+    api.saveDraft.mockRejectedValue(new Error("save unavailable"));
+    await router.navigate("/personal-tags");
+    fireEvent.click(await screen.findByRole("button", {name: "加入正向 长发"}));
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalledTimes(2));
+    await router.navigate(-1);
+    expect(router.state.location.pathname).toBe("/personal-tags");
+    expect(await screen.findByText(/组合草稿尚未保存/)).toBeInTheDocument();
   });
 });
