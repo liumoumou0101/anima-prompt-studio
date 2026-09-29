@@ -3,6 +3,7 @@ import {createMemoryRouter, RouterProvider} from "react-router-dom";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import {PersonalTagsPage} from "./PersonalTagsPage";
 import {personalTagsApi, type CategoryRecord, type TagRecord} from "../lib/personalTags";
+import {readPersonalPromptTransfer} from "../lib/personalPromptTransfer";
 
 vi.mock("../lib/personalTags", async importOriginal => {
   const original = await importOriginal<typeof import("../lib/personalTags")>();
@@ -35,6 +36,60 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("personal tag market", () => {
+  it("appends_exact_personal_prompt_after_flushing_latest_selection_without_clearing_source", async () => {
+    let finishSave!: (value: unknown) => void;
+    api.saveDraft.mockImplementationOnce(() => new Promise(resolve => {finishSave = resolve;}));
+    api.listTags.mockResolvedValue({items: [tag("one", "原文片段", " Portrait,\nBlue_Sky "), tag("two", "负向片段", "BAD_hands, blur")], total: 2, offset: 0, limit: 40, has_more: false});
+    const router = mount();
+    fireEvent.click(await screen.findByRole("button", {name: "加入正向 原文片段"}));
+    fireEvent.click(screen.getByRole("button", {name: "追加到工作台"}));
+    expect(router.state.location.pathname).toBe("/personal-tags");
+    expect(screen.getByRole("button", {name: "追加到工作台"})).toBeDisabled();
+    expect(Object.keys(localStorage).filter(key => key.startsWith("anima-personal-prompt-transfer:"))).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", {name: "加入负向 负向片段"}));
+    finishSave({items: [], revision: 2, updated_at: ""});
+    await screen.findByText("工作台内容");
+    const id = new URLSearchParams(router.state.location.search).get("personal_transfer")!;
+    expect(id).toBeTruthy();
+    expect(router.state.location.search).not.toContain("Portrait");
+    expect(readPersonalPromptTransfer(id)).toMatchObject({positive: " Portrait,\nBlue_Sky ", negative: "BAD_hands, blur"});
+    expect(Object.keys(localStorage).filter(key => key.startsWith("anima-personal-prompt-transfer:"))).toHaveLength(1);
+    const saved = api.saveDraft.mock.calls.at(-1)![0];
+    expect(saved).toHaveLength(2);
+    expect(saved.map((item: {content: string}) => item.content)).toEqual([" Portrait,\nBlue_Sky ", "BAD_hands, blur"]);
+    api.getDraft.mockResolvedValue({items: saved, revision: 3, updated_at: ""});
+    await router.navigate("/personal-tags");
+    expect(await screen.findByRole("button", {name: "移除 原文片段"})).toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "移除 负向片段"})).toBeInTheDocument();
+  });
+  it("retains_source_and_does_not_create_transfer_or_navigate_when_append_flush_fails", async () => {
+    api.saveDraft.mockRejectedValue(new Error("save unavailable"));
+    const router = mount();
+    fireEvent.click(await screen.findByRole("button", {name: "加入正向 长发"}));
+    fireEvent.click(screen.getByRole("button", {name: "追加到工作台"}));
+    await screen.findByText("组合草稿尚未保存，请重试或处理保存错误");
+    expect(router.state.location.pathname).toBe("/personal-tags");
+    expect(screen.getByRole("button", {name: "移除 长发"})).toBeInTheDocument();
+    expect(Object.keys(localStorage).filter(key => key.startsWith("anima-personal-prompt-transfer:"))).toHaveLength(0);
+  });
+  it("retains_source_on_transfer_storage_failure_and_allows_negative_only_retry", async () => {
+    const router = mount();
+    fireEvent.click(await screen.findByRole("button", {name: "加入负向 长发"}));
+    const original = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function(this: Storage, key: string, value: string) {
+      if (key.startsWith("anima-personal-prompt-transfer:")) throw new Error("传递记录无法写入");
+      original.call(this, key, value);
+    });
+    fireEvent.click(screen.getByRole("button", {name: "追加到工作台"}));
+    await screen.findByText("传递记录无法写入");
+    expect(router.state.location.pathname).toBe("/personal-tags");
+    expect(screen.getByRole("button", {name: "移除 长发"})).toBeInTheDocument();
+    spy.mockRestore();
+    fireEvent.click(screen.getByRole("button", {name: "追加到工作台"}));
+    await screen.findByText("工作台内容");
+    const id = new URLSearchParams(router.state.location.search).get("personal_transfer")!;
+    expect(readPersonalPromptTransfer(id)).toMatchObject({positive: "", negative: "long hair"});
+  });
   it("browses_descendants_and_searches_aliases", async () => {
     mount(); fireEvent.click(await screen.findByRole("button", {name: "展开分类 人物"}));
     fireEvent.click(screen.getByRole("button", {name: "选择分类 头发"}));
