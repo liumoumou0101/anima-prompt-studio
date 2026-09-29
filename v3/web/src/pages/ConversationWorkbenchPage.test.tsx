@@ -57,6 +57,31 @@ it("retries opening the existing workspace after load failure without creating a
   expect(screen.getByLabelText("追加前正向提示词")).toHaveValue("cat");
   expect(writes).toHaveLength(0);
 });
+it("reloads unresolved proposal state before retrying personal preview with a dirty recovered draft", async () => {
+  personalServer();
+  pendingProposal = {id: "proposal_test", workspace_id: workspace.id, base_revision: 3, draft: workspace.draft,
+    changed_layers: [], warnings: [], created_at: "2026-09-29"};
+  localStorage.setItem("anima-conversation-draft:workspace_test", JSON.stringify({baseRevision: 3, delta: "keep idea",
+    mode: "faithful", requirements: editableRequirements(workspace), positive: "unsaved local cat", negative: "",
+    model: "anima_base_v1", settings: workspace.draft.generation_settings}));
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let proposalReads = 0;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    if (String(input).endsWith("/proposal") && ++proposalReads === 1) throw new TypeError("proposal temporarily unavailable");
+    return original(input, init);
+  });
+  render(<MemoryRouter initialEntries={[personalTransfer()]}><ConversationWorkbenchPage /></MemoryRouter>);
+  await screen.findByText(/无法连接本地服务/);
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("unsaved local cat");
+  fireEvent.click(screen.getByRole("button", {name: "保存并重新预览"}));
+  await screen.findByText("请先接受或放弃待处理的提示词草案。");
+  expect(proposalReads).toBe(2);
+  expect(writes).toHaveLength(0);
+  expect(screen.getByLabelText("正向提示词")).toHaveValue("unsaved local cat");
+  expect(screen.getByLabelText("这次想怎么改？")).toHaveValue("keep idea");
+  expect(screen.getByRole("button", {name: "确认追加原文"})).toBeDisabled();
+  expect(localStorage.getItem("anima-personal-prompt-transfer:personal-test")).not.toBeNull();
+});
 it("does not consume a transfer for a malformed success without a durable receipt", async () => {
   personalServer();
   const original = vi.mocked(fetch).getMockImplementation()!;

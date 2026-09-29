@@ -59,6 +59,7 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
   const [personalPreview, setPersonalPreview] = useState<ConversationRecord | null>(null);
   const [personalResult, setPersonalResult] = useState<PersonalPromptResult | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
+  const openedWorkspace = useRef<string | null>(null);
   const transferAttempt = useRef("");
   const [transferRetry, setTransferRetry] = useState(0);
   const [transferNotice, setTransferNotice] = useState<{workspace: string; added: SelectedContent[]} | null>(null);
@@ -181,35 +182,41 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
   }
 
   async function open(id: string) {
-    if (draftAtRisk) return false;
+    const resumeProposalLoad = current.current?.id === id && openedWorkspace.current !== id;
+    if (draftAtRisk && !resumeProposalLoad) return false;
     const sequence = ++opening.current;
+    openedWorkspace.current = null; setInitialLoaded(false);
     setBusy("打开工作台"); setError("");
     try {
-      const next = await apiRequest<ConversationRecord>(`/api/v3/workspaces/${encodeURIComponent(id)}`);
-      if (!mounted.current || sequence !== opening.current) return false;
-      const recovered = readConversationDraft(id);
-      draftPersistenceBlocked.current = recovered?.persistenceBlocked ? id : null;
-      setInvalidDraftRaw(recovered?.invalidRaw || "");
-      adopt(next);
-      setWorkspaces(items => items.some(item => item.id === next.id) ? items : [next, ...items]);
-      if (recovered?.local) {
-        const value = migrateWorkflowSnapshot(recovered.local, next);
-        const original = recovered.base ? migrateWorkflowSnapshot(recovered.base, next) : value.baseRevision === next.revision ? localFrom(next) : null;
-        const untouched = original && JSON.stringify({...value, delta: ""}) === JSON.stringify({...original, delta: ""});
-        if (untouched) {
-          const kept = {...localFrom(next), delta: value.delta}; setLocal(kept); persistDraft(id, kept, localFrom(next));
-        } else {
-          base.current = original; setLocal(value); persistDraft(id, value, original);
-          setConflict(value.baseRevision !== next.revision);
+      // A partial open already restored local edits. Retry only the missing proposal read.
+      if (!resumeProposalLoad) {
+        const next = await apiRequest<ConversationRecord>(`/api/v3/workspaces/${encodeURIComponent(id)}`);
+        if (!mounted.current || sequence !== opening.current) return false;
+        const recovered = readConversationDraft(id);
+        draftPersistenceBlocked.current = recovered?.persistenceBlocked ? id : null;
+        setInvalidDraftRaw(recovered?.invalidRaw || "");
+        adopt(next);
+        setWorkspaces(items => items.some(item => item.id === next.id) ? items : [next, ...items]);
+        if (recovered?.local) {
+          const value = migrateWorkflowSnapshot(recovered.local, next);
+          const original = recovered.base ? migrateWorkflowSnapshot(recovered.base, next) : value.baseRevision === next.revision ? localFrom(next) : null;
+          const untouched = original && JSON.stringify({...value, delta: ""}) === JSON.stringify({...original, delta: ""});
+          if (untouched) {
+            const kept = {...localFrom(next), delta: value.delta}; setLocal(kept); persistDraft(id, kept, localFrom(next));
+          } else {
+            base.current = original; setLocal(value); persistDraft(id, value, original);
+            setConflict(value.baseRevision !== next.revision);
+          }
         }
+        if (recovered?.warning) setStorageWarning(recovered.warning);
+        setPendingRecoveryBlocked(false);
+        try {setPending(recoverConversationPending(id));} catch (caught) {setPending(null); setPendingRecoveryBlocked(true); setError((caught as Error).message);}
+        setRun(null); setRecentRuns([]); setRunLimit(20); setAvailability(null); setProposal(null); setNotice(""); setRename(null);
       }
-      if (recovered?.warning) setStorageWarning(recovered.warning);
-      setPendingRecoveryBlocked(false);
-      try {setPending(recoverConversationPending(id));} catch (caught) {setPending(null); setPendingRecoveryBlocked(true); setError((caught as Error).message);}
-      setRun(null); setRecentRuns([]); setRunLimit(20); setAvailability(null); setProposal(null); setNotice(""); setRename(null);
       const review = await apiRequest<{proposal: ConversationProposal | null}>(`/api/v3/workspaces/${encodeURIComponent(id)}/proposal`);
       if (!mounted.current || sequence !== opening.current) return false;
       setProposal(review.proposal || null);
+      openedWorkspace.current = id; setInitialLoaded(true);
       write(ACTIVE, id);
       if (requestedWorkspace && requestedWorkspace !== id) clearWorkspaceLink();
       return true;
@@ -225,7 +232,8 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
       setWorkspaces(result.items);
       setMoreSessions(result.items.length === 50);
       const id = requestedWorkspace || read<string>(ACTIVE);
-      const opened = !id || current.current?.id === id || await open(id);
+      // Adopting the workspace alone does not confirm whether a proposal is pending.
+      const opened = !id || (current.current?.id === id && openedWorkspace.current === id) || await open(id);
       if (mounted.current && opened) setInitialLoaded(true);
     }).catch(caught => {if (mounted.current) setError((caught as Error).message);});
     if (remoteEnabled) void apiRequest<GenerationTargetListResponse>("/api/v3/generation-targets").then(result => {
@@ -324,7 +332,7 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
   }, [requestedPersonalTransfer, initialLoaded, busy]);
 
   async function confirmPersonalTransfer() {
-    if (!personalTransfer || !personalPreview || !current.current || personalBlockedReason) return;
+    if (!initialLoaded || !personalTransfer || !personalPreview || !current.current || personalBlockedReason) return;
     if (personalPreview.id !== current.current.id || personalPreview.revision !== current.current.revision
       || (localRef.current && hasUnsavedInputs(current.current, localRef.current))) {await preparePersonalTransfer(); return;}
     const id = personalTransfer.id, source = current.current;
@@ -335,7 +343,7 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
     });
   }
   async function undoPersonalTransfer() {
-    if (!personalResult || !current.current || !localRef.current || personalBlockedReason || personalUndoChanged) return;
+    if (!initialLoaded || !personalResult || !current.current || !localRef.current || personalBlockedReason || personalUndoChanged) return;
     const id = personalResult.receipt.id;
     await act("撤销个人提示词追加", async () => {
       const source = hasUnsavedInputs(current.current!, localRef.current!) ? await save() : current.current!;
@@ -809,7 +817,7 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
     {requestedPersonalTransfer && <PersonalPromptTransferPanel addition={personalTransfer}
       before={personalPreview ? {positive: personalPreview.draft.compiled?.positive || "", negative: personalPreview.draft.compiled?.negative || ""} : null}
       receipt={personalResult?.receipt || null} blockedReason={personalBlockedReason} busy={Boolean(busy)}
-      needsRefresh={Boolean(personalPreview && (personalPreview.id !== record?.id || personalPreview.revision !== record?.revision || dirty))}
+      needsRefresh={Boolean(personalPreview && (!initialLoaded || personalPreview.id !== record?.id || personalPreview.revision !== record?.revision || dirty))}
       undoChanged={personalUndoChanged} onConfirm={() => void confirmPersonalTransfer()} onCancel={closePersonalTransfer}
       onRefresh={() => void preparePersonalTransfer()} onUndo={() => void undoPersonalTransfer()} />}
     {record && local && transferNotice?.workspace === record.id && <p role="status">{transferNotice.added.length ? `已加入 ${transferNotice.added.length} 个标签，原有草稿已保留。` : "所选标签已在当前要求中，没有重复添加。"}
