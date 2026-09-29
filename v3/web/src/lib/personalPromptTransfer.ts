@@ -1,4 +1,5 @@
 import type {ConversationRecord} from "./conversation";
+import {codePointLength} from "./textLength";
 
 export type PersonalPromptText = {positive: string; negative: string};
 export type PersonalPromptTransfer = PersonalPromptText & {version: 1; id: string};
@@ -11,7 +12,7 @@ const prefix = "anima-personal-prompt-transfer:";
 function validate(value: PersonalPromptTransfer) {
   if (!value || value.version !== 1 || typeof value.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(value.id)
     || typeof value.positive !== "string" || typeof value.negative !== "string"
-    || value.positive.length > 20000 || value.negative.length > 20000 || !(value.positive + value.negative).trim()) {
+    || codePointLength(value.positive) > 20000 || codePointLength(value.negative) > 20000 || !(value.positive + value.negative).trim()) {
     throw new Error("个人提示词传递记录无效，请从个人标签超市重新追加。");
   }
 }

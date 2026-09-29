@@ -1,4 +1,5 @@
 import type {CompositionItem, TagRecord} from "./personalTags";
+import {codePointLength} from "./textLength";
 
 type Polarity = CompositionItem["polarity"];
 
@@ -36,14 +37,14 @@ export function renderComposition(items: CompositionItem[]): {positive: string; 
   for (const item of items) {
     if (!validWeight(item.weight)) throw new RangeError("Weight must be 0.1–2.0 in steps of 0.05");
     if (item.polarity !== "positive" && item.polarity !== "negative") throw new Error("Invalid polarity");
+    if (!item.content.trim()) throw new Error("Snapshot content cannot be blank");
     const output = item.weight === 1 ? item.content : `(${item.content}:${Number(item.weight.toFixed(2))})`;
     sides[item.polarity].push(output);
     contents[item.polarity].add(item.content);
   }
   const positive = sides.positive.join(", ");
   const negative = sides.negative.join(", ");
-  // Python's server-side len() counts Unicode code points rather than UTF-16 units.
-  if ([...positive].length > 20_000 || [...negative].length > 20_000)
+  if (codePointLength(positive) > 20_000 || codePointLength(negative) > 20_000)
     throw new RangeError("Output cannot exceed 20000 characters per side");
   const warnings = [...contents.positive].filter(content => contents.negative.has(content))
     .map(content => `正负向同时包含：${content}`);

@@ -36,6 +36,17 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("personal tag market", () => {
+  it("shows and clears visible negative-only selection feedback", async () => {
+    mount();
+    const negative = await screen.findByRole("button", {name: "加入负向 长发"});
+    fireEvent.click(negative);
+    expect(negative).toHaveAttribute("aria-pressed", "true");
+    expect(negative).toHaveTextContent("已选");
+    expect(screen.getByRole("button", {name: "加入正向 长发"})).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", {name: "移除 长发"}));
+    expect(negative).toHaveAttribute("aria-pressed", "false");
+    expect(negative).not.toHaveTextContent("已选");
+  });
   it("appends_exact_personal_prompt_after_flushing_latest_selection_without_clearing_source", async () => {
     let finishSave!: (value: unknown) => void;
     api.saveDraft.mockImplementationOnce(() => new Promise(resolve => {finishSave = resolve;}));

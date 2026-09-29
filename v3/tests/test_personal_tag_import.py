@@ -121,6 +121,24 @@ def test_export_roundtrip_keeps_ids_trash_and_snapshots(tmp_path):
     assert PersonalTagCompositions(destination.path).get(saved.id).items[0].content == "unchanged,\nraw"
 
 
+def test_bundle_requires_explicit_draft_without_changing_library(tmp_path):
+    store = PersonalTagStore(tmp_path / "personal-tags.db")
+    store.create_tag(TagWrite(display_name="本地", content=" local,\nRaw "))
+    before = export_bundle(store)
+    revision = store.library_revision
+    document = {"format": "anima-personal-tags", "version": 1,
+                "source_key": "personal-library", "categories": [], "tags": [], "combinations": []}
+    with pytest.raises(ValueError, match="draft"):
+        preview_import(store, document, ImportOptions())
+    assert export_bundle(store) == before
+    assert store.library_revision == revision
+    # An explicit null is the supported representation of an absent draft.
+    result = import_document(store, {**document, "draft": None})
+    assert result["counts"]["new"] == 0
+    assert export_bundle(store) == before
+    assert store.library_revision == revision
+
+
 def test_opt_in_invalid_legacy_weight_is_reported_without_clamping(tmp_path):
     store = PersonalTagStore(tmp_path / "personal-tags.db")
     source = legacy()

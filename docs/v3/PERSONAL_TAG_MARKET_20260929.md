@@ -1,6 +1,6 @@
 # 个人标签超市交付记录（2026-09-29）
 
-状态：在隔离工作区 `D:/soft/提示词辅助工具2/.worktrees/personal-tag-market`、分支 `codex/personal-tag-market` 开发和验证；尚未合并、推送或重新打包发布。真实迁移已完成；集成测试与界面复核已执行，结论和限制如下。浏览器检查使用 QA 副本。整分支独立最终审查仍待完成。
+状态：在隔离工作区 `D:/soft/提示词辅助工具2/.worktrees/personal-tag-market`、分支 `codex/personal-tag-market` 开发和验证；尚未合并、推送或重新打包发布。真实迁移已完成；集成测试与界面复核已执行，结论和限制如下。浏览器检查使用 QA 副本。已完成整分支独立审查；发现的导入与边界问题已修复，专项验证见下。修复复审记录保存在本地审计目录。
 
 ## 使用
 
@@ -61,6 +61,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Web build failed' }
 - 集成后端精确选择：**209 项通过、1 项失败**。失败项为 `tests/test_reference_examples.py::test_bundled_install_is_explicit_and_preserves_notes`：内置参考样例安装返回 422 `bundled_examples_install_failed`，与功能开发前基线日志中的同一失败一致。另有一项 Starlette/AnyIO 弃用警告。
 - 前端完整 `npm test -- --maxWorkers=2` 在修复前集成提交 `d142a69` 上为 **55 个文件、489 项通过**。后续工作台加载重试修复 `b3e3ba7` 的受影响范围复测为 **4 个文件、95 项通过**；未重跑完整套件。修复后的 `npm run typecheck` 通过。
 - 标准 `npm run build` 在当前 Windows 环境完成 4,667 个模块转换后异常退出，停止 QA 服务重试仍失败；同目录使用 `npm run build -- --emptyOutDir false` 则完整通过，生成默认 Oxc 压缩的 `web/dist`（只有大块提示）。隔离目录诊断构建也通过，因此故障集中在默认输出目录清理环节；目前仍未确认底层 Windows 失败机制。启动示例采用已验证的参数，标准裸命令的失败如实保留。
-- **待最终填写：** 整分支独立代码审查结论。当前测试和 QA 结果不能代替该审查。
+- 整分支独立审查覆盖 `ac157f2..7da095f`，发现 1 项 Important 和 3 项 Minor：完整导入缺少 `draft` 的校验、非 BMP Unicode 传递长度、仅负向选择反馈、空白快照渲染防御。本次已全部修复：缺少 `draft` 返回可读 422，显式 `null` 仍有效；渲染与传递共享码点计数；负向已选卡片显示反馈；空白检测不改写有效原文。
+- 最终修复专项验证：后端导入、API 和工作台传递 **46 项通过**（既有 Starlette/AnyIO 警告仍在）；前端组合、传递库、传递组件、个人标签页面及草稿 hook **5 个文件、44 项通过**；`npm run typecheck` 与 `npm run build -- --emptyOutDir false` 均通过，构建转换 4,668 个模块，只有大块提示。没有重跑完整套件。原始命令、红绿回归输出及结果见本地审计目录 `final-fix-report.md`、`final-fix-*.log`；整分支记录为 `final-review.md`，提交后的专项复审记录为 `final-fix-review.md`，审查结论以该记录为准。
 
 既有基线问题：独立工作区的受跟踪参考样例包字节与 manifest 校验值不一致，可使相关包校验测试失败；另有先于本功能的参考 ingest/config 失败。不要改动只读参考数据包来掩盖基线。最终检查若仍出现失败，应写明具体测试和本功能关联性。

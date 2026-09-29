@@ -118,6 +118,8 @@ def _shape(document: dict) -> str:
     for field_name in ("categories", "tags"):
         if not isinstance(document.get(field_name), list):
             raise ValueError(f"Import {field_name} must be a list")
+    if kind == "anima-personal-tags" and "draft" not in document:
+        raise ValueError("Import draft field is required; use null when there is no draft")
     if kind == "anima-personal-tags" and (not isinstance(document.get("combinations"), list)
                                            or document.get("draft") is not None and not isinstance(document["draft"], dict)):
         raise ValueError("Import combinations or draft has invalid structure")

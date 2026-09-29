@@ -46,3 +46,13 @@ it("rejects_server_size_limits_before_rendering", () => {
   expect(() => renderComposition(Array.from({length: 301}, (_, index) => item(String(index), "x")))).toThrow();
   expect(() => renderComposition([item("a", "x".repeat(20_001))])).toThrow();
 });
+
+it.each(["", " \n\t "])("rejects blank snapshot content %j", content => {
+  expect(() => renderComposition([item("blank", content)])).toThrow(/blank|empty/i);
+});
+
+it("counts Unicode code points and preserves surrounding raw whitespace", () => {
+  const raw = " \n" + "😀".repeat(19_997) + " ";
+  expect(renderComposition([item("unicode", raw)]).positive).toBe(raw);
+  expect(() => renderComposition([item("unicode", raw + "😀")])).toThrow(/20000/);
+});

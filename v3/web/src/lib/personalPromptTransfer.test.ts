@@ -2,6 +2,14 @@ import {beforeEach, expect, it, vi} from "vitest";
 import {storePersonalPromptTransfer, readPersonalPromptTransfer, consumePersonalPromptTransfer} from "./personalPromptTransfer";
 
 beforeEach(() => localStorage.clear());
+it.each(["positive", "negative"] as const)("transfers %s up to 20000 Unicode code points verbatim", side => {
+  const raw = " \n" + "😀".repeat(19_997) + " ";
+  const value = {positive: "", negative: "", [side]: raw};
+  const url = storePersonalPromptTransfer(value);
+  expect(readPersonalPromptTransfer(url.split("=")[1])?.[side]).toBe(raw);
+  expect(() => storePersonalPromptTransfer({...value, [side]: raw + "😀"})).toThrow();
+  expect(localStorage.length).toBe(1);
+});
 it("round trips raw fragments through an opaque URL and consumes only explicitly", () => {
   const value = {positive: "  Blue_Sky,\n(Cat:1.2) ", negative: "LOW_quality,\n blur "};
   const url = storePersonalPromptTransfer(value);

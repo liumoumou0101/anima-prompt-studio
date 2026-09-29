@@ -143,6 +143,25 @@ def test_import_preview_commit_and_bounded_body(tmp_path):
     assert oversized.status_code == 413
 
 
+def test_import_missing_draft_returns_readable_422_without_writes(tmp_path):
+    client, headers, database = client_and_headers(tmp_path)
+    created = client.post(BASE + "/tags", json={"display_name": "保留", "content": " Raw,\nText "}, headers=headers)
+    assert created.status_code == 200
+    store = PersonalTagStore(database)
+    before = export_bundle(store)
+    revision = store.library_revision
+    document = {"format": "anima-personal-tags", "version": 1,
+                "source_key": "personal-library", "categories": [], "tags": [], "combinations": []}
+    response = client.post(BASE + "/imports/preview", json={"document": document}, headers=headers)
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert "draft" in response.json()["error"]["message"]
+    assert export_bundle(store) == before
+    assert store.library_revision == revision
+    accepted = client.post(BASE + "/imports/preview", json={"document": {**document, "draft": None}}, headers=headers)
+    assert accepted.status_code == 200, accepted.text
+
+
 def test_category_and_combination_restore_conflicts(tmp_path):
     client, headers, _ = client_and_headers(tmp_path)
     parent = client.post(BASE + "/categories", json={"name": "parent"}, headers=headers).json()

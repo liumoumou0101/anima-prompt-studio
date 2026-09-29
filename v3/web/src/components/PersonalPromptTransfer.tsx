@@ -1,4 +1,5 @@
 import {appendPersonalPromptText, type PersonalPromptText, type PersonalPromptReceipt} from "../lib/personalPromptTransfer";
+import {codePointLength} from "../lib/textLength";
 
 export function PersonalPromptTransfer({addition, before, receipt, blockedReason, needsRefresh, undoChanged, busy, onConfirm, onCancel, onRefresh, onUndo}: {
   addition: PersonalPromptText | null; before: PersonalPromptText | null; receipt: PersonalPromptReceipt | null;
@@ -7,7 +8,7 @@ export function PersonalPromptTransfer({addition, before, receipt, blockedReason
 }) {
   const after = before && addition ? appendPersonalPromptText(before, addition) : null;
   const validation = after && !after.positive.trim() ? "请先在工作台填写正向提示词，再追加这段负向内容"
-    : after && (after.positive.length > 20000 || after.negative.length > 20000) ? "追加后提示词超过 20,000 字符，请缩短正文后重新预览。" : "";
+    : after && (codePointLength(after.positive) > 20000 || codePointLength(after.negative) > 20000) ? "追加后提示词超过 20,000 字符，请缩短正文后重新预览。" : "";
   return <section aria-label="追加个人提示词" className="conversation-conflict">
     <h2>追加个人提示词</h2>
     {receipt ? <>
