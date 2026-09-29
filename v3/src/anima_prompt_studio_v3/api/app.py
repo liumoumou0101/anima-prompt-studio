@@ -339,6 +339,9 @@ def create_api_runtime(
         status = {"rate_limited": 429, "llm_generation_failed": 502,
                   "workspace_contract_unsupported": 409, "reference_preset_not_found": 404,
                   "example_revision_conflict": 409, "reference_version_conflict": 409,
+                  "personal_prompt_transfer_conflict": 409, "personal_prompt_undo_conflict": 409,
+                  "workspace_proposal_pending": 409, "workspace_busy": 409,
+                  "personal_prompt_transfer_not_found": 404,
                   "ingest_superseded": 409}.get(exc.code, 422)
         return _error_response(request, status, exc.code, str(exc))
 
@@ -446,6 +449,8 @@ def create_api_runtime(
 
     from .scene_design import register_scene_design_routes
     register_scene_design_routes(app, require_workspace_store, require_session)
+    from .personal_prompt_transfer import register_personal_prompt_transfer_routes
+    register_personal_prompt_transfer_routes(app, require_workspace_store, require_session)
 
     def require_v2_settings_database() -> Path:
         database = app.state.v2_database
