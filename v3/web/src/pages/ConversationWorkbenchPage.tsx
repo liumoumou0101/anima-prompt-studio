@@ -1,4 +1,6 @@
 import {ImagePreview} from "../components/ImagePreview";
+import {PersonalPromptTransfer as PersonalPromptTransferPanel} from "../components/PersonalPromptTransfer";
+import {consumePersonalPromptTransfer, readPersonalPromptTransfer, type PersonalPromptTransfer, type PersonalPromptResult} from "../lib/personalPromptTransfer";
 import {ArtistRecommendations} from "../components/ArtistRecommendations";
 import {SceneDesignControls} from "../components/SceneDesignControls";
 import {sceneFields, sceneChoice} from "../lib/sceneDesign";
@@ -51,6 +53,11 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedWorkspace = searchParams.get("workspace");
   const requestedTransfer = searchParams.get("transfer");
+  const requestedPersonalTransfer = searchParams.get("personal_transfer");
+  const personalAttempt = useRef("");
+  const [personalTransfer, setPersonalTransfer] = useState<PersonalPromptTransfer | null>(null);
+  const [personalPreview, setPersonalPreview] = useState<ConversationRecord | null>(null);
+  const [personalResult, setPersonalResult] = useState<PersonalPromptResult | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const transferAttempt = useRef("");
   const [transferRetry, setTransferRetry] = useState(0);
@@ -239,6 +246,103 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
 
   function clearTransferLink() {
     setSearchParams(previous => {const next = new URLSearchParams(previous); next.delete("transfer"); return next;}, {replace: true});
+  }
+  const personalBlockedReason = busy ? `${busy}…` : pending || pendingRecoveryBlocked ? "请先查询上次生成请求的结果。"
+    : proposal ? "请先接受或放弃待处理的提示词草案。" : conflict ? "请先处理版本冲突。"
+    : recentRuns.some(item => ["draft", "connecting", "preparing", "queued", "running", "downloading"].includes(item.state)) ? "图片生成中，请完成后再追加或撤销。" : "";
+
+  function closePersonalTransfer() {
+    setPersonalTransfer(null); setPersonalPreview(null); setPersonalResult(null); personalAttempt.current = "";
+    setSearchParams(previous => {const next = new URLSearchParams(previous); next.delete("personal_transfer"); return next;}, {replace: true});
+  }
+  function acceptPersonalResult(result: PersonalPromptResult, id: string) {
+    // Only a matching durable receipt permits consuming the raw transfer.
+    if (!result.receipt || result.receipt.id !== id || result.receipt.workspace_id !== result.workspace?.id
+      || !["applied", "undone"].includes(result.receipt.state)) throw new Error("追加回执未确认，请重试查询。");
+    if (!mounted.current || current.current?.id !== result.workspace.id) return;
+    const value = localRef.current;
+    const unsaved = value && current.current && hasUnsavedInputs(current.current, value);
+    setPersonalResult(result); setPersonalPreview(null);
+    if (unsaved) {
+      adopt(result.workspace, true); setConflict(true); setConflictChoices({});
+    } else {
+      const delta = value?.delta || "";
+      adopt(result.workspace);
+      const kept = {...localFrom(result.workspace), delta}; setLocal(kept); persistDraft(result.workspace.id, kept);
+    }
+    consumePersonalPromptTransfer(id);
+    setActiveView("prompt"); setInspectorTab("prompt");
+  }
+  async function recoverPersonalReceipt(id: string, source: ConversationRecord): Promise<boolean> {
+    try {
+      const result = await apiRequest<PersonalPromptResult>(`/api/v3/workspaces/${source.id}/personal-prompt-transfers/${encodeURIComponent(id)}`);
+      acceptPersonalResult(result, id); return true;
+    } catch (caught) {
+      if (caught instanceof ApiClientError && caught.code === "personal_prompt_transfer_not_found") return false;
+      throw caught;
+    }
+  }
+  async function preparePersonalTransfer() {
+    if (!requestedPersonalTransfer) return;
+    if (!initialLoaded) {personalAttempt.current = ""; setTransferRetry(value => value + 1); return;}
+    const id = requestedPersonalTransfer;
+    await act("准备追加预览", async () => {
+      const transfer = readPersonalPromptTransfer(id); setPersonalTransfer(transfer);
+      let source = current.current;
+      // Recover before flushing: a lost append response must not be overwritten by an older local draft.
+      if (source && await recoverPersonalReceipt(id, source)) return;
+      if (!transfer) throw new Error("未找到个人提示词传递记录或回执，请从个人标签超市重新追加。");
+      if (personalBlockedReason) return;
+      if (!source) {
+        // Creation is idempotent and the body is frozen before sending, including across reloads.
+        const key = `anima-personal-prompt-create:${id}`;
+        const body = read<string>(key) || JSON.stringify({title: "个人提示词", draft: {
+          model_profile: profiles.find(item => item.id === "anima_aesthetic_v1_1")?.id || profiles[0].id,
+          generation_settings: defaultGenerationSettings()}});
+        localStorage.setItem(key, JSON.stringify(body));
+        source = await apiRequest<ConversationRecord>("/api/v3/workspaces", {method: "POST", body, headers: {"Idempotency-Key": `personal-prompt:${id}`}});
+        if (!mounted.current) return;
+        adopt(source); write(ACTIVE, source.id); setWorkspaces(items => [source!, ...items.filter(item => item.id !== source!.id)]);
+        if (await recoverPersonalReceipt(id, source)) return;
+      }
+      const value = localRef.current;
+      if (!value || current.current?.id !== source.id) return;
+      if (hasUnsavedInputs(source, value)) {
+        if (!value.positive.trim() && (value.positive !== (source.draft.compiled?.positive || "") || value.negative !== (source.draft.compiled?.negative || ""))) {
+          throw new Error("请先在工作台填写正向提示词，再保存并预览追加内容。");
+        }
+        source = await save();
+      }
+      setPersonalPreview(source); setPersonalResult(null);
+      setSearchParams(previous => {const next = new URLSearchParams(previous); next.set("workspace", source!.id); return next;}, {replace: true});
+    });
+  }
+  useEffect(() => {
+    if (!requestedPersonalTransfer || !initialLoaded || busy || personalAttempt.current === requestedPersonalTransfer) return;
+    personalAttempt.current = requestedPersonalTransfer;
+    void preparePersonalTransfer();
+  }, [requestedPersonalTransfer, initialLoaded, busy]);
+
+  async function confirmPersonalTransfer() {
+    if (!personalTransfer || !personalPreview || !current.current || personalBlockedReason) return;
+    if (personalPreview.id !== current.current.id || personalPreview.revision !== current.current.revision
+      || (localRef.current && hasUnsavedInputs(current.current, localRef.current))) {await preparePersonalTransfer(); return;}
+    const id = personalTransfer.id, source = current.current;
+    await act("追加个人提示词", async () => {
+      const result = await apiRequest<PersonalPromptResult>(`/api/v3/workspaces/${source.id}/personal-prompt-transfers`, {method: "POST", body: JSON.stringify({
+        transfer_id: id, revision: source.revision, positive: personalTransfer.positive, negative: personalTransfer.negative})});
+      acceptPersonalResult(result, id);
+    });
+  }
+  async function undoPersonalTransfer() {
+    if (!personalResult || !current.current || !localRef.current || personalBlockedReason || personalUndoChanged) return;
+    const id = personalResult.receipt.id;
+    await act("撤销个人提示词追加", async () => {
+      const source = hasUnsavedInputs(current.current!, localRef.current!) ? await save() : current.current!;
+      const result = await apiRequest<PersonalPromptResult>(`/api/v3/workspaces/${source.id}/personal-prompt-transfers/${encodeURIComponent(id)}/undo`, {
+        method: "POST", body: JSON.stringify({revision: source.revision})});
+      acceptPersonalResult(result, id);
+    });
   }
   async function receiveContent(transfer: ContentTransfer) {
     await act("带入已选内容", async () => {
@@ -654,6 +758,9 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
   }
 
   const promptChanged = Boolean(local && (local.positive !== (record?.draft.compiled?.positive || "") || local.negative !== (record?.draft.compiled?.negative || "")));
+  const personalUndoChanged = Boolean(personalResult && (personalResult.workspace.id !== record?.id || !personalResult.receipt.can_undo
+    || local?.positive !== (personalResult.workspace.draft.compiled?.positive || "")
+    || local?.negative !== (personalResult.workspace.draft.compiled?.negative || "")));
   const executionReason=busy ? busy+"…" : pendingRecoveryBlocked?"请先核对上次生成请求的恢复记录":pending?"请先查询上次提交的结果":conflict?"请先处理版本冲突"
     :local?.model===LEGACY_AESTHETIC?"请选择明确的模型版本":!remoteEnabled?"连接生图服务后即可生成":!target?"请选择可用的服务器与工作流"
     :local&&!validSeed(local.settings.seed)?"请填写有效种子，-1 表示随机":"";
@@ -699,6 +806,12 @@ export function ConversationWorkbenchPage({modelProfiles, remoteEnabled = false}
     {notice && <p role="status" className="conversation-notice">{notice}</p>}
     {busy && <div className="conversation-wait"><p role="status">{busy}… 已等待 {elapsed} 秒{turnController.current ? "；完成后提示词会直接更新。" : ""}</p>{turnController.current && <button onClick={() => turnController.current?.abort()}>取消整理</button>}</div>}
     {requestedTransfer && error && <button disabled={Boolean(busy)} onClick={() => {transferAttempt.current = ""; setInitialLoaded(false); setTransferRetry(value => value + 1);}}>重试带入</button>}
+    {requestedPersonalTransfer && <PersonalPromptTransferPanel addition={personalTransfer}
+      before={personalPreview ? {positive: personalPreview.draft.compiled?.positive || "", negative: personalPreview.draft.compiled?.negative || ""} : null}
+      receipt={personalResult?.receipt || null} blockedReason={personalBlockedReason} busy={Boolean(busy)}
+      needsRefresh={Boolean(personalPreview && (personalPreview.id !== record?.id || personalPreview.revision !== record?.revision || dirty))}
+      undoChanged={personalUndoChanged} onConfirm={() => void confirmPersonalTransfer()} onCancel={closePersonalTransfer}
+      onRefresh={() => void preparePersonalTransfer()} onUndo={() => void undoPersonalTransfer()} />}
     {record && local && transferNotice?.workspace === record.id && <p role="status">{transferNotice.added.length ? `已加入 ${transferNotice.added.length} 个标签，原有草稿已保留。` : "所选标签已在当前要求中，没有重复添加。"}
       {transferNotice.added.length > 0 && <button disabled={Boolean(busy || pending || conflict)} onClick={() => {
         edit({requirements: undoSelectedContent(local.requirements, transferNotice.added)}); setTransferNotice(null);
