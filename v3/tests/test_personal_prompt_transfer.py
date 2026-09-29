@@ -263,4 +263,3 @@ def test_api_session_receipts_errors_and_busy_generation(tmp_path):
         runtime.app.state.conversation_service.active.clear()
         assert client.post(url + "/api-1/undo", json={"revision": 2}).status_code == 200
         assert client.get(url + "/api-1").json()["receipt"]["state"] == "undone"
-
