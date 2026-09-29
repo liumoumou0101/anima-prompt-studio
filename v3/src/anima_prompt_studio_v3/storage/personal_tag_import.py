@@ -77,6 +77,7 @@ def _record_dict(row: sqlite3.Row, json_fields: tuple[str, ...]) -> dict:
 def export_bundle(store: PersonalTagStore) -> dict:
     """Return every library row, including trashed rows and saved snapshots."""
     with store._connect() as db:
+        db.execute("BEGIN")
         categories = [_record_dict(row, ("source_metadata", "needs_review")) for row in
                       db.execute("SELECT * FROM personal_categories ORDER BY id")]
         tags = [_record_dict(row, ("aliases", "source_metadata", "needs_review")) for row in
@@ -132,6 +133,7 @@ def _prepare(db: sqlite3.Connection, document: dict, options: ImportOptions) -> 
     prepared: dict[str, object] = {"categories": [], "tags": [], "combinations": [], "draft": None,
                                    "counts": counts, "issues": issues}
     category_rows: dict[str, dict] = {}
+    seen_category_origins: set[tuple[str, str]] = set()
     category_ids: dict[str, str] = {}
     names: dict[str, str] = {}
     parents: dict[str, str | None] = {}
@@ -158,6 +160,13 @@ def _prepare(db: sqlite3.Connection, document: dict, options: ImportOptions) -> 
                 raise ValueError("duplicate category source id")
             value = CategoryRecord.model_validate(row) if kind == "anima-personal-tags" else CategoryWrite(
                 name=row.get("name"), parent_id=None, position=index)
+            row_origin = origin(row) if kind == "anima-personal-tags" else (source_key, label)
+            if row_origin is not None and row_origin in seen_category_origins:
+                issues.append(_issue("duplicate_source", "category", label,
+                                     "Multiple categories claim the same source key and id", blocking=True))
+                continue
+            if row_origin is not None:
+                seen_category_origins.add(row_origin)
             category_rows[label] = row
             category_ids[label] = (category_source.get(origin(row), row["id"])
                                    if kind == "anima-personal-tags" else category_source.get(
@@ -225,6 +234,7 @@ def _prepare(db: sqlite3.Connection, document: dict, options: ImportOptions) -> 
     for existing in tag_db.values():
         similar_seen.setdefault(normalize_search(existing["content"]), set()).add(existing["content"])
     seen_tag_ids: set[str] = set()
+    seen_tag_origins: set[tuple[str, str]] = set()
     for index, row in enumerate(document["tags"]):
         label = str(index)
         try:
@@ -239,6 +249,13 @@ def _prepare(db: sqlite3.Connection, document: dict, options: ImportOptions) -> 
                          tag_source.get(key, _stable_id(source_key, "tag", label)))
             if kind == "anima-personal-tags":
                 payload = TagRecord.model_validate(row).model_dump()
+                row_origin = origin(payload)
+                if row_origin is not None and row_origin in seen_tag_origins:
+                    issues.append(_issue("duplicate_source", "tag", label,
+                                         "Multiple tags claim the same source key and id", blocking=True))
+                    continue
+                if row_origin is not None:
+                    seen_tag_origins.add(row_origin)
                 payload["id"] = target_id
                 payload["category_id"] = category_ids.get(payload["category_id"], payload["category_id"])
                 if payload["category_id"] is not None and payload["category_id"] not in category_db and payload["category_id"] not in category_ids.values():

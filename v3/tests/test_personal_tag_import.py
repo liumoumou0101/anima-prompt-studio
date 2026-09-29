@@ -1,12 +1,14 @@
 """Lossless import and export of personal tags."""
 
 import json
+import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from anima_prompt_studio_v3.core.personal_tags import CompositionItem, CompositionWrite, TagWrite
+from anima_prompt_studio_v3.core.personal_tags import CategoryWrite, CompositionItem, CompositionWrite, TagWrite
 from anima_prompt_studio_v3.storage.personal_tag_compositions import PersonalTagCompositions
 from anima_prompt_studio_v3.storage.personal_tag_import import (
     ImportOptions, backup_database, commit_import, export_bundle, preview_import,
@@ -244,3 +246,54 @@ def test_bundle_deduplicates_matching_source_ids_despite_different_row_ids(tmp_p
     import_document(destination, bundle)
     assert len(destination.list_categories()) == 3
     assert destination.list_tags(limit=20)["total"] == 3
+
+
+def test_export_uses_one_snapshot_during_concurrent_wal_write(tmp_path, monkeypatch):
+    store = PersonalTagStore(tmp_path / "personal-tags.db")
+    category = store.create_category(CategoryWrite(name="before"))
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+
+    real_connect = store._connect
+    inserted = False
+
+    class InterceptConnection:
+        def __init__(self, db):
+            self.db = db
+
+        def execute(self, sql, *args):
+            nonlocal inserted
+            if sql.startswith("SELECT * FROM personal_tags ORDER BY id") and not inserted:
+                inserted = True
+                store.create_tag(TagWrite(display_name="after", content="later", category_id=category.id))
+            return self.db.execute(sql, *args)
+
+    @contextmanager
+    def intercept_connect(*, write=False):
+        with real_connect(write=write) as db:
+            yield db if write else InterceptConnection(db)
+
+    monkeypatch.setattr(store, "_connect", intercept_connect)
+    bundle = export_bundle(store)
+    assert inserted
+    assert len(bundle["categories"]) == 1
+    assert bundle["tags"] == []
+    assert store.list_tags()["total"] == 1
+
+
+def test_bundle_duplicate_origins_are_blocking_even_with_distinct_row_ids(tmp_path):
+    source = PersonalTagStore(tmp_path / "source" / "personal-tags.db")
+    import_document(source, legacy())
+    bundle = export_bundle(source)
+    root = next(row for row in bundle["categories"] if row["parent_id"] is None)
+    bundle["categories"].append({**root, "id": "other-category-id"})
+    bundle["tags"].append({**bundle["tags"][0], "id": "other-tag-id"})
+    destination = PersonalTagStore(tmp_path / "destination" / "personal-tags.db")
+    before = export_bundle(destination)
+    preview = preview_import(destination, bundle, ImportOptions())
+    assert {(issue["entity"], issue["code"]) for issue in preview["issues"]
+            if issue["blocking"]} >= {("category", "duplicate_source"), ("tag", "duplicate_source")}
+    with pytest.raises(ValueError, match="invalid"):
+        commit_import(destination, bundle, ImportOptions(), digest=preview["digest"],
+                      expected_library_revision=preview["library_revision"])
+    assert export_bundle(destination) == before
