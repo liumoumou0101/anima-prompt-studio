@@ -60,6 +60,9 @@ class PersonalTagStore:
                     id INTEGER PRIMARY KEY CHECK (id = 1), library_revision INTEGER NOT NULL
                 );
                 INSERT OR IGNORE INTO library_meta VALUES (1, 0);
+                CREATE TABLE IF NOT EXISTS personal_seed_meta (
+                    id INTEGER PRIMARY KEY CHECK (id = 1), version TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS personal_categories (
                     id TEXT PRIMARY KEY, name TEXT NOT NULL, parent_id TEXT,
                     position INTEGER NOT NULL, revision INTEGER NOT NULL,

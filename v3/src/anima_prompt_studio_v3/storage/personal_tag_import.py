@@ -381,6 +381,47 @@ def preview_import(store: PersonalTagStore, document: dict, options: ImportOptio
             "counts": prepared["counts"], "issues": prepared["issues"]}
 
 
+def _insert_prepared(db: sqlite3.Connection, prepared: dict) -> None:
+    """Insert prepared records inside the caller's write transaction."""
+    pending = {row["id"]: row for row in prepared["categories"]}
+    while pending:
+        ready = [row for row in pending.values() if row["parent_id"] not in pending]
+        if not ready:
+            raise ValueError("Import category cycle")
+        for row in ready:
+            db.execute("""INSERT INTO personal_categories
+                (id,name,parent_id,position,revision,created_at,updated_at,deleted_at,
+                 source_key,source_id,source_metadata,needs_review)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (row["id"], row["name"], row["parent_id"], row["position"], row["revision"],
+                 row["created_at"], row["updated_at"], row["deleted_at"], row["source_key"],
+                 row["source_id"], _json(row["source_metadata"]), _json(row["needs_review"])))
+            del pending[row["id"]]
+    for row in prepared["tags"]:
+        db.execute("""INSERT INTO personal_tags
+            (id,display_name,content,aliases,category_id,kind,notes,default_weight,
+             search_key,display_sort,revision,created_at,updated_at,deleted_at,
+             source_key,source_id,source_metadata,needs_review)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (row["id"], row["display_name"], row["content"], _json(row["aliases"]),
+             row["category_id"], row["kind"], row["notes"], row["default_weight"],
+             normalize_search(" ".join([row["display_name"], row["content"], *row["aliases"]])),
+             normalize_search(row["display_name"]), row["revision"], row["created_at"],
+             row["updated_at"], row["deleted_at"], row["source_key"], row["source_id"],
+             _json(row["source_metadata"]), _json(row["needs_review"])))
+    for row in prepared["combinations"]:
+        db.execute("""INSERT INTO personal_compositions
+            (id,name,items,revision,created_at,updated_at,deleted_at) VALUES (?,?,?,?,?,?,?)""",
+            (row["id"], row["name"], _json(row["items"]), row["revision"],
+             row["created_at"], row["updated_at"], row["deleted_at"]))
+    draft = prepared["draft"]
+    if draft is not None:
+        current_draft = db.execute("SELECT revision,items,updated_at FROM personal_draft WHERE id=1").fetchone()
+        if current_draft["revision"] == 0 and current_draft["items"] == "[]" and current_draft["updated_at"] == "":
+            db.execute("UPDATE personal_draft SET items=?,revision=?,updated_at=? WHERE id=1",
+                       (_json(draft["items"]), draft["revision"], draft["updated_at"]))
+
+
 def commit_import(store: PersonalTagStore, document: dict, options: ImportOptions, *,
                   digest: str, expected_library_revision: int) -> dict:
     if digest != _digest(document, options):
@@ -399,43 +440,7 @@ def commit_import(store: PersonalTagStore, document: dict, options: ImportOption
         prepared = _prepare(db, document, options)
         if prepared["counts"]["invalid"]:
             raise ValueError(f"Import contains invalid records: {prepared['issues']}")
-        pending = {row["id"]: row for row in prepared["categories"]}
-        while pending:
-            ready = [row for row in pending.values() if row["parent_id"] not in pending]
-            if not ready:
-                raise ValueError("Import category cycle")
-            for row in ready:
-                db.execute("""INSERT INTO personal_categories
-                    (id,name,parent_id,position,revision,created_at,updated_at,deleted_at,
-                     source_key,source_id,source_metadata,needs_review)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (row["id"], row["name"], row["parent_id"], row["position"], row["revision"],
-                     row["created_at"], row["updated_at"], row["deleted_at"], row["source_key"],
-                     row["source_id"], _json(row["source_metadata"]), _json(row["needs_review"])))
-                del pending[row["id"]]
-        for row in prepared["tags"]:
-            db.execute("""INSERT INTO personal_tags
-                (id,display_name,content,aliases,category_id,kind,notes,default_weight,
-                 search_key,display_sort,revision,created_at,updated_at,deleted_at,
-                 source_key,source_id,source_metadata,needs_review)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (row["id"], row["display_name"], row["content"], _json(row["aliases"]),
-                 row["category_id"], row["kind"], row["notes"], row["default_weight"],
-                 normalize_search(" ".join([row["display_name"], row["content"], *row["aliases"]])),
-                 normalize_search(row["display_name"]), row["revision"], row["created_at"],
-                 row["updated_at"], row["deleted_at"], row["source_key"], row["source_id"],
-                 _json(row["source_metadata"]), _json(row["needs_review"])))
-        for row in prepared["combinations"]:
-            db.execute("""INSERT INTO personal_compositions
-                (id,name,items,revision,created_at,updated_at,deleted_at) VALUES (?,?,?,?,?,?,?)""",
-                (row["id"], row["name"], _json(row["items"]), row["revision"],
-                 row["created_at"], row["updated_at"], row["deleted_at"]))
-        draft = prepared["draft"]
-        if draft is not None:
-            current_draft = db.execute("SELECT revision,items,updated_at FROM personal_draft WHERE id=1").fetchone()
-            if current_draft["revision"] == 0 and current_draft["items"] == "[]" and current_draft["updated_at"] == "":
-                db.execute("UPDATE personal_draft SET items=?,revision=?,updated_at=? WHERE id=1",
-                           (_json(draft["items"]), draft["revision"], draft["updated_at"]))
+        _insert_prepared(db, prepared)
         if prepared["counts"]["new"]:
             store._bump(db)
     return {"counts": prepared["counts"], "issues": prepared["issues"],

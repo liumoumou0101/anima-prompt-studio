@@ -30,6 +30,7 @@ OfficialPack.validate(EXAMPLE_SOURCE)
 datas = [
     (str(EXAMPLE_SOURCE), f"anima_prompt_studio_v3/example_packs/{EXAMPLE_SOURCE.name}"),
     (str(V3_PACKAGE / "configs"), "anima_prompt_studio_v3/configs"),
+    (str(V3_PACKAGE / "seed_data"), "anima_prompt_studio_v3/seed_data"),
     (str(V3_ROOT / "web" / "dist"), "anima_prompt_studio_v3/web/dist"),
     (str(V2_PACKAGE / "configs"), "anima_prompt_studio/configs"),
     (str(PACK_SOURCE), f"data-packs/{PACK_SOURCE.name}"),

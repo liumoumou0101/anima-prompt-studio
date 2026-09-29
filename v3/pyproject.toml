@@ -43,7 +43,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-anima_prompt_studio_v3 = ["configs/model_profiles/*.json", "configs/workflow_profiles/*.json", "configs/workflow_catalog.json", "configs/prompt_identity_aliases.json"]
+anima_prompt_studio_v3 = ["configs/model_profiles/*.json", "configs/workflow_profiles/*.json", "configs/workflow_catalog.json", "configs/prompt_identity_aliases.json", "seed_data/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "../src"]

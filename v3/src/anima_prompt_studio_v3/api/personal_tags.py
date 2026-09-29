@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from ..core.personal_tags import CategoryWrite, CompositionItem, CompositionWrite, TagWrite
 from ..storage.personal_tag_compositions import PersonalTagCompositions
 from ..storage.personal_tag_import import ImportOptions, commit_import, export_bundle, preview_import
+from ..storage.personal_tag_seed import initialize_bundled_personal_tags
 from ..storage.personal_tags import PersonalTagConflictError, PersonalTagNotFoundError, PersonalTagStore
 
 
@@ -80,6 +81,7 @@ def register_personal_tag_routes(app, workspace_db: Path, require_session):
     from .app import ApiError
 
     store = PersonalTagStore(Path(workspace_db).with_name("personal-tags.db"))
+    initialize_bundled_personal_tags(store)
     compositions = PersonalTagCompositions(store.path)
     app.state.personal_tag_store = store
     dependencies = [Depends(require_session)]

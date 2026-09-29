@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -16,7 +17,9 @@ ORIGIN = "http://127.0.0.1"
 
 def client_and_headers(tmp_path: Path):
     workspace = tmp_path / "workspace.db"
-    runtime = create_api_runtime(tmp_path / "missing-reference.db", workspace_db=workspace)
+    # These endpoint contract tests start with an intentionally empty library.
+    with patch("anima_prompt_studio_v3.api.personal_tags.initialize_bundled_personal_tags"):
+        runtime = create_api_runtime(tmp_path / "missing-reference.db", workspace_db=workspace)
     client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
     response = client.post("/api/v3/session/exchange", json={"bootstrap_token": runtime.bootstrap_token},
                            headers={"Origin": ORIGIN})
