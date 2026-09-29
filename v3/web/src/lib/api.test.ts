@@ -1,5 +1,6 @@
 import {beforeEach, describe, expect, it, vi} from "vitest";
 import {apiRequest, initializeApp, resetApiClientForTests} from "./api";
+import {personalTagsApi} from "./personalTags";
 
 const bootstrapPayload = {
   app_version: "3.0.0-test",
@@ -41,6 +42,24 @@ describe("API bootstrap client", () => {
 
     const request = fetchMock.mock.calls[0][1] as RequestInit;
     expect(new Headers(request.headers).get("X-Anima-Session")).toBe("session-token");
+  });
+
+  it("preserves the current record in a personal-tag revision conflict", async () => {
+    sessionStorage.setItem("anima-v3-session", "session-token");
+    const current = {id: "tag-1", revision: 2, display_name: "saved", content: "saved content"};
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+      error: {code: "revision_conflict", message: "Expected revision 1, found 2",
+        details: {current_revision: 2, current}, request_id: "req_conflict", retryable: false},
+    }), {status: 409}));
+
+    await expect(personalTagsApi.updateTag("tag-1", {display_name: "pending", content: "pending content"}, 1))
+      .rejects.toMatchObject({code: "revision_conflict", requestId: "req_conflict",
+        details: {current_revision: 2, current}});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v3/personal-tags/tags/tag-1");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      value: {display_name: "pending", content: "pending content"}, expected_revision: 1,
+    });
   });
 
   it("restores a new tab using only the remembered same-origin secret", async () => {
