@@ -34,7 +34,7 @@ def capture_payload(monkeypatch, model, base_url, *, task="rewrite", ingest_thin
 
 
 @pytest.mark.parametrize("model", ["mimo-v2.5", "minimax-m3"])
-@pytest.mark.parametrize("task", ["rewrite", "prompt_ingest", "probe", "ingest"])
+@pytest.mark.parametrize("task", ["rewrite", "rewrite_review", "prompt_ingest", "probe", "ingest"])
 def test_opencode_go_sends_both_verified_controls_when_thinking_is_disabled(model, task, monkeypatch):
     payload = capture_payload(monkeypatch, model, "https://opencode.ai/zen/go/v1", task=task)
     assert payload["thinking"] == {"type": "disabled"}

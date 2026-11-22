@@ -32,10 +32,9 @@ def _import_lock(database: Path, cancelled=None):
         if os.name == "nt":
             import msvcrt
 
-            stream.seek(0, os.SEEK_END)
-            if stream.tell() == 0:
-                stream.write(b"\0")
-                stream.flush()
+            # Byte-range locks can extend beyond EOF. A sentinel write before
+            # acquiring the lock races with another first-open writer and can
+            # hit its already locked byte during the CRT's append operation.
             while True:
                 if cancelled is not None and cancelled():
                     raise InterruptedError("reference import cancelled")

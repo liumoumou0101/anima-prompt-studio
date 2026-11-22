@@ -44,6 +44,29 @@ describe("API bootstrap client", () => {
     expect(new Headers(request.headers).get("X-Anima-Session")).toBe("session-token");
   });
 
+  it.each(["POST", "PUT", "PATCH", "DELETE"])("sets JSON content type for bodyless %s actions required by API middleware", async method => {
+    sessionStorage.setItem("anima-v3-session", "session-token");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+    await apiRequest("/api/v3/generation-intents/intent/retry", {method});
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(new Headers(request.headers).get("Content-Type")).toBe("application/json");
+    expect(request.body).toBeUndefined();
+  });
+
+  it("preserves multipart boundaries, explicit content types and bodyless reads", async () => {
+    sessionStorage.setItem("anima-v3-session", "session-token");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("{}"));
+    const form = new FormData();
+    form.append("file", new Blob(["content"]), "sample.txt");
+    await apiRequest("/api/v3/upload", {method:"POST",body:form});
+    await apiRequest("/api/v3/custom", {method:"POST",headers:{"Content-Type":"text/plain"},body:"text"});
+    await apiRequest("/api/v3/read");
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).has("Content-Type")).toBe(false);
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(form);
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get("Content-Type")).toBe("text/plain");
+    expect(new Headers(fetchMock.mock.calls[2][1]?.headers).has("Content-Type")).toBe(false);
+  });
+
   it("preserves the current record in a personal-tag revision conflict", async () => {
     sessionStorage.setItem("anima-v3-session", "session-token");
     const current = {id: "tag-1", revision: 2, display_name: "saved", content: "saved content"};

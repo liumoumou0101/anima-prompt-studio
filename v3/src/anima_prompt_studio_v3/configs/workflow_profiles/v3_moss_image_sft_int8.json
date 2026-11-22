@@ -1,0 +1,207 @@
+{
+  "id": "v3_moss_image_sft_int8",
+  "display_name": "MOSS Image SFT INT8 · 中文原文",
+  "api_workflow": {
+    "5": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "clip": [
+          "3",
+          0
+        ],
+        "text": ""
+      },
+      "_meta": {
+        "title": "提示词编码 CLIP Text Encode"
+      }
+    },
+    "6": {
+      "class_type": "EmptyFlux2LatentImage",
+      "inputs": {
+        "width": 1024,
+        "height": 1024,
+        "batch_size": 1
+      },
+      "_meta": {
+        "title": "空潜空间 Empty Latent"
+      }
+    },
+    "7": {
+      "class_type": "KSampler",
+      "inputs": {
+        "model": [
+          "1",
+          0
+        ],
+        "positive": [
+          "4",
+          0
+        ],
+        "negative": [
+          "5",
+          0
+        ],
+        "latent_image": [
+          "6",
+          0
+        ],
+        "seed": 0,
+        "steps": 25,
+        "cfg": 2.5,
+        "sampler_name": "er_sde",
+        "scheduler": "simple",
+        "denoise": 1.0
+      },
+      "_meta": {
+        "title": "采样器 KSampler"
+      }
+    },
+    "9": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "7",
+          0
+        ],
+        "vae": [
+          "8",
+          0
+        ]
+      },
+      "_meta": {
+        "title": "VAE解码 VAE Decode"
+      }
+    },
+    "10": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "images": [
+          "9",
+          0
+        ],
+        "filename_prefix": "v3_moss_image_sft_int8"
+      },
+      "_meta": {
+        "title": "保存图片 Save Image"
+      }
+    },
+    "1": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "moss_image_sft_int8_convrot.safetensors",
+        "weight_dtype": "default"
+      },
+      "_meta": {
+        "title": "模型加载 UNET Loader"
+      }
+    },
+    "3": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "qwen3.5_9b_w4a8_gptq.safetensors",
+        "type": "moss_image",
+        "device": "default"
+      },
+      "_meta": {
+        "title": "文本编码器加载 CLIP Loader"
+      }
+    },
+    "8": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "flux2-vae_small.safetensors"
+      },
+      "_meta": {
+        "title": "VAE加载 VAE Loader"
+      }
+    },
+    "4": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "clip": [
+          "3",
+          0
+        ],
+        "text": ""
+      },
+      "_meta": {
+        "title": "提示词编码 CLIP Text Encode"
+      }
+    }
+  },
+  "bindings": {
+    "positive_prompt": {
+      "node_id": "4",
+      "input_name": "text"
+    },
+    "negative_prompt": {
+      "node_id": "5",
+      "input_name": "text"
+    },
+    "checkpoint": {
+      "node_id": "1",
+      "input_name": "unet_name"
+    },
+    "text_encoder": {
+      "node_id": "3",
+      "input_name": "clip_name"
+    },
+    "text_encoder_type": {
+      "node_id": "3",
+      "input_name": "type"
+    },
+    "vae": {
+      "node_id": "8",
+      "input_name": "vae_name"
+    },
+    "seed": {
+      "node_id": "7",
+      "input_name": "seed"
+    },
+    "steps": {
+      "node_id": "7",
+      "input_name": "steps"
+    },
+    "cfg": {
+      "node_id": "7",
+      "input_name": "cfg"
+    },
+    "sampler": {
+      "node_id": "7",
+      "input_name": "sampler_name"
+    },
+    "scheduler": {
+      "node_id": "7",
+      "input_name": "scheduler"
+    },
+    "width": {
+      "node_id": "6",
+      "input_name": "width"
+    },
+    "height": {
+      "node_id": "6",
+      "input_name": "height"
+    },
+    "batch_size": {
+      "node_id": "6",
+      "input_name": "batch_size"
+    },
+    "filename_prefix": {
+      "node_id": "10",
+      "input_name": "filename_prefix"
+    }
+  },
+  "workflow_kind": "txt2img_basic",
+  "lora_slots": [],
+  "compatible_model_profiles": [
+    "moss_image_sft_int8"
+  ],
+  "runtime_assets": {
+    "checkpoint": "moss_image_sft_int8_convrot.safetensors",
+    "text_encoder": "qwen3.5_9b_w4a8_gptq.safetensors",
+    "text_encoder_type": "moss_image",
+    "vae": "flux2-vae_small.safetensors"
+  },
+  "source_path": "packaged://moss/v3_moss_image_sft_int8",
+  "notes": "25 步、CFG 2.5、er_sde + simple；1024×1024，宽高为 16 的倍数。原生 shift 5，不额外覆盖，无自动扩写。"
+}

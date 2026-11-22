@@ -6,7 +6,10 @@ import {useEffect, useRef} from "react";
 export interface ConversationProposal {
   id: string; workspace_id: string; base_revision: number; draft: ConversationRecord["draft"];
   changed_layers: string[]; warnings: string[]; created_at: string;
-  unchanged?: boolean; message?: string;
+  task?: "rewrite" | "sync_requirements" | "bold_rewrite"; review_status?: "needs_review"; unchanged?: boolean; message?: string;
+}
+export function isPromptPreview(proposal: ConversationProposal | null): boolean {
+  return proposal?.task==="bold_rewrite" || proposal?.review_status==="needs_review";
 }
 export function PromptChanges({before, after}: {before: {positive: string; negative: string}; after: {positive: string; negative: string}}) {
   return <div className="conversation-diff">{(["positive", "negative"] as const).map(key =>
@@ -32,20 +35,27 @@ export function RequirementChanges({before, after}: {before: RequirementsEdit; a
   });
   return changes.length ? <ul className="conversation-requirement-diff">{changes}</ul> : <p className="conversation-muted">中文画面要求未改变。</p>;
 }
-export function ConversationReview({proposal, before, disabled, acceptBlocked = false, onAccept, onDiscard}: {proposal: ConversationProposal; before: LocalConversation; disabled: boolean; acceptBlocked?: boolean; onAccept: () => void; onDiscard: () => void}) {
+export function ConversationReview({proposal, before, disabled, acceptBlocked = false, onAccept, onDiscard, onEdit}: {proposal: ConversationProposal; before: LocalConversation; disabled: boolean; acceptBlocked?: boolean; onAccept: () => void; onDiscard: () => void; onEdit?: () => void}) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     heading.current?.scrollIntoView?.({block: "start", behavior: "instant"});
     heading.current?.focus({preventScroll: true});
   }, [proposal.id]);
   const after = {positive: proposal.draft.compiled?.positive || "", negative: proposal.draft.compiled?.negative || ""};
-  return <section className="conversation-review" aria-label="待确认的修改">
-    <header><h2 ref={heading} tabIndex={-1}>待确认的修改</h2><span>尚未替换当前版本</span></header>
+  const bold = proposal.task === "bold_rewrite";
+  const needsReview = proposal.review_status==="needs_review";
+  const title = bold ? "大胆重构预览" : needsReview ? "待核对候选" : "待确认的修改";
+  const instruction = isPromptPreview(proposal) && proposal.draft.conversation_events.at(-1)?.delta;
+  return <section className="conversation-review" aria-label={title}>
+    <header><h2 ref={heading} tabIndex={-1}>{title}</h2><span>尚未替换当前版本</span></header>
+    {instruction && <p>本次修改意见：{instruction}</p>}
     <p>检查新增与删除内容，再决定是否采用。<span className="conversation-diff-legend"><ins>新增</ins> <del>删除</del></span></p>
     <RequirementChanges before={before.requirements} after={proposal.draft.requirements} />
     <PromptChanges before={before} after={after} />
-    {proposal.warnings.length > 0 && <div className="conversation-review-notes"><strong>模型说明</strong><ul>{proposal.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul></div>}
-    {acceptBlocked && <p role="alert">当前草稿或版本已变化，请先不采用这份候选，处理草稿后重新整理。</p>}
-    <div className="conversation-actions"><button className="conversation-primary" disabled={disabled || acceptBlocked} onClick={onAccept}>采用修改</button><button disabled={disabled} onClick={onDiscard}>不采用</button></div>
+    {proposal.warnings.length > 0 && <div className="conversation-review-notes"><strong>{needsReview?"请核对这些地方":"模型说明"}</strong><ul>{proposal.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul></div>}
+    {acceptBlocked && <p role="alert">当前草稿、修改意见或版本已变化。请放弃这份候选，再按最新内容重试。</p>}
+    <div className="conversation-actions"><button className="conversation-primary" disabled={disabled || acceptBlocked} onClick={onAccept}>采用修改</button>
+      {onEdit && <button disabled={disabled || acceptBlocked} onClick={onEdit}>带入草稿继续编辑</button>}
+      <button disabled={disabled} onClick={onDiscard}>不采用</button></div>
   </section>;
 }

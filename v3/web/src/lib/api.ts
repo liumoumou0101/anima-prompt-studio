@@ -125,7 +125,8 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   const headers = new Headers(init.headers);
   const sentToken = sessionStorage.getItem(SESSION_KEY)!;
   headers.set("X-Anima-Session", sentToken);
-  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const writesJson = ["POST", "PUT", "PATCH", "DELETE"].includes((init.method || "GET").toUpperCase());
+  if ((init.body || writesJson) && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   let response = await fetchLocal(path, {...init, headers});
   if (response.status === 401) {
     const error = await response.clone().json() as ApiErrorPayload;

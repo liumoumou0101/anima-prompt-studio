@@ -17,6 +17,134 @@ from test_generation_submissions import harness, payload, submit, workspace_payl
 from test_api import reference_db
 
 
+def test_hand_edited_anima_text_reaches_storage_assistant_queue_and_graph_verbatim(
+    harness, reference_db, monkeypatch
+):
+    from fastapi.testclient import TestClient
+    from anima_prompt_studio.domain.execution_models import WorkflowProfile
+    from anima_prompt_studio.domain.models import PromptJob
+    from anima_prompt_studio_v3.api import create_api_runtime
+    from anima_prompt_studio_v3.api.workspace_store import WorkspaceStore
+    from anima_prompt_studio_v3.core.requirements import Requirements, dump
+    from anima_prompt_studio_v3.core.workflow_compiler import V3WorkflowCompiler
+    from anima_prompt_studio_v3.prompt_assistant.services.llm import LLMService
+    from test_v2_generation_adapter import remote_profile
+
+    store, start, _, executed, _, _ = harness
+    queue, _ = start()
+    runtime = create_api_runtime(reference_db, workspace_db=store.path, generation_queue=queue)
+    submissions = runtime.app.state.submission_service
+    submissions.close()
+    model = "anima_base_v1"
+    reviewed = {
+        "positive": "  clear river,\n\n  (wide view:1.17),\t blue stone  \n",
+        "negative": " \t mist,\n\nwashed out  ",
+    }
+
+    def assert_saved_prompt(workspace):
+        compiled = workspace["draft"]["compiled"]
+        assert {key: compiled[key] for key in reviewed} == reviewed
+
+    assistant_inputs = []
+
+    async def assistant(**kwargs):
+        assistant_inputs.append(json.loads(kwargs["messages"][1]["content"]))
+        return {"text": json.dumps({
+            "touched_layers": [],
+            "layer_updates": {},
+            "positive": "other text",
+            "negative": "other negative",
+            "warnings": [],
+        })}
+
+    monkeypatch.setattr(LLMService, "complete", assistant)
+    with TestClient(runtime.app, base_url="http://127.0.0.1") as client:
+        client.headers["Origin"] = "http://127.0.0.1"
+        exchange = client.post("/api/v3/session/exchange", json={"bootstrap_token": runtime.bootstrap_token})
+        client.headers["X-Anima-Session"] = exchange.json()["session_token"]
+
+        layers = dump(Requirements.empty())["layers"]
+        layers["subject"]["text"] = "山间河流"
+        requirements = {
+            "layers": layers,
+            "loras": [],
+            "prompt_locks": [{"target": "positive", "text": "clear river"}],
+        }
+        draft = {"model_profile": model, "requirements_edit": requirements}
+        created = client.post("/api/v3/workspaces", json={"draft": {
+            **draft,
+            "prompt_edit": {"positive": "clear river, old bridge", "negative": "old haze"},
+        }})
+        assert created.status_code == 201, created.text
+        workspace = created.json()
+        workspace_id = workspace["id"]
+        path = f"/api/v3/workspaces/{workspace_id}"
+
+        layers["subject"]["character_tags"] = ["river traveler"]
+        layers["style"]["manual_artist_tags"] = ["garden painter"]
+        selected = client.put(path, json={"revision": workspace["revision"], "draft": draft})
+        assert selected.status_code == 200, selected.text
+        workspace = selected.json()
+        selected_positive = workspace["draft"]["compiled"]["positive"]
+        assert "river traveler" in selected_positive
+        assert "@garden painter" in selected_positive
+
+        layers["subject"]["general_tags"] = ["stone bridge"]
+        edited = client.put(path, json={
+            "revision": workspace["revision"],
+            "title": "River",
+            "draft": {**draft, "prompt_edit": reviewed},
+        })
+        assert edited.status_code == 200, edited.text
+        workspace = edited.json()
+        assert_saved_prompt(workspace)
+        assert_saved_prompt(client.get(path).json())
+        assert_saved_prompt(WorkspaceStore(store.path).get(workspace_id))
+
+        synced = client.post("/api/v3/workbench/turns", json={
+            "workspace_id": workspace_id,
+            "revision": workspace["revision"],
+            "mode": "faithful",
+            "task": "sync_requirements",
+            "delta": {"text": ""},
+            "compiled": reviewed,
+        })
+        assert synced.status_code == 200, synced.text
+        assert assistant_inputs[0]["compiled"] == reviewed
+        workspace = client.get(path).json()
+        assert_saved_prompt(workspace)
+
+        submitted = client.post(
+            "/api/v3/direct-prompt/runs",
+            headers={"Idempotency-Key": "river-exact"},
+            json={
+                "submission_kind": "conversational",
+                "use_current_prompt": True,
+                "workspace_id": workspace_id,
+                "workspace_revision": workspace["revision"],
+                "compiled_token": workspace["draft"]["compiled"]["compiled_token"],
+                "positive_prompt": reviewed["positive"],
+                "negative_prompt": reviewed["negative"],
+                "model_profile": model,
+                "remote_profile_id": "remote-1",
+                "workflow_profile_id": "anima_base_api_v1",
+            },
+        )
+        assert submitted.status_code == 202, submitted.text
+
+        run_id = submitted.json()["id"]
+        snapshot = submissions.store.for_runs([run_id])[0]["snapshot"]
+        job = PromptJob.model_validate(snapshot["job"])
+        assert {"positive": job.positive_prompt, "negative": job.negative_prompt} == reviewed
+        profile = WorkflowProfile.model_validate(snapshot["workflow"])
+        graph = V3WorkflowCompiler().render(job, profile, remote_profile(), model, run_id).workflow
+        for direction, text in reviewed.items():
+            binding = profile.bindings[f"{direction}_prompt"]
+            assert graph[binding.node_id]["inputs"][binding.input_name] == text
+        assert_saved_prompt(client.get(path).json())
+        assert not executed
+
+
 def current_prompt_request(store, *, first_manual=False):
     if first_manual:
         record = store.create("首次手写", {"model_profile": "anima_base_v1"})
@@ -163,9 +291,12 @@ def test_current_prompt_can_use_verified_snapshot_without_persistent_generation_
 
 def test_rewrite_marks_visible_prompt_as_authoritative_over_older_unlocked_context(tmp_path, monkeypatch):
     from anima_prompt_studio_v3.api.conversation import ConversationService, TurnRequest
+    from anima_prompt_studio_v3.core.requirements import PromptEdit, compile_prompt
     from anima_prompt_studio_v3.prompt_assistant.services.llm import LLMService
     from test_conversation_reliability import prepared
     store, record = prepared(tmp_path)  # Older Chinese memory says blue coat.
+    record = store.transform(record["id"], expected_revision=record["revision"], operation=lambda draft: {
+        **draft, "compiled": compile_prompt(draft, PromptEdit(positive="detective, blue coat", negative="blurry"), source="llm")})
     record = store.update(record["id"], expected_revision=record["revision"], title=record["title"],
         draft={"prompt_edit": {"positive": "detective, red coat", "negative": "blurry"}})
     requests = []
@@ -182,7 +313,8 @@ def test_rewrite_marks_visible_prompt_as_authoritative_over_older_unlocked_conte
     assert len(requests) == 1
     assert requests[0]["prompt_authority"] == "visible_prompt"
     assert requests[0]["compiled"] == {"positive": "detective, red coat", "negative": "blurry"}
-    assert requests[0]["requirements"]["layers"]["subject"]["text"] == "蓝外套侦探"
+    assert requests[0]["requirements"]["layers"]["subject"]["text"] == ""
+    assert "蓝外套侦探" not in json.dumps(requests[0], ensure_ascii=False)
     assert result["draft"]["compiled"]["positive"] == "detective, red coat, warm lighting"
     assert result["draft"]["requirements"]["layers"]["subject"]["text"] == "红外套侦探"
     assert store.get_proposal(record["id"]) is None

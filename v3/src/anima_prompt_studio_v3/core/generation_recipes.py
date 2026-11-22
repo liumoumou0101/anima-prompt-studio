@@ -8,6 +8,7 @@ from anima_prompt_studio.domain.execution_models import HIRES_FIX_WORKFLOW_KIND,
 from anima_prompt_studio.domain.models import PromptJob
 from .runtime_profiles import V3RuntimeProfiles
 from .model_versions import workflow_models
+from .workflow_parameters import build_workflow_parameter_schema
 
 
 class RecipeParameters(BaseModel):
@@ -124,6 +125,10 @@ def build_workflow_recipe_contract(workflow: WorkflowProfile) -> dict[str, objec
                 "upscale_factor": float(_binding_value(workflow, "upscale_factor", 1.5)),
             },
         ]
+    elif "moss_image_sft_int8" in model_profiles:
+        default_recipe_id = "moss_baseline"
+        recipes = [_recipe("moss_baseline", "MOSS 中文基线", "baseline", template, "25 步、CFG 2.5、er_sde + simple；原生 shift 5，建议审阅后出图。", "workflow_template")]
+        stages = [{"id": "base", "display_name": "MOSS 单阶段", **template.model_dump(mode="json")} ]
     elif is_dmdx:
         default_recipe_id = "dmdx_4step"
         recipes = [
@@ -154,6 +159,13 @@ def build_workflow_recipe_contract(workflow: WorkflowProfile) -> dict[str, objec
             _recipe("yume15_40_steps", "40 步细节对照", "detail_study", creator.model_copy(update={"steps": 40}), "作者推荐步数区间上沿；保持其余参数不变做对照，不保证质量提升。", "model_guidance"),
         ]
         stages = [{"id": "base", "display_name": "AnimaYume 1.5 单阶段", **creator.model_dump(mode="json")}]
+    elif "wai_anima_v1_0" in model_profiles:
+        default_recipe_id = "wai_baseline"
+        baseline = RecipeParameters(steps=25, cfg=4.5, sampler="euler_ancestral", scheduler="normal")
+        recipes = [
+            _recipe("wai_baseline", "WAI 基础生成", "baseline", baseline, "25 步、CFG 4.5、Euler a + normal；使用共享 Qwen3 文本编码器与 Qwen Image VAE。", "workflow_template"),
+        ]
+        stages = [{"id": "base", "display_name": "WAI ANIMA 单阶段", **baseline.model_dump(mode="json")}]
     elif is_yume:
         default_recipe_id = "yume_creator"
         creator = RecipeParameters(steps=30, cfg=5.5, sampler="euler_ancestral", scheduler="normal")
@@ -230,6 +242,7 @@ def build_workflow_recipe_contract(workflow: WorkflowProfile) -> dict[str, objec
     }
 
     return {
+        "parameter_schema": build_workflow_parameter_schema(workflow),
         "default_recipe_id": default_recipe_id,
         "generation_recipes": [item.model_dump(mode="json") for item in recipes],
         "parameter_capabilities": {

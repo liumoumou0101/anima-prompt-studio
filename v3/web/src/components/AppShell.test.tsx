@@ -9,7 +9,7 @@ import type {BootstrapResponse} from "../lib/types";
 const bootstrap: BootstrapResponse = {app_version: "test", api_version: "3", data_pack: {ready: true, id: "test-pack", cutoff_mode: "exact"}, features: {}, model_profiles: [], settings_summary: {}};
 
 describe("shared appearance shell", () => {
-  it("keeps the route, draft, image and local operation mounted across all four appearances", () => {
+  it("keeps the route, draft, image and operation mounted across themes and navigation sizes", () => {
     const mounted = vi.fn(); const unmounted = vi.fn();
     function Draft() {
       const [text, setText] = useState("");
@@ -21,10 +21,11 @@ describe("shared appearance shell", () => {
     const draft = screen.getByLabelText("未发送想法"); const picture = screen.getByAltText("原图");
     fireEvent.change(draft, {target: {value: "原提示词、角色和未发送修改"}});
     fireEvent.click(screen.getByText("开始本地操作"));
-    for (const [layout, theme] of [['studio', 'light'], ['editorial', 'light'], ['editorial', 'dark'], ['studio', 'dark']]) {
-      fireEvent.change(screen.getByLabelText("界面布局"), {target: {value: layout}});
+    expect(screen.queryByLabelText("界面布局")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {name: "展开导航"}));
+    for (const theme of ['light', 'dark', 'system']) {
       fireEvent.change(screen.getByLabelText("明暗主题"), {target: {value: theme}});
-      expect(document.documentElement.dataset).toMatchObject({layout, theme});
+      expect(document.documentElement.dataset.layout).toBe("unified");
       expect(screen.getByLabelText("未发送想法")).toBe(draft);
       expect(draft).toHaveValue("原提示词、角色和未发送修改");
       expect(screen.getByAltText("原图")).toBe(picture);
@@ -37,9 +38,8 @@ describe("shared appearance shell", () => {
     render(<MemoryRouter><Routes><Route path="*" element={<AppShell bootstrap={bootstrap} />} /></Routes><section aria-label="设置外观"><AppearanceControls /></section></MemoryRouter>);
     fireEvent.click(screen.getByText("更多工具"));
     for (const label of ["工作台", "参考案例", "画师", "标签", "个人标签超市", "画廊", "英文直出", "生成", "工作流", "设置"]) expect(screen.getByRole("link", {name: label})).toBeInTheDocument();
-    const layouts = screen.getAllByLabelText("界面布局"); const themes = screen.getAllByLabelText("明暗主题");
-    fireEvent.change(layouts[1], {target: {value: "editorial"}});
+    const themes = screen.getAllByLabelText("明暗主题");
     fireEvent.change(themes[0], {target: {value: "light"}});
-    expect(layouts[0]).toHaveValue("editorial"); expect(themes[1]).toHaveValue("light");
+    expect(screen.queryByLabelText("界面布局")).not.toBeInTheDocument(); expect(themes[1]).toHaveValue("light");
   });
 });

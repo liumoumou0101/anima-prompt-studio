@@ -72,10 +72,10 @@ def test_choices_roundtrip_pin_and_llm_layer_updates_cannot_replace_them(tmp_pat
     reopened = WorkspaceStore(store.path).get(record["id"])
     assert reopened["draft"]["requirements"] == record["draft"]["requirements"]
     canonical = Requirements.model_validate(raw)
-    updated = apply_layer_updates(canonical, ["composition"], {"composition": {"text": "车站两人", "shot": ""}})
+    updated = apply_layer_updates(canonical, {"composition": {"text": "车站两人", "shot": ""}})
     assert updated.layers.composition.design == canonical.layers.composition.design
     with pytest.raises(WorkbenchError):
-        apply_layer_updates(canonical, ["composition"], {"composition": {"text": "", "shot": "", "design": {}}})
+        apply_layer_updates(canonical, {"composition": {"text": "", "shot": "", "design": {}}})
     pinned = apply_pin(Requirements.empty(), canonical, "whole_scene")
     assert pinned.layers.composition.design == canonical.layers.composition.design
     assert pinned.layers.lighting.mood == canonical.layers.lighting.mood
@@ -280,8 +280,8 @@ def test_llm_layer_updates_cannot_write_mood_or_replace_its_source():
     raw["layers"]["lighting"]["mood"] = {"value": "宁静日常", "source": "extracted", "evidence": "宁静日常"}
     canonical = Requirements.model_validate(raw)
     with pytest.raises(WorkbenchError, match="不可自动编辑"):
-        apply_layer_updates(canonical, ["lighting"], {"lighting": {"text": "日光", "mood": None}})
-    updated = apply_layer_updates(canonical, ["lighting"], {"lighting": {"text": "柔和日光"}})
+        apply_layer_updates(canonical, {"lighting": {"text": "日光", "mood": None}})
+    updated = apply_layer_updates(canonical, {"lighting": {"text": "柔和日光"}})
     assert updated.layers.lighting.mood == canonical.layers.lighting.mood
 
 

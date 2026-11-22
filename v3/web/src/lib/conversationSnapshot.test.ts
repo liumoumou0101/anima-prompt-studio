@@ -15,8 +15,22 @@ function record(): ConversationRecord {
       generation_settings: local().settings, generation_source: {run_id: "run-a", model_profile: "anima_base_v1",
         remote_profile_id: "remote-a", workflow_profile_id: "workflow-a"}}};
 }
+function withWorkflow(draft:LocalConversation,id:string):LocalConversation {
+  return {...draft,settings:{...draft.settings,creation_configuration:{modelProfile:draft.model,
+    workflow:{id,revision:"saved-v1"},baseRecipeId:"custom",recipeValues:{},parameterOverrides:{},resourceRequirements:[],seedMode:"random"}}};
+}
 
 describe("migrateWorkflowSnapshot", () => {
+  it("uses the configured workflow when a flat workflow cache is stale",()=>{
+    const draft=withWorkflow(local(),"workflow-a");
+    draft.settings.workflow_profile_id="stale-cache";
+    expect(migrateWorkflowSnapshot(draft,record()).workflowSnapshotRunId).toBe("run-a");
+  });
+
+  it.each(["workflow-b",""])("does not reattach the old snapshot after the configuration selects %j",id=>{
+    expect(migrateWorkflowSnapshot(withWorkflow(local(),id),record()).workflowSnapshotRunId).toBeNull();
+  });
+
   it("retains the verified source when upgrading an old dirty draft", () => {
     const draft = local();
     draft.positive = "my unsaved edit";
@@ -32,12 +46,20 @@ describe("migrateWorkflowSnapshot", () => {
     expect(migrateWorkflowSnapshot(draft, record()).workflowSnapshotRunId).toBe(choice);
   });
 
-  it.each(["model", "remote", "workflow"])("does not attach an old source after changing %s", changed => {
+  it.each(["model", "workflow"])("does not attach an old source after changing %s", changed => {
     const draft = local();
     if (changed === "model") draft.model = "anima_turbo_v1_1";
-    if (changed === "remote") draft.settings.remote_profile_id = "remote-b";
     if (changed === "workflow") draft.settings.workflow_profile_id = "workflow-b";
     expect(migrateWorkflowSnapshot(draft, record()).workflowSnapshotRunId).toBeNull();
+  });
+
+  it("keeps the old graph when only the execution environment changes during recovery", () => {
+    const draft = local();
+    draft.settings = {...draft.settings, remote_profile_id: "remote-b", execution_policy: {mode: "pinned", environmentId: "remote-b"}};
+    const migrated = migrateWorkflowSnapshot(draft, record());
+    expect(migrated.workflowSnapshotRunId).toBe("run-a");
+    expect(migrated.settings).toEqual(draft.settings);
+    expect(migrated.positive).toBe(draft.positive);
   });
 
   it("sets an old draft with no verified source to the current workflow", () => {
@@ -48,17 +70,38 @@ describe("migrateWorkflowSnapshot", () => {
 });
 
 describe("reconcileWorkflowSnapshot", () => {
-  it.each(["model", "remote", "workflow"])("clears a local frozen source when a merged %s comes from elsewhere", changed => {
+  it("keeps the snapshot when only the flat workflow cache differs during a merge",()=>{
+    const source=withWorkflow({...local(),workflowSnapshotRunId:"run-a"},"workflow-a");
+    const merged={...source,settings:{...source.settings,workflow_profile_id:"stale-cache"}};
+    expect(reconcileWorkflowSnapshot(merged,[source]).workflowSnapshotRunId).toBe("run-a");
+  });
+
+  it.each(["workflow-b",""])("detaches the old snapshot when the merged configuration selects %j",id=>{
+    const source=withWorkflow({...local(),workflowSnapshotRunId:"run-a"},"workflow-a");
+    const merged=withWorkflow(source,id);
+    expect(reconcileWorkflowSnapshot(merged,[source]).workflowSnapshotRunId).toBeNull();
+    expect(merged.workflowSnapshotRunId).toBe("run-a");
+  });
+
+  it.each(["model", "workflow"])("clears a local frozen source when a merged %s comes from elsewhere", changed => {
     const source = {...local(), workflowSnapshotRunId: "run-a"};
     const merged = structuredClone(source);
     if (changed === "model") merged.model = "anima_turbo_v1_1";
-    if (changed === "remote") merged.settings.remote_profile_id = "remote-b";
     if (changed === "workflow") merged.settings.workflow_profile_id = "workflow-b";
     const reconciled = reconcileWorkflowSnapshot(merged, [null, source]);
     expect(reconciled.workflowSnapshotRunId).toBeNull();
     expect(merged.workflowSnapshotRunId).toBe("run-a");
     expect(reconciled.model).toBe(merged.model);
     expect(reconciled.settings).toEqual(merged.settings);
+  });
+
+  it("keeps snapshot ownership when a merge selects another environment for the same graph", () => {
+    const source = {...local(), workflowSnapshotRunId: "run-a"};
+    const merged = {...source, settings: {...source.settings, remote_profile_id: "remote-b", execution_policy: {mode: "auto" as const, preferredEnvironmentIds: ["remote-b"]}}};
+    const reconciled = reconcileWorkflowSnapshot(merged, [source]);
+    expect(reconciled.workflowSnapshotRunId).toBe("run-a");
+    expect(reconciled.settings).toEqual(merged.settings);
+    expect(reconciled.model).toBe(source.model);
   });
 
   it("preserves a matching source while changing prompt and sampling settings", () => {

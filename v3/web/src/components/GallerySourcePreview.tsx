@@ -45,7 +45,7 @@ export function GallerySourcePreview({source}: {source: GallerySource}) {
     {imageFailed && <p role="alert">来源原图读取失败，请检查图片文件是否仍可用。</p>}
     <div className="workbench-result-footer"><p className="workbench-results-note">{source.mode === "generation"
       ? "已恢复画廊图片的生成条件；继续前请核对模型和执行目标。"
-      : "只导入提示词，生成时使用工作台默认参数；继续前请核对模型和执行目标。"}</p></div>
+      : "已带入原图提示词和可读取的参数。缺失的参数使用模型默认参数，请核对执行目标。"}</p></div>
     {preview && !imageFailed && <ImagePreview index={0} onClose={() => setPreview(false)}
       images={[{src, alt: source.name}]} />}
   </section>;

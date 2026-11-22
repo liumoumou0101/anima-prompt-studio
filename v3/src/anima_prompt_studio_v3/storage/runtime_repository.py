@@ -37,7 +37,16 @@ class SQLiteRepository:
         self.db_path = db_path or data_dir / "anima_prompt_studio.db"
         self.connection = sqlite3.connect(self.db_path)
         self.connection.row_factory = sqlite3.Row
+        self._owns_connection = True
         self._migrate()
+
+    @classmethod
+    def from_connection(cls, db_path, connection):
+        """Read runtime evidence inside an already open acceptance transaction."""
+        repository = cls.__new__(cls)
+        repository.db_path, repository.connection = Path(db_path), connection
+        repository._owns_connection = False
+        return repository
 
     def _migrate(self) -> None:
         version = self.connection.execute("PRAGMA user_version").fetchone()[0]
@@ -104,6 +113,19 @@ class SQLiteRepository:
                 favorite=MAX(prompt_jobs.favorite, excluded.favorite)
             """, (job.id, job.project_name, job.updated_at.isoformat(), job.original_zh, job.positive_prompt, payload, int(favorite)))
 
+    def rebuild_environment(self, remote_profile_id: str) -> int:
+        """User-confirmed reconstruction invalidates capabilities and all old mapping epochs."""
+        with self.connection:
+            self.connection.execute('BEGIN IMMEDIATE')
+            self.get_remote_profile(remote_profile_id)
+            epoch = self.get_setting('environment_epoch:' + remote_profile_id, 0) + 1
+            for key, value in [('environment_epoch:' + remote_profile_id, epoch),
+                               ('workflow_capabilities:' + remote_profile_id, {}),
+                               ('environment_probe:' + remote_profile_id, {})]:
+                self.connection.execute('INSERT INTO settings(key,value_json) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json',
+                                        (key, json.dumps(value)))
+        return epoch
+
     def load_job(self, job_id: str) -> PromptJob:
         row = self.connection.execute("SELECT payload_json FROM prompt_jobs WHERE id=?", (job_id,)).fetchone()
         if not row:
@@ -166,6 +188,7 @@ class SQLiteRepository:
 
     def delete_remote_profile(self, profile_id: str, *, before_delete=None) -> None:
         """Delete one profile and its owned settings without touching run history."""
+        compensate = None
         states = sorted(state.value for state in ACTIVE_RUN_STATES)
         placeholders = ",".join("?" for _ in states)
         try:
@@ -184,11 +207,14 @@ class SQLiteRepository:
 
             profile = RemoteProfile.model_validate_json(row[0])
             if before_delete is not None:
-                before_delete(profile)
+                compensate = before_delete(profile)
 
             exact_keys = (
                 f"remember_remote_password:{profile_id}",
                 f"workflow_capabilities:{profile_id}",
+                f"environment_probe:{profile_id}",
+                f"environment_epoch:{profile_id}",
+                f"http_retired_sessions:{profile_id}",
             )
             self.connection.executemany("DELETE FROM settings WHERE key=?", [(key,) for key in exact_keys])
             mapping_prefix = f"workflow_mapping:{profile_id}:"
@@ -213,7 +239,11 @@ class SQLiteRepository:
             self.connection.execute("DELETE FROM remote_profiles WHERE id=?", (profile_id,))
             self.connection.commit()
         except Exception:
-            self.connection.rollback()
+            try:
+                self.connection.rollback()
+            finally:
+                if callable(compensate):
+                    compensate()
             raise
 
     def save_workflow_profile(self, profile: WorkflowProfile) -> None:
@@ -383,4 +413,5 @@ class SQLiteRepository:
             )
 
     def close(self) -> None:
-        self.connection.close()
+        if self._owns_connection:
+            self.connection.close()

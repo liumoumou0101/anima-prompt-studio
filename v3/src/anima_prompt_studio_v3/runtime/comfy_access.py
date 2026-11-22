@@ -11,6 +11,7 @@ from anima_prompt_studio_v3.remote.comfy_client import ComfyUIClient
 from anima_prompt_studio_v3.remote.credential_store import CredentialStore
 from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
 from anima_prompt_studio_v3.remote.local_connection import LocalComfyConnection
+from anima_prompt_studio_v3.remote.connections import connection_factory, client_for_connection, HttpComfyConnection
 
 
 COMFY_ACCESS_HOST = "127.0.0.1"
@@ -53,6 +54,9 @@ class ManagedComfyAccess:
 
     @property
     def local_url(self) -> str:
+        if isinstance(self._tunnel, HttpComfyConnection):
+            from anima_prompt_studio_v3.remote.temporary_connections import web_url
+            return web_url(self._tunnel.profile)
         if isinstance(self._tunnel, LocalComfyConnection):
             return self._tunnel.base_url
         return f"http://{COMFY_ACCESS_HOST}:{self.local_port}"
@@ -105,14 +109,13 @@ class ManagedComfyAccess:
 
             credentials = self._credentials(profile, password=password, passphrase=passphrase)
             self._close_current_tunnel()
-            tunnel = (LocalComfyConnection if profile.connection_type == "local" else self.tunnel_factory)(
-                profile,
+            tunnel = connection_factory(profile, ssh_factory=self.tunnel_factory,
                 local_bind_host=COMFY_ACCESS_HOST,
                 local_bind_port=self.local_port,
             )
             try:
                 tunnel.open(credentials)
-                report = self.client_factory(tunnel.base_url).validate_environment()
+                report = client_for_connection(tunnel, self.client_factory, identity_database=self.database).validate_environment()
             except Exception as exc:
                 tunnel.close()
                 with self._state_lock:
@@ -131,6 +134,7 @@ class ManagedComfyAccess:
                 self._profile_snapshot = profile.model_copy(deep=True)
                 self._state = "ready"
                 self._message = (f"已连接本地 ComfyUI：{tunnel.base_url}" if profile.connection_type == "local"
+                                 else "HTTPS API 已验证；网页请打开网关登录入口并手动输入访问密钥。" if profile.connection_type == "http"
                                  else f"ComfyUI 网页已通过本机安全隧道连接到 {profile.display_name}。")
                 self._devices = list(report.devices)
                 self._queue_running = int(report.queue_running)
@@ -206,11 +210,12 @@ class ManagedComfyAccess:
             password = self.credential_store.read_password(profile.id)
         if profile.connection_type == "ssh" and profile.auth_type == RemoteAuthType.PASSWORD and not password:
             raise ValueError("没有可用的 SSH 密码；请在设置中填写并保存密码。")
-        return RemoteCredentials(password=password, passphrase=passphrase)
+        return RemoteCredentials(password=password, passphrase=passphrase,
+            comfy_api_key=self.credential_store.read_comfy_api_key(profile.http_session_id) if profile.connection_type == "http" else None)
 
     def _tunnel_is_active(self) -> bool:
         tunnel = self._tunnel
-        if isinstance(tunnel, LocalComfyConnection):
+        if isinstance(tunnel, (LocalComfyConnection, HttpComfyConnection)):
             return tunnel.active
         if tunnel is None or tunnel.client is None or tunnel.server is None:
             return False

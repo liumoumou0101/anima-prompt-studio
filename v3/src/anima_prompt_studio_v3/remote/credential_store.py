@@ -14,6 +14,7 @@ class CredentialStore:
 
     TARGET_PREFIX = "AnimaPromptStudio/SSH/"
     AI_TARGET_PREFIX = "AnimaPromptStudio/AI/"
+    COMFY_TARGET_PREFIX = "AnimaPromptStudio/COMFY/"
 
     def __init__(self, backend=None) -> None:
         self.backend = backend if backend is not None else (
@@ -55,6 +56,29 @@ class CredentialStore:
     def delete_ai_api_key(self, profile_id: str = "default") -> None:
         if self.backend and profile_id:
             self.backend.delete(self.AI_TARGET_PREFIX + profile_id)
+
+    def read_comfy_api_key(self, session_id: str) -> str:
+        if not self.backend or not session_id:
+            return ""
+        try:
+            return self.backend.read(self.COMFY_TARGET_PREFIX + session_id)
+        except Exception:
+            raise CredentialStoreError("无法读取 ComfyUI 访问密钥。") from None
+
+    def save_comfy_api_key(self, session_id: str, api_key: str) -> None:
+        if not self.backend:
+            raise CredentialStoreError("当前系统不支持安全保存 ComfyUI 访问密钥。")
+        try:
+            self.backend.write(self.COMFY_TARGET_PREFIX + session_id, "ComfyUI", api_key)
+        except Exception:
+            raise CredentialStoreError("无法保存 ComfyUI 访问密钥。") from None
+
+    def delete_comfy_api_key(self, session_id: str) -> None:
+        if self.backend and session_id:
+            try:
+                self.backend.delete(self.COMFY_TARGET_PREFIX + session_id)
+            except Exception:
+                raise CredentialStoreError("无法删除 ComfyUI 访问密钥。") from None
 
 
 class MemoryCredentialBackend:

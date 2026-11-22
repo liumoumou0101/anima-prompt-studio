@@ -1,5 +1,5 @@
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
-import {MemoryRouter, Route, Routes} from "react-router-dom";
+import {MemoryRouter, Route, Routes,useLocation} from "react-router-dom";
 import {beforeEach, expect, it, vi} from "vitest";
 import {ReferencesPage} from "./ReferencesPage";
 import {emptyRequirements} from "../lib/conversation";
@@ -8,19 +8,29 @@ import {AppearanceControls} from "../components/AppearanceControls";
 const example = {id: "ex_a", title: "雨夜案例", revision: 1, source_version: "1", requirements_valid: true, requirements: emptyRequirements(),
   origin: "session_pin", notes: {external_prompt: "rain", user_notes: "", source_url: ""}, provenance: {run_id: "run1", positive: "rain", settings: {seed: "8798399215689017476"}}};
 beforeEach(() => {vi.restoreAllMocks(); sessionStorage.setItem("anima-v3-session", "token"); localStorage.clear();});
-function mount() {render(<MemoryRouter initialEntries={["/references?example=ex_a"]}><Routes><Route path="/references" element={<ReferencesPage />} /><Route path="/workbench" element={<p>新会话已打开</p>} /></Routes></MemoryRouter>);}
+function WorkspaceDestination(){const location=useLocation();return <p>{location.pathname}{location.search}</p>;}
+function receipt(model:string){return {id:"workspace_new",revision:1,draft:{model_profile:model}};}
+function mount() {render(<MemoryRouter initialEntries={["/references?example=ex_a"]}><Routes><Route path="/references" element={<ReferencesPage />} /><Route path="/workbench" element={<WorkspaceDestination/>} /><Route path="/moss" element={<WorkspaceDestination/>} /></Routes></MemoryRouter>);}
 it("opens a case directly and starts a new workspace without touching an existing draft", async () => {
   localStorage.setItem("anima-conversation-draft:workspace_old", "unsaved draft");
-  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).endsWith("/workspace") ? {id: "workspace_new"} : String(url).includes("?") ? {items: [example], next_cursor: null, official_pack: {ready: true}} : example)));
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).endsWith("/workspace") ? receipt("anima_aesthetic_v1_1") : String(url).includes("?") ? {items: [example], next_cursor: null, official_pack: {ready: true}} : example)));
   mount();
   await screen.findByRole("button", {name: "沿用生成条件，新建会话"});
   fireEvent.click(screen.getByText("原图提示词与参数"));
   expect(screen.getByText("8798399215689017476")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: "沿用生成条件，新建会话"}));
-  expect(await screen.findByText("新会话已打开")).toBeInTheDocument();
+  expect(await screen.findByText("/workbench?workspace=workspace_new")).toBeInTheDocument();
   const call = fetchMock.mock.calls.find(call => String(call[0]).endsWith("/workspace"));
   expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({mode: "generation", source_version: "1"});
   expect(localStorage.getItem("anima-conversation-draft:workspace_old")).toBe("unsaved draft");
+});
+it.each([["沿用生成条件，新建会话","generation"],["借用原提示词，新建会话","prompt"],["借用要求，新建会话","requirements"]])("routes %s to the model in the returned workspace",async(button,mode)=>{
+  const fetchMock=vi.spyOn(globalThis,"fetch").mockImplementation(async input=>new Response(JSON.stringify(String(input).endsWith("/workspace")
+    ?receipt("moss_image_sft_int8"):String(input).includes("?")?{items:[example],next_cursor:null,official_pack:{ready:true}}:example)));
+  mount();fireEvent.click(await screen.findByRole("button",{name:button}));
+  expect(await screen.findByText("/moss?workspace=workspace_new")).toBeInTheDocument();
+  const post=fetchMock.mock.calls.find(([input])=>String(input).endsWith("/workspace"));
+  expect(JSON.parse(String(post?.[1]?.body)).mode).toBe(mode);
 });
 it("blocks starting a new workspace while case notes have unsaved changes", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).includes("?") ? {items: [example], next_cursor: null, official_pack: {ready: true}} : example)));
@@ -36,7 +46,7 @@ it("borrows original prompt without requiring analyzed requirements and copies i
   const research = {...example, requirements_valid: false, requirements: null, provenance: {positive: original, negative: "", model_profile: "anima_2_9b_preview_v1"}};
   const copy = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {configurable: true, value: {writeText: copy}});
-  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).endsWith("/workspace") ? {id: "workspace_new"} : String(url).includes("?") ? {items: [research], next_cursor: null, official_pack: {ready: true}} : research)));
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).endsWith("/workspace") ? receipt("anima_2_9b_preview_v1") : String(url).includes("?") ? {items: [research], next_cursor: null, official_pack: {ready: true}} : research)));
   mount();
   await screen.findByRole("button", {name: "借用原提示词，新建会话"});
   expect(screen.getByRole("button", {name: "借用要求，新建会话"})).toBeDisabled();
@@ -45,7 +55,7 @@ it("borrows original prompt without requiring analyzed requirements and copies i
   await waitFor(() => expect(copy).toHaveBeenCalledWith(original));
   await waitFor(() => expect(screen.getByRole("button", {name: "借用原提示词，新建会话"})).toBeEnabled());
   fireEvent.click(screen.getByRole("button", {name: "借用原提示词，新建会话"}));
-  expect(await screen.findByText("新会话已打开")).toBeInTheDocument();
+  expect(await screen.findByText("/workbench?workspace=workspace_new")).toBeInTheDocument();
   const call = fetchMock.mock.calls.find(call => String(call[0]).endsWith("/workspace"));
   expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({mode: "prompt", source_version: "1"});
   expect(fetchMock.mock.calls.some(call => String(call[0]).endsWith("/ingest"))).toBe(false);
@@ -103,7 +113,7 @@ it("keeps selected unsaved edits while an automatic filter request is pending an
   expect(screen.getByRole("heading", {name: "雨夜案例"})).toBeInTheDocument();
 });
 
-it("keeps unsaved notes, selected reference and original image URL while changing all four appearance modes", async () => {
+it("keeps unsaved notes, selected reference and original image URL while changing both themes", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(String(url).includes("?") ? {items: [example], next_cursor: null, official_pack: {ready: true}} : example)));
   render(<MemoryRouter initialEntries={["/references?example=ex_a"]}><AppearanceControls /><ReferencesPage /></MemoryRouter>);
   const notes = await screen.findByLabelText("我的笔记");
@@ -111,11 +121,8 @@ it("keeps unsaved notes, selected reference and original image URL while changin
   const preview = screen.getByRole("button", {name: "预览案例原图"}).querySelector("img")!;
   const source = preview.getAttribute("src");
   const requestCount = fetchMock.mock.calls.length;
-  const layout = screen.getByLabelText("界面布局") as HTMLSelectElement;
   const theme = screen.getByLabelText("明暗主题") as HTMLSelectElement;
-  const previous = {layout: layout.value, theme: theme.value};
-  for (const value of ["studio", "editorial"]) {
-    fireEvent.change(layout, {target: {value}});
+  const previous = {theme: theme.value};
     for (const mode of ["light", "dark"]) {
       fireEvent.change(theme, {target: {value: mode}});
       expect(notes).toHaveValue("切换外观前还未保存");
@@ -123,8 +130,6 @@ it("keeps unsaved notes, selected reference and original image URL while changin
       expect(screen.getByRole("button", {name: "关闭详情"})).toBeDisabled();
       expect(screen.getByRole("button", {name: "沿用生成条件，新建会话"})).toBeDisabled();
     }
-  }
   expect(fetchMock).toHaveBeenCalledTimes(requestCount);
-  fireEvent.change(layout, {target: {value: previous.layout}});
   fireEvent.change(theme, {target: {value: previous.theme}});
 });

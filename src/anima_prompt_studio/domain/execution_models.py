@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from anima_prompt_studio.domain.models import utc_now
 
@@ -43,7 +43,12 @@ ACTIVE_RUN_STATES = {
 
 
 class RemoteProfile(BaseModel):
-    connection_type: Literal["ssh", "local"] = "ssh"
+    connection_type: Literal["ssh", "local", "http"] = "ssh"
+    http_base_url: str = ""
+    http_session_id: str = ""
+    http_runtime_id: str | None = None
+    http_auth_required: bool = False
+    http_gateway: bool = False
     id: str = Field(default_factory=lambda: str(uuid4()))
     provider_preset_id: str = "compshare_container"
     display_name: str = "云端 ComfyUI"
@@ -62,6 +67,8 @@ class RemoteProfile(BaseModel):
 
     @property
     def connection_ready(self) -> bool:
+        if self.connection_type == "http":
+            return bool(self.http_base_url and self.http_session_id)
         return self.connection_type == "local" or bool(self.known_host_fingerprint.strip())
 
 
@@ -76,10 +83,21 @@ class LoRASlotBinding(BaseModel):
     node_id: str
     name_input: str = "lora_name"
     model_strength_input: str = "strength_model"
-    clip_strength_input: str = "strength_clip"
+    clip_strength_input: str | None = "strength_clip"
+
+
+class LoRAExtension(BaseModel):
+    loader: Literal["LoraLoader", "LoraLoaderModelOnly"]
+    model_source: tuple[str, int]
+    model_targets: list[WorkflowBinding] = Field(min_length=1)
+    clip_source: tuple[str, int] | None = None
+    clip_targets: list[WorkflowBinding] = Field(default_factory=list)
 
 
 class WorkflowProfile(BaseModel):
+    # Set only on trusted catalog templates. User graphs and frozen jobs have fixed slots.
+    _lora_extension: LoRAExtension | None = PrivateAttr(default=None)
+
     id: str
     display_name: str
     api_workflow: dict[str, Any]
@@ -162,3 +180,4 @@ class RemoteCredentials(BaseModel):
 
     password: str = ""
     passphrase: str = ""
+    comfy_api_key: str | None = Field(default=None, repr=False)

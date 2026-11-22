@@ -34,7 +34,7 @@ def capabilities(manager, remote_id, replacement=None):
 
 
 def test_empty_database_uses_resources_without_seeding(manager):
-    assert len(catalog(manager.database)) == 11
+    assert len(catalog(manager.database)) == 13
     repo = SQLiteRepository(manager.database)
     assert repo.list_workflow_profiles() == []
     repo.close()
@@ -46,13 +46,13 @@ def test_empty_database_uses_resources_without_seeding(manager):
 def test_local_library_and_preview_need_no_server(tmp_path):
     manager = WorkflowCatalog(tmp_path / "offline.db")
     library = manager.library()
-    assert len(library["items"]) == 11
+    assert len(library["items"]) == 13
     assert all(item["revision"] and item["nodes"] for item in library["items"])
     document = manager.export_profile("23_Turbo_v1.1")
     document["profile"]["compatible_model_profiles"] = []
     preview = manager.preview_import(document)
     assert preview["profile"]["compatible_model_profiles"] == []
-    assert len(manager.library()["items"]) == 11
+    assert len(manager.library()["items"]) == 13
     with pytest.raises(ValueError, match="兼容模型"):
         manager.import_profile(preview)
     preview["profile"]["compatible_model_profiles"] = ["anima_turbo_v1_1"]
@@ -284,7 +284,7 @@ def test_archived_version_restores_as_independent_user_copy(manager):
     assert len(versions) == 1
     restored = manager.restore_version("23_Turbo_v1.1", versions[0]["revision"])
     assert restored["id"].startswith("user:")
-    assert len(catalog(manager.database)) == 12
+    assert len(catalog(manager.database)) == 14
 
 
 def test_simple_api_import_and_invalid_graph(manager):

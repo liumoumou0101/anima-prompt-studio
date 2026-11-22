@@ -3,12 +3,14 @@ import re
 
 LEGACY_AESTHETIC = "anima_aesthetic_v1"
 AESTHETIC_VERSIONS = {"anima_aesthetic_v1_0", "anima_aesthetic_v1_1"}
-COMMUNITY_VERSIONS = {"anima_2_9b_preview_v1", "animayume_v1_5_base", "animayume_v1_0_final"}
+COMMUNITY_VERSIONS = {"anima_2_9b_preview_v1", "animayume_v1_5_base", "animayume_v1_0_final", "wai_anima_v1_0"}
 
 
 def community_checkpoint_version(filename: str) -> str | None:
     name = filename.replace("\\", "/").rsplit("/", 1)[-1].lower()
     aliases = {
+        "moss_image_sft_int8_convrot.safetensors": "moss_image_sft_int8",
+        "waianima_v10base10.safetensors": "wai_anima_v1_0",
         "anima-2.9b-preview-v1.safetensors": "anima_2_9b_preview_v1",
         "animayume_v15_base.safetensors": "animayume_v1_5_base",
         "animayume_v15base.safetensors": "animayume_v1_5_base",
@@ -41,6 +43,23 @@ def workflow_models(profile) -> list[str]:
     declared = list(profile.compatible_model_profiles)
     binding = profile.bindings.get("checkpoint")
     value = profile.api_workflow.get(binding.node_id, {}).get("inputs", {}).get(binding.input_name) if binding else None
+    if "moss_image_sft_int8" in declared:
+        expected = {"checkpoint": "moss_image_sft_int8_convrot.safetensors", "text_encoder": "qwen3.5_9b_w4a8_gptq.safetensors", "vae": "flux2-vae_small.safetensors", "text_encoder_type": "moss_image"}
+        for key, filename in expected.items():
+            b = profile.bindings.get(key)
+            actual = profile.api_workflow.get(b.node_id, {}).get("inputs", {}).get(b.input_name) if b else None
+            if not isinstance(actual, str) or actual.replace("\\", "/").rsplit("/", 1)[-1] != filename:
+                return []
+            # Compiler runtime overrides must not replace a validated graph
+            # asset. Keep checkpoint metadata consistent as well, including
+            # imported/recovered profiles before any server mapping is applied.
+            if key in profile.runtime_assets and profile.runtime_assets[key] != actual:
+                return []
+        b = profile.bindings.get("width")
+        if not b or profile.api_workflow.get(b.node_id, {}).get("class_type") != "EmptyFlux2LatentImage":
+            return []
+        if declared != ["moss_image_sft_int8"]:
+            return []
     version = aesthetic_checkpoint_version(value) if isinstance(value, str) else None
     community_version = community_checkpoint_version(value) if isinstance(value, str) else None
     if community_version and any(item != community_version for item in declared):

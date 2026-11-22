@@ -1,20 +1,18 @@
-import type {WorkbenchGenerationSettings, WorkspaceRecord} from "./types";
+import type {RequirementLora, WorkbenchGenerationSettings, WorkspaceRecord} from "./types";
+export type {RequirementLora} from "./types";
 import {defaultGenerationSettings} from "./generationSettings";
 import type {SceneChoice, SceneDesign} from "./sceneDesign";
+import type {ArtistPresetPlacement, ArtistPresetSnapshot} from "./artistPresetApplication";
 
 export type LayerName = "subject" | "style" | "lighting" | "composition" | "exclusions";
 export type Mode = "faithful" | "expand";
 export const layerLabels: Record<LayerName, string> = {subject: "主体", style: "风格", lighting: "光影", composition: "构图", exclusions: "排除"};
 export interface RequirementLayers {
   subject: {text: string; locked: boolean; character_tags?: string[]; series_tags?: string[]; general_tags?: string[]};
-  style: {text: string; medium: string; artists: string[]; manual_artist_tags?: string[]; locked: boolean};
+  style: {text: string; medium: string; artists: string[]; manual_artist_tags?: string[]; artist_preset?: ArtistPresetSnapshot | null; locked: boolean};
   lighting: {text: string; locked: boolean; include_with_style_pin: boolean; mood?: SceneChoice | null};
   composition: {text: string; shot: string; locked: boolean; include_with_style_pin: boolean; design?: SceneDesign | null};
   exclusions: {global: string[]; scoped: {target: string; concept: string}[]; locked: boolean};
-}
-export interface RequirementLora {
-  logical_id: string; file_name: string; weight: number; trigger_words: string[]; required: boolean;
-  source: {kind: "user" | "civitai" | "huggingface" | "official" | "run"; model_version_id?: string | null};
 }
 export interface PromptLock {target: "positive" | "negative"; text: string}
 export interface RequirementsEdit {layers: RequirementLayers; loras: RequirementLora[]; prompt_locks?: PromptLock[]}
@@ -32,6 +30,8 @@ export interface ConversationRecord extends WorkspaceRecord {
   };
 }
 export interface LocalConversation {
+  artistPresetPlacement?: ArtistPresetPlacement;
+  artistPresetCustomized?: string;
   workflowSnapshotRunId?: string | null;
   restoredFrom?: string;
   baseRevision: number; delta: string; mode: Mode; requirements: RequirementsEdit;
@@ -64,6 +64,7 @@ export function cleanRequirements(value: RequirementsEdit): RequirementsEdit {
   const artists = normalizeIdentityTags(clean.layers.style.manual_artist_tags || [], true);
   if (artists.length) clean.layers.style.manual_artist_tags = artists;
   else delete clean.layers.style.manual_artist_tags;
+  if (!clean.layers.style.artist_preset) delete clean.layers.style.artist_preset;
   for (const key of ["character_tags", "series_tags", "general_tags"] as const) {
     const tags = normalizeIdentityTags(clean.layers.subject[key] || []);
     if (tags.length) clean.layers.subject[key] = tags;

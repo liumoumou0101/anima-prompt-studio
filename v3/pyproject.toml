@@ -49,3 +49,4 @@ anima_prompt_studio_v3 = ["configs/model_profiles/*.json", "configs/workflow_pro
 pythonpath = ["src", "../src"]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["real_rewrite_review: exercise semantic review through its actual external-transport boundary"]

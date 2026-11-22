@@ -11,7 +11,13 @@ it("offers distinct Aesthetic versions even with an old bootstrap catalog", () =
 it.each(["anima_aesthetic_v1_0", "anima_aesthetic_v1_1"])("recovers %s only from the saved target", model => {
   const settings = {...defaultGenerationSettings(), remote_profile_id:"server", workflow_profile_id:"old-import"};
   const targets = [{remote_profile_id:"server", workflow_profile_id:"old-import", compatible_model_profiles:[model]}] as GenerationTarget[];
-  expect(resolveLegacyAesthetic(LEGACY_AESTHETIC,settings,targets)).toBe(model);
-  expect(resolveLegacyAesthetic(LEGACY_AESTHETIC,{...settings,workflow_profile_id:"missing"},targets)).toBe(LEGACY_AESTHETIC);
-  expect(resolveLegacyAesthetic(LEGACY_AESTHETIC,{...settings,remote_profile_id:"other-server"},targets)).toBe(LEGACY_AESTHETIC);
+  expect(resolveLegacyAesthetic(LEGACY_AESTHETIC,settings,targets)).toEqual({model,target:targets[0]});
+  expect(resolveLegacyAesthetic(LEGACY_AESTHETIC,{...settings,workflow_profile_id:"missing"},targets)).toBeUndefined();
+  expect(resolveLegacyAesthetic(LEGACY_AESTHETIC,{...settings,remote_profile_id:"other-server"},targets)).toBeUndefined();
+});
+
+it("does not guess a legacy Aesthetic version from a workflow shared by both versions", () => {
+  const settings = {...defaultGenerationSettings(),remote_profile_id:"server",workflow_profile_id:"shared"};
+  const targets = [{remote_profile_id:"server",workflow_profile_id:"shared",compatible_model_profiles:["anima_aesthetic_v1_0","anima_aesthetic_v1_1"]}] as GenerationTarget[];
+  expect(resolveLegacyAesthetic(LEGACY_AESTHETIC,settings,targets)).toBeUndefined();
 });

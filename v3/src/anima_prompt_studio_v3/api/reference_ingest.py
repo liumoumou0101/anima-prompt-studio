@@ -107,7 +107,7 @@ class IngestService:
             output.layer_updates["style"]["artists"] = list(canonical.layers.style.artists)
             updates = {name: content for name, content in output.layer_updates.items()
                        if not getattr(canonical.layers, name).locked}
-            merged = apply_layer_updates(canonical, list(updates), updates)
+            merged = apply_layer_updates(canonical, updates)
             if old is None:
                 merged.revision = 1
                 for name, included in ({} if from_prompt else output.include_with_style_pin).items():

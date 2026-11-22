@@ -37,7 +37,10 @@ def test_real_service_capture_preparation_and_independent_repeats(case, tmp_path
         assert prep['draft']['requirements']['layers']['subject']['locked'] is True
     else:
         assert report['results'][2]['mode'] == 'expand'
-        assert 'EXPANSION' in json.dumps(seen[2])
+        sent = json.loads(seen[2]['messages'][1]['content'])
+        assert sent['mode'] == 'expand'
+        assert sent['rewrite_goal']['operation'] == 'edit_existing'
+        assert sent['rewrite_goal']['scope'] == 'latest_delta'
     with pytest.raises(FileExistsError):
         asyncio.run(evaluation.evaluate(case, tmp_path / 'output'))
     assert len(seen) == 6

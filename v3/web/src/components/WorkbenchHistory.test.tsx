@@ -5,6 +5,9 @@ import {WorkbenchImageResults} from "./WorkbenchImageResults";
 import {emptyRequirements, localFromRecord, type ConversationRecord} from "../lib/conversation";
 import type {GenerationRunRecord} from "../lib/types";
 import {copyImageFileToClipboard} from "../lib/copyImage";
+import {appendOperation,createJournal,operationBetween} from "../lib/editorHistory";
+import {saveConversationDraft} from "../lib/conversationDrafts";
+import {notifyEditorHistoryChanged} from "../lib/workbenchHistory";
 
 vi.mock("../lib/copyImage", () => ({copyImageFileToClipboard: vi.fn()}));
 
@@ -24,12 +27,14 @@ const second: GenerationRunRecord = {...first, id: "run-second", created_at: "20
 const versions = [record, {...record, revision: 2}, {...record, revision: 1, draft: {...record.draft,
   compiled: {...record.draft.compiled!, positive: "blue coat"}, conversation_events: []}}];
 beforeEach(() => {
+  localStorage.clear();
   vi.mocked(copyImageFileToClipboard).mockReset().mockResolvedValue(undefined);
   sessionStorage.setItem("anima-v3-session", "test");
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     expect(init?.method || "GET").toBe("GET");
     const url = String(input);
     if (url.includes("/versions?")) return new Response(JSON.stringify({items: versions}));
+    if (url.includes("/checkpoints?")) return new Response(JSON.stringify({items: []}));
     const runId = /generation-runs\/([^/]+)\/artifacts/.exec(url)?.[1];
     if (runId) return new Response(JSON.stringify({items: [1, 2].map(number => ({id: `${runId}-${number}`, path: `${runId}/${number}.png`,
       content_url: `/images/${runId}/${number}.png`, thumbnail_url: `/thumb/${runId}/${number}.png`, removed: false}))}));
@@ -112,9 +117,62 @@ it("links Chinese intent and a thumbnail to exact submitted prompts, and permits
   expect(restoreRun).toHaveBeenCalledWith(first, false, expect.objectContaining({revision: 3}));
   const prompt = screen.getByRole("article", {name: "提示词记录：外套换成红色"});
   expect(prompt).toHaveTextContent("尚未生成图片");
-  fireEvent.click(within(prompt).getByRole("button", {name: "恢复到这里"}));
+  fireEvent.click(within(prompt).getByRole("button", {name: "用此版本继续编辑"}));
   expect(restoreVersion).toHaveBeenCalledWith(expect.objectContaining({revision: 2}));
   expect(screen.getByText("本地草稿入口")).toBeInTheDocument();
+});
+
+it("keeps an editable version beside its image and filters by text and image",async()=>{
+ render(<WorkbenchHistory record={record} runs={[first]} onRestoreVersion={()=>{}} onRestoreRun={()=>{}}/>);
+ await screen.findByRole("article",{name:"生图记录：外套换成红色"});
+ expect(screen.getAllByRole("button",{name:"用此版本继续编辑"})).toHaveLength(3);
+ fireEvent.change(screen.getByLabelText("搜索创作记录"),{target:{value:"blue coat"}});
+ expect(screen.queryByRole("article",{name:"生图记录：外套换成红色"})).not.toBeInTheDocument();
+ expect(screen.getAllByRole("button",{name:"用此版本继续编辑"})).toHaveLength(1);
+ fireEvent.change(screen.getByLabelText("搜索创作记录"),{target:{value:""}});
+ fireEvent.change(screen.getByLabelText("记录范围"),{target:{value:"images"}});
+ expect(screen.queryByRole("button",{name:"用此版本继续编辑"})).not.toBeInTheDocument();
+ expect(screen.getByRole("article",{name:"生图记录：外套换成红色"})).toBeInTheDocument();
+});
+
+it("labels durable offline operations as local versions without inventing a server number",async()=>{
+ const before=localFromRecord(record),after={...before,positive:"offline prompt"};
+ const journal=appendOperation(createJournal(record.id,"document"),operationBetween(before,after,"manual","offline edit",0)!);
+ expect(saveConversationDraft(record.id,after,before,undefined,journal).ok).toBe(true);
+ render(<WorkbenchHistory record={record} runs={[]} onRestoreVersion={()=>{}} onRestoreRun={()=>{}}/>);
+ const card=await screen.findByRole("article",{name:"提示词记录：offline edit"});expect(card).toHaveTextContent("本地版本 · 待同步");expect(card).not.toHaveTextContent(/V\d+/);expect(card).toHaveTextContent("offline prompt");
+});
+
+it("does not fork a checkpoint using its prior storage revision",async()=>{
+ const original=vi.mocked(fetch).getMockImplementation()!;
+ vi.mocked(fetch).mockImplementation((input,init)=>String(input).includes("/checkpoints?")?Promise.resolve(new Response(JSON.stringify({items:[{id:"checkpoint_test",operation_id:"operation",version_number:7,base_revision:2,kind:"ai",label:"checkpoint edit",created_at:"2026-10-25",snapshot:{...localFromRecord(record),positive:"checkpoint text"}}]}))):original(input,init));
+ const restore=vi.fn();render(<WorkbenchHistory record={record} runs={[]} onRestoreVersion={restore} onRestoreRun={()=>{}} onForkVersion={()=>{}}/>);
+ const card=await screen.findByRole("article",{name:"提示词记录：checkpoint edit"});expect(card).toHaveTextContent("V7");
+ expect(within(card).queryByRole("button",{name:/从版本.*另开会话/})).not.toBeInTheDocument();
+ fireEvent.click(within(card).getByRole("button",{name:"用此版本继续编辑"}));expect(restore).toHaveBeenCalledWith(expect.objectContaining({checkpointId:"checkpoint_test",draft:expect.objectContaining({compiled:expect.objectContaining({positive:"checkpoint text"})})}));
+});
+
+it("loads checkpoints beyond the first fifty even when legacy revision snapshots are few",async()=>{
+ const original=vi.mocked(fetch).getMockImplementation()!;
+ vi.mocked(fetch).mockImplementation((input,init)=>{
+   const url=String(input);if(!url.includes("/checkpoints?"))return original(input,init);
+   const offset=Number(new URL(url,"http://localhost").searchParams.get("offset"));
+   const count=offset===0?50:1;
+   return Promise.resolve(new Response(JSON.stringify({items:Array.from({length:count},(_,i)=>({id:`checkpoint-${offset+i}`,operation_id:`op-${offset+i}`,version_number:51-offset-i,base_revision:2,kind:"manual",label:`saved edit ${offset+i}`,created_at:"2026-10-25",snapshot:localFromRecord(record)}))})));
+ });
+ render(<WorkbenchHistory record={record} runs={[]} onRestoreVersion={()=>{}} onRestoreRun={()=>{}}/>);
+ fireEvent.click(await screen.findByRole("button",{name:"加载更早记录"}));await screen.findByRole("article",{name:"提示词记录：saved edit 50"});expect(screen.queryByRole("button",{name:"加载更早记录"})).not.toBeInTheDocument();
+});
+
+it("refreshes an already open history only for its own workspace sync receipt",async()=>{
+ const original=vi.mocked(fetch).getMockImplementation()!;let synced=false;let reads=0;
+ vi.mocked(fetch).mockImplementation((input,init)=>{
+   if(!String(input).includes("/checkpoints?"))return original(input,init);reads++;
+   return Promise.resolve(new Response(JSON.stringify({items:synced?[{id:"synced",operation_id:"op",version_number:12,base_revision:3,kind:"manual",label:"synced edit",created_at:"2026-10-25",snapshot:localFromRecord(record)}]:[]})));
+ });
+ render(<WorkbenchHistory record={record} runs={[]} onRestoreVersion={()=>{}} onRestoreRun={()=>{}}/>);await screen.findByRole("article",{name:"提示词记录：外套换成红色（当前起点）"});await waitFor(()=>expect(reads).toBe(1));
+ await act(async()=>notifyEditorHistoryChanged("unrelated-workspace"));expect(reads).toBe(1);
+ synced=true;await act(async()=>notifyEditorHistoryChanged(record.id));const card=await screen.findByRole("article",{name:"提示词记录：synced edit"});expect(card).toHaveTextContent("V12");expect(reads).toBe(2);
 });
 
 it("disables complete restoration of incomplete source settings but keeps prompt-only restoration available", async () => {
@@ -170,4 +228,25 @@ it("allows a failed image read to be retried without losing the run snapshot", a
   expect(await screen.findByAltText("当前图片：第 1 张")).toHaveAttribute("src", "/images/run-first/1.png");
   fireEvent.click(screen.getByRole("button", {name: "查看实际输入"}));
   expect(screen.getByRole("region", {name: "实际提交输入"})).toHaveTextContent(source.positive_prompt);
+});
+
+
+it("switches images and batches with ArrowLeft and ArrowRight while ignoring editable inputs", async () => {
+  const onSelectRun = vi.fn();
+  render(<div>
+    <textarea aria-label="测试输入框" />
+    <WorkbenchImageResults record={record} local={localFromRecord(record)} runs={[second, first]} run={second} onSelectRun={onSelectRun} onRestoreRun={() => {}} />
+  </div>);
+  expect(await screen.findByAltText("当前图片：第 1 张")).toHaveAttribute("src", "/images/run-second/1.png");
+  const input = screen.getByLabelText("测试输入框");
+  input.focus();
+  fireEvent.keyDown(input, {key: "ArrowRight"});
+  expect(screen.getByAltText("当前图片：第 1 张")).toHaveAttribute("src", "/images/run-second/1.png");
+  input.blur();
+  fireEvent.keyDown(window, {key: "ArrowRight"});
+  expect(await screen.findByAltText("当前图片：第 2 张")).toHaveAttribute("src", "/images/run-second/2.png");
+  fireEvent.keyDown(window, {key: "ArrowRight"});
+  expect(onSelectRun).toHaveBeenCalledWith(first);
+  fireEvent.keyDown(window, {key: "ArrowLeft"});
+  expect(await screen.findByAltText("当前图片：第 1 张")).toHaveAttribute("src", "/images/run-second/1.png");
 });

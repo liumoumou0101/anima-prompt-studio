@@ -3,23 +3,24 @@ import {useState} from "react";
 import {IdentityTagField, type IdentitySuggestion} from "./IdentityTagField";
 import "./manualIdentityTags.css";
 
-export function ManualIdentityTags({characters, series, artists, onCharacters, onSeries, onArtists, modelProfileId, compact = false}: {
+export function ManualIdentityTags({characters, series, artists, onCharacters, onSeries, onArtists, modelProfileId, compact = false, initiallyOpen = false}: {
   characters: string[]; series: string[]; artists: string[];
   onCharacters: (tags: string[]) => void; onSeries: (tags: string[]) => void; onArtists: (tags: string[]) => void;
   modelProfileId?: string;
   compact?: boolean;
+  initiallyOpen?: boolean;
 }) {
   const [relatedCharacter, setRelatedCharacter] = useState<IdentitySuggestion | null>(null);
   const tagCount = normalizeIdentityTags(characters).length + normalizeIdentityTags(series).length + normalizeIdentityTags(artists, true).length;
   // The workbench keys this component by record, so only a new record resets this preference.
-  const [compactOpen, setCompactOpen] = useState(() => tagCount > 0);
+  const [compactOpen, setCompactOpen] = useState(() => initiallyOpen || tagCount > 0);
   const preview = [...normalizeIdentityTags(characters), ...normalizeIdentityTags(series),
     ...normalizeIdentityTags(artists, true).map(tag => `@${tag}`)].map(tag => tag.replace(/[()]/g, "\\$&")).join(", ");
   const help = <>
     <p className="conversation-muted">填写模型认识的英文 tag，每行一个；无需在本地词库中存在。动画、游戏角色填在角色栏，作品名填在作品栏。这里只指定已有知识，不会训练新角色。</p>
     <p className="conversation-muted">输入名称可补全，↑↓ 选择、Enter 确认、Esc 关闭；支持多行或逗号分隔粘贴。词库收录不等于当前模型已学会，具体角色与画师的模型知识尚未逐项验证。</p>
   </>;
-  const normalizationHelp = <p className="conversation-muted">保存并编译时转为小写、下划线转空格，画师自动加 @。名称中的括号按文字保留，不作为权重。多角色的位置、动作和各自外观仍在主体要求中描述。</p>;
+  const normalizationHelp = <p className="conversation-muted">选择或输入时，固定 tag 转为小写、下划线转空格，画师自动加 @ 并同步到正向提示词。名称中的括号按文字保留，不作为权重。多角色的位置、动作和各自外观仍在主体要求中描述。</p>;
   const fields = <div className="manual-identity-grid">
     <div className="manual-identity-group">
     <IdentityTagField kind="character" label="角色 tag（每行一个）" values={characters} onChange={onCharacters} onPick={setRelatedCharacter}
@@ -41,7 +42,7 @@ export function ManualIdentityTags({characters, series, artists, onCharacters, o
     </div>
   </div>;
   const tagPreview = <output aria-label="手动 tag 预览">{preview || "尚未添加手动 tag"}</output>;
-  const updateHint = <p className="conversation-muted">这些 tag 会写入可编辑的正向提示词，不会自动出图。要更换或移除固定 tag，请修改本栏后重新编译。</p>;
+  const updateHint = <p className="conversation-muted">增删会同步正向提示词中的完整 tag，无需调用 LLM。可以直接出图，也可以继续编辑；本次生成使用当前正向提示词。</p>;
 
   if (compact) return <details className="manual-identity-tags manual-identity-tags--compact" aria-label="角色、作品与画师"
     open={compactOpen} onToggle={event => {if (event.target === event.currentTarget) setCompactOpen(event.currentTarget.open);}}>

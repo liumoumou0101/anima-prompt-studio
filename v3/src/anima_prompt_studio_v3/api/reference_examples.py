@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from pathlib import Path
+import re
 from threading import Lock
 from typing import Literal
 
@@ -16,11 +18,136 @@ from .conversation import WorkspaceCommand
 from .reference_ingest import IngestRequest, IngestService
 from ..core.requirements import ContractModel, PinRole, Requirements, apply_pin, dump
 from ..core.requirements import GallerySource, PromptEdit, WorkspaceOrigin, compile_prompt
+from ..core.runtime_profiles import V3RuntimeProfiles
+from ..core.seeds import display_seed
+from ..core.workflow_parameters import BASE_FIELDS, build_workflow_parameter_schema, resolve_workflow_parameters
 from .workspace_store import WorkspaceNotFoundError, WorkspaceVersionNotFoundError
-from .models import WorkspaceDraft, WorkbenchGenerationSettings
+from .models import CreationConfiguration, WorkspaceDraft, WorkbenchGenerationSettings
 from ..storage.reference_examples import (
     ExampleMetadata, ExampleNotes, ExamplePatch, ExampleStore, MAX_IMAGE_BYTES, fail, now,
 )
+
+
+def _fresh_generation_settings(model_profile):
+    """Model defaults apply only to new prompt/requirements-based workspaces."""
+    defaults = V3RuntimeProfiles().profiles.get(model_profile)
+    if defaults is None:
+        return WorkbenchGenerationSettings()
+    settings = WorkbenchGenerationSettings(
+        steps=defaults.steps, cfg=defaults.cfg,
+        sampler=defaults.sampler, scheduler=defaults.scheduler,
+        width=defaults.default_width, height=defaults.default_height, aspect="custom",
+    )
+    values = {key: getattr(settings, key) for key in
+              ("steps", "cfg", "sampler", "scheduler", "width", "height", "batch_size")}
+    configuration = CreationConfiguration(
+        modelProfile=model_profile, workflow={"id": "", "revision": ""},
+        baseRecipeId=settings.preset_id, recipeValues={**values, "seed": "-1"},
+        parameterOverrides={}, resourceRequirements=[], seedMode="random",
+    )
+    return settings.model_copy(update={"creation_configuration": configuration})
+
+
+def _source_model(model):
+    if model not in V3RuntimeProfiles().profiles:
+        fail("model_profile_unknown", "来源未记录可用的模型，无法确定应打开哪个工作台。")
+    return model
+
+
+def source_generation_settings(model, explicit):
+    """Use this model's defaults for missing fields and preserve recorded controls."""
+    defaults = _fresh_generation_settings(model)
+    values = defaults.model_dump(mode="json", exclude={"creation_configuration", "model_configurations"})
+    settings = WorkbenchGenerationSettings.model_validate({**values, **explicit})
+    if settings.creation_configuration or settings.parameter_schema or not defaults.creation_configuration:
+        return settings
+    overrides = {key: getattr(settings, key) for key in BASE_FIELDS if key in explicit and getattr(settings, key) is not None}
+    overrides.update(settings.workflow_parameter_overrides)
+    if "seed" in overrides:
+        overrides["seed"] = str(overrides["seed"])
+    config = defaults.creation_configuration.model_copy(update={
+        "workflow": defaults.creation_configuration.workflow.model_copy(update={"id": settings.workflow_profile_id or ""}),
+        "baseRecipeId": settings.preset_id, "parameterOverrides": overrides, "seedMode": "random" if settings.seed == -1 else "fixed"})
+    return settings.model_copy(update={"creation_configuration": config, "workflow_parameter_overrides": overrides})
+
+
+def _selected_image_seed(path):
+    """Only explicitly recorded image metadata identifies a seed for one item in a batch."""
+    from PIL import Image
+    try:
+        with Image.open(path) as image:
+            if image.format != "PNG":
+                return None
+            value = image.info.get("Seed", image.info.get("seed"))
+            if value is None:
+                line = str(image.info.get("parameters", "")).rstrip().rsplit("\n", 1)[-1]
+                match = re.search(r",\s*Seed:\s*(\d{1,19})(?=,|$)", line) if line.startswith("Steps:") else None
+                value = match.group(1) if match else None
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return None
+    if re.fullmatch(r"[0-9]{1,19}", str(value)) and int(value) < 2**63:
+        return int(value)
+    return None
+
+
+def _frozen_generation_settings(snapshot, actual):
+    """Restore accepted values against their frozen declaration, including actual Seed."""
+    job = snapshot.get("job") or {}
+    integration = job.get("integration_metadata") or {}
+    frozen = integration.get("workflow_parameters") or {}
+    schema = frozen.get("schema") or integration.get("parameter_schema")
+    resolved = frozen.get("values")
+    if not schema and snapshot.get("workflow"):
+        from anima_prompt_studio.domain.execution_models import WorkflowProfile
+        try:
+            profile = WorkflowProfile.model_validate(snapshot["workflow"])
+        except ValidationError:
+            return {}  # Older records may identify a workflow without storing its declaration.
+        schema = build_workflow_parameter_schema(profile)
+    if isinstance(schema, dict) and not isinstance(resolved, dict):
+        resolved = resolve_workflow_parameters(schema, integration.get("workflow_parameter_overrides") or {})["values"]
+    if not isinstance(schema, dict) or not isinstance(resolved, dict):
+        return {}
+    values = deepcopy(resolved)
+    original = snapshot.get("provenance") or {}
+    for key in BASE_FIELDS.keys() & values.keys() & actual.keys():
+        values[key] = str(actual[key]) if key == "seed" else actual[key]
+    if "seed" in values:
+        values["seed"] = str(values["seed"])
+    configuration = {
+        "modelProfile": job.get("model_profile_id") or original.get("model_profile"),
+        "workflow": {"id": schema["workflowId"], "revision": schema["templateRevision"]},
+        "baseRecipeId": (integration.get("generation_recipe") or {}).get("id") or "custom",
+        "recipeValues": {field["key"]: deepcopy(field["default"]) for field in schema.get("fields", [])},
+        # Resolved values freeze all accepted fields; original random overrides must not replace actual Seed.
+        "parameterOverrides": deepcopy(values),
+        "resourceRequirements": deepcopy(snapshot.get("resources") or []),
+        "seedMode": "random" if str(values.get("seed", "-1")) == "-1" else "fixed",
+    }
+    return {**{key: value for key, value in values.items() if key in BASE_FIELDS},
+            "parameter_schema": deepcopy(schema), "workflow_parameter_overrides": values,
+            "creation_configuration": configuration}
+
+
+def workspace_run_source(snapshot, image_seed=None):
+    if snapshot is None:
+        return None
+    job = snapshot.get("job") or {}
+    original = snapshot.get("provenance") or {}
+    actual = {**(original.get("settings") or {}), **(job.get("generation_params") or {})}
+    resolved_seed = ((snapshot.get("run") or {}).get("request_json") or {}).get("resolved_seed")
+    if actual.get("seed") in (None, -1, "-1") and re.fullmatch(r"[0-9]{1,19}", str(resolved_seed)) and int(resolved_seed) < 2**63:
+        actual["seed"] = int(resolved_seed)
+    if image_seed is not None:
+        actual.update(seed=image_seed, batch_size=1)
+    settings = {key: value for key, value in actual.items() if key in BASE_FIELDS or key in {"denoise", "clip_skip"}}
+    settings.update(_frozen_generation_settings(snapshot, actual))
+    if re.fullmatch(r"-?[0-9]{1,19}", str(settings.get("seed"))):
+        settings["seed"] = display_seed(int(settings["seed"]))
+    return {"workspace_revision": snapshot.get("workspace_revision"),
+            "positive_prompt": job.get("positive_prompt", original.get("positive", "")),
+            "negative_prompt": job.get("negative_prompt", original.get("negative", "")),
+            "model_profile": job.get("model_profile_id") or original.get("model_profile"), "settings": settings}
 
 
 class ExampleDelete(ContractModel):
@@ -198,27 +325,29 @@ def register_reference_routes(app, workspace_db, require_session):
             fail("reference_preset_not_found", "生成任务不存在。")
         if not any(Path(item.local_path).resolve() == path.resolve() for item in artifacts):
             fail("reference_preset_not_found", "该图片不属于指定生成任务。")
-        provenance = entries[0]["snapshot"]["provenance"]
+        snapshot = entries[0]["snapshot"]
+        provenance = snapshot.get("provenance") or {}
         # Only explicitly selected fields cross the API boundary; snapshots may contain local paths.
-        verified = {key: provenance.get(key) for key in ("positive", "negative", "model_profile", "settings", "workflow_snapshot_ref")}
-        verified["run_id"] = payload.run_id
-        from copy import deepcopy
-        from ..core.seeds import display_seed
-        verified = deepcopy(verified)
-        if isinstance(verified.get("settings"), dict) and isinstance(verified["settings"].get("seed"), int):
-            verified["settings"]["seed"] = display_seed(verified["settings"]["seed"])
+        selected_seed = _selected_image_seed(path)
+        source = workspace_run_source(snapshot, selected_seed)
+        model = source["model_profile"]
+        verified = {"positive":source["positive_prompt"], "negative":source["negative_prompt"], "model_profile":model,
+                    "settings":{key:value for key,value in source["settings"].items() if key in BASE_FIELDS},
+                    "workflow_snapshot_ref":provenance.get("workflow_snapshot_ref"), "run_id":payload.run_id}
+        if selected_seed is not None:
+            verified["image_seed"] = display_seed(selected_seed)
         notes = ExampleNotes(external_prompt=f"正向：{verified.get('positive') or ''}\n负向：{verified.get('negative') or ''}"[:20000],
                              user_notes=payload.user_notes)
         return store.create(data, path.stem[:200], ExampleMetadata(notes=notes), origin="session_pin", origin_ref=payload.run_id,
             requirements=provenance.get("requirements"), provenance=verified,
-            compat={"model_profiles": [provenance["model_profile"]], "workflow_snapshot_ref": payload.run_id})
+            compat={"model_profiles": [model] if model else [], "workflow_snapshot_ref": payload.run_id})
 
     @app.get(prefix + "/{example_id}", dependencies=dependencies)
     def get_example(example_id: str):
         return store.get(example_id)
 
-    def verified_workspace_origin(snapshot, run_id):
-        original = snapshot["provenance"]
+    def verified_workspace_origin(snapshot, run_id, source):
+        original = snapshot.get("provenance") or {}
         workspace_id = snapshot.get("workspace_id", original.get("workspace_id"))
         revision = snapshot.get("workspace_revision", original.get("workspace_revision"))
         if (original.get("workspace_id", workspace_id) != workspace_id
@@ -230,39 +359,46 @@ def register_reference_routes(app, workspace_db, require_session):
         except (ValidationError, WorkspaceNotFoundError, WorkspaceVersionNotFoundError):
             return None
         compiled = parent["draft"].get("compiled") or {}
-        if (parent["draft"].get("model_profile") != original["model_profile"]
-                or compiled.get("positive") != original["positive"]
-                or compiled.get("negative") != original["negative"]):
+        if (parent["draft"].get("model_profile") != source["model_profile"]
+                or compiled.get("positive") != source["positive_prompt"]
+                or compiled.get("negative") != source["negative_prompt"]):
             return None
         return dump(origin)
 
     def create_generation_workspace(run_id, title=None, idempotency_key=None, *,
-                                    gallery_source=None, request_identity=None):
+                                    gallery_source=None, request_identity=None, image_seed=None):
         service = app.state.submission_service
         entries = service.store.for_runs([run_id]) if service and run_id else []
         if not entries:
             fail("reference_preset_unavailable", "没有可用的原始生成快照。")
         snapshot = entries[0]["snapshot"]
-        original, run = snapshot["provenance"], snapshot["run"]
-        if not snapshot.get("workflow"):
+        original, run = snapshot.get("provenance") or {}, snapshot.get("run") or {}
+        if not snapshot.get("workflow") or not run.get("workflow_profile_id") or not run.get("remote_profile_id"):
             fail("workflow_snapshot_missing", "原始工作流快照缺失。")
-        model = original["model_profile"]
-        values = {k: v for k, v in original["settings"].items() if k in WorkbenchGenerationSettings.model_fields}
-        values.update(preset_id="custom", aspect="custom", remote_profile_id=run["remote_profile_id"], workflow_profile_id=run["workflow_profile_id"])
-        settings = WorkbenchGenerationSettings.model_validate(values)
+        source = workspace_run_source(snapshot, image_seed)
+        model = _source_model(source["model_profile"])
+        values = {k: v for k, v in source["settings"].items() if k in WorkbenchGenerationSettings.model_fields}
+        values.update(preset_id=(values.get("creation_configuration") or {}).get("baseRecipeId", "custom"),
+                      aspect="custom", remote_profile_id=run["remote_profile_id"], workflow_profile_id=run["workflow_profile_id"])
+        try:
+            settings = WorkbenchGenerationSettings.model_validate(values)
+        except ValidationError:
+            fail("workflow_snapshot_missing", "原任务的参数记录不完整，无法恢复生成条件。")
         requirements = Requirements.model_validate(original["requirements"]) if original.get("requirements") else Requirements.empty()
         # Direct-prompt runs can have LoRAs without structured creative requirements.
         if "resources" in snapshot:
             requirements = Requirements.model_validate({**dump(requirements), "loras": snapshot["resources"]})
-        prompt = PromptEdit(positive=original["positive"], negative=original["negative"])
+        if not source["positive_prompt"].strip():
+            fail("empty_requirements", "原任务没有已记录的正向提示词。")
+        prompt = PromptEdit(positive=source["positive_prompt"], negative=source["negative_prompt"])
         draft = WorkspaceDraft(model_profile=model, generation_settings=settings).persistence_payload()
         draft["requirements"] = dump(requirements)
         draft["generation_source"] = dict(run_id=run_id, remote_profile_id=run["remote_profile_id"], workflow_profile_id=run["workflow_profile_id"], model_profile=model)
-        draft["workspace_origin"] = verified_workspace_origin(snapshot, run_id)
+        draft["workspace_origin"] = verified_workspace_origin(snapshot, run_id, source)
         if gallery_source is not None:
             draft["gallery_source"] = dump(GallerySource.model_validate(gallery_source))
         draft["compiled"] = compile_prompt(draft, prompt, source="user")
-        resolved_title = title or "继续 · " + (requirements.layers.subject.text or original["positive"])[:40]
+        resolved_title = title or "继续 · " + (requirements.layers.subject.text or prompt.positive)[:40]
         return app.state.workspace_store.create_snapshot(resolved_title[:200], draft,
             request_identity=request_identity if request_identity is not None else {
                 "kind": "generation_run", "run_id": run_id, "title": title}, idempotency_key=idempotency_key)
@@ -270,7 +406,6 @@ def register_reference_routes(app, workspace_db, require_session):
     @app.post("/api/v3/gallery/assets/workspace", dependencies=dependencies, status_code=201)
     def continue_gallery(payload: GalleryCopy,
                          idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
-        from ..core.runtime_profiles import V3RuntimeProfiles
         from ..runtime import GenerationRunNotFoundError
 
         gallery = app.state.gallery_service
@@ -289,35 +424,42 @@ def register_reference_routes(app, workspace_db, require_session):
         run_id = asset.get("batch_id")
         service = app.state.submission_service
         entries = service.store.for_runs([run_id]) if service and run_id else []
-        if entries and entries[0]["snapshot"].get("workflow"):
+        selected_seed = _selected_image_seed(path)
+        prior = None
+        if entries:
             try:
                 artifacts = service.queue.artifacts(run_id)
             except GenerationRunNotFoundError:
                 fail("reference_preset_not_found", "原始生成任务不存在。")
             if not any(Path(item.local_path).resolve() == path.resolve() for item in artifacts):
                 fail("reference_preset_not_found", "这张图片不属于记录中的生成任务。")
-            positive = entries[0]["snapshot"]["provenance"].get("positive") or ""
-            if not positive.strip():
-                fail("empty_requirements", "这张图片没有已记录的正向提示词，无法直接转入工作台。")
-            return create_generation_workspace(run_id, idempotency_key=idempotency_key,
-                gallery_source={**source, "mode": "generation"}, request_identity=identity)
+            snapshot = entries[0]["snapshot"]
+            if snapshot.get("workflow"):
+                return create_generation_workspace(run_id, idempotency_key=idempotency_key,
+                    gallery_source={**source, "mode": "generation"}, request_identity=identity, image_seed=selected_seed)
+            prior = workspace_run_source(snapshot, selected_seed)
 
-        positive = asset.get("positive_prompt") or ""
+        positive = prior["positive_prompt"] if prior else asset.get("positive_prompt") or ""
+        negative = prior["negative_prompt"] if prior else asset.get("negative_prompt") or ""
         if not positive.strip():
             fail("empty_requirements", "这张图片没有已记录的正向提示词，无法直接转入工作台。")
-        profiles = V3RuntimeProfiles()
-        model = asset.get("model_profile")
-        if model not in profiles.profiles:
-            model = "anima_aesthetic_v1_1"
-        defaults = profiles.get_model(model)
-        settings = WorkbenchGenerationSettings(steps=defaults.steps, cfg=defaults.cfg,
-            sampler=defaults.sampler, scheduler=defaults.scheduler,
-            width=defaults.default_width, height=defaults.default_height)
+        model = _source_model(prior["model_profile"] if prior else asset.get("model_profile"))
+        recorded = {}
+        parameters = prior["settings"] if prior else asset.get("generation_params") or {}
+        for key, value in parameters.items():
+            if key not in BASE_FIELDS or value is None:
+                continue
+            try:
+                recorded[key] = getattr(WorkbenchGenerationSettings.model_validate({key:value}), key)
+            except ValidationError:
+                continue  # A malformed legacy field does not invalidate its other recorded values.
+        if selected_seed is not None:
+            recorded.update(seed=selected_seed,batch_size=1)
+        settings = source_generation_settings(model, recorded)
         draft = WorkspaceDraft(model_profile=model, generation_settings=settings).persistence_payload()
         draft["requirements"] = dump(Requirements.empty())
         draft["gallery_source"] = dump(GallerySource(**source, mode="prompt"))
-        draft["compiled"] = compile_prompt(draft, PromptEdit(positive=positive,
-            negative=asset.get("negative_prompt") or ""), source="user")
+        draft["compiled"] = compile_prompt(draft, PromptEdit(positive=positive,negative=negative), source="user")
         return app.state.workspace_store.create_snapshot(("图片提示词 · " + source["name"])[:200], draft,
             request_identity=identity, idempotency_key=idempotency_key)
 
@@ -331,20 +473,15 @@ def register_reference_routes(app, workspace_db, require_session):
                         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
         source = store.get(example_id, payload.source_version)
         if payload.mode == "generation":
-            return create_generation_workspace((source.get("provenance") or {}).get("run_id"),
-                                               "参考 · " + source["title"], idempotency_key=idempotency_key)
+            provenance = source.get("provenance") or {}
+            return create_generation_workspace(provenance.get("run_id"), "参考 · " + source["title"], idempotency_key=idempotency_key,
+                image_seed=provenance.get("image_seed"),request_identity={"kind":"reference_generation","example_id":example_id,"source_version":payload.source_version})
         if payload.mode == "prompt":
-            from ..core.runtime_profiles import V3RuntimeProfiles
             original = source.get("provenance") or {}
             if not original.get("positive") or not original["positive"].strip():
                 fail("empty_requirements", "此案例没有已记录的原始正向提示词。")
-            profiles = V3RuntimeProfiles()
-            model = original.get("model_profile")
-            if model not in profiles.profiles:
-                model = "anima_aesthetic_v1_1"
-            defaults = profiles.get_model(model)
-            settings = WorkbenchGenerationSettings(steps=defaults.steps, cfg=defaults.cfg,
-                sampler=defaults.sampler, scheduler=defaults.scheduler)
+            model = _source_model(original.get("model_profile"))
+            settings = _fresh_generation_settings(model)
             draft = WorkspaceDraft(model_profile=model, generation_settings=settings).persistence_payload()
             record = app.state.workspace_store.create(("提示词参考 · " + source["title"])[:200], draft)
             def populate_prompt(draft):
@@ -357,7 +494,7 @@ def register_reference_routes(app, workspace_db, require_session):
             fail("empty_requirements", "请先编辑或提取参考要求。")
         requirements = apply_pin(Requirements.empty(), Requirements.model_validate(source["requirements"]), payload.role)
         model = source["compat"]["model_profiles"][0] if source["compat"]["model_profiles"] else "anima_aesthetic_v1_1"
-        draft = WorkspaceDraft(model_profile=model, generation_settings=WorkbenchGenerationSettings()).persistence_payload()
+        draft = WorkspaceDraft(model_profile=model, generation_settings=_fresh_generation_settings(model)).persistence_payload()
         record = app.state.workspace_store.create(("参考 · " + source["title"])[:200], draft)
         def populate(draft):
             draft["requirements"] = dump(requirements)

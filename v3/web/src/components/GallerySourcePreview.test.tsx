@@ -33,9 +33,9 @@ it("opens a single original without prompt or parameter metadata", async () => {
   await waitFor(() => expect(screen.queryByRole("dialog", {name: "Lightbox"})).not.toBeInTheDocument());
 });
 
-it("explains prompt-only import and default parameters", () => {
+it("explains that an import without a complete snapshot keeps recorded parameters", () => {
   render(<GallerySourcePreview source={{...source, mode: "prompt"}} />);
-  expect(screen.getByText(/只导入提示词/)).toBeInTheDocument();
+  expect(screen.getByText(/可读取的参数/)).toBeInTheDocument();
   expect(screen.getByText(/默认参数/)).toBeInTheDocument();
   expect(screen.getByText(/模型/)).toBeInTheDocument();
   expect(screen.getByText(/执行目标/)).toBeInTheDocument();

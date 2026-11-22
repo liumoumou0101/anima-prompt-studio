@@ -1,4 +1,7 @@
 import type {LocalConversation} from "./conversation";
+import {configurationFromSettings,resolveConfiguration} from "./creationConfiguration";
+import {modelProfileChoices} from "./modelProfiles";
+import {basicWorkflowSchema} from "./workflowParameterSchema";
 
 export interface ConversationConflict {
   path: string;
@@ -15,11 +18,26 @@ export interface ConversationMergeResult {
 
 export type ConversationConflictChoices = Record<string, "local" | "remote">;
 
+const generationPath = "generationConditions";
+const atomicPaths = new Set([generationPath,"requirements.layers.style.artist_preset","artistPresetPlacement"]);
+type GenerationConditions = Pick<LocalConversation,"model"|"settings"|"workflowSnapshotRunId"> & {loras:LocalConversation["requirements"]["loras"]};
+
+function generationConditions(draft: LocalConversation): GenerationConditions {
+  return {model:draft.model,settings:draft.settings,workflowSnapshotRunId:draft.workflowSnapshotRunId ?? null,loras:draft.requirements.loras};
+}
+
+function withGenerationConditions(draft: LocalConversation, conditions: GenerationConditions): LocalConversation {
+  const {loras,...generation} = conditions;
+  return {...draft,...generation,requirements:{...draft.requirements,loras}};
+}
+
 const labels: Record<string, string> = {
+  [generationPath]: "模型与生成条件",
   delta: "未发送的修改", positive: "正向提示词", negative: "负向提示词", mode: "改写方式", model: "模型",
   "requirements.layers.subject.text": "主体要求", "requirements.layers.style.text": "风格要求",
   "requirements.layers.lighting.text": "光影要求", "requirements.layers.composition.text": "构图要求",
   "requirements.layers.exclusions.global": "全局排除", "requirements.layers.exclusions.scoped": "局部排除",
+  "requirements.layers.style.artist_preset": "画师串版本", artistPresetPlacement: "画师串位置",
 };
 
 const leafLabels: Record<string, string> = {
@@ -38,8 +56,11 @@ function labelFor(path: string): string {
 
 function same(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
-  if (left === undefined || right === undefined) return false;
-  return JSON.stringify(left) === JSON.stringify(right);
+  if (Array.isArray(left) && Array.isArray(right)) return left.length === right.length && left.every((item,i)=>same(item,right[i]));
+  if (plainObject(left) && plainObject(right)) {
+    return [...new Set([...Object.keys(left),...Object.keys(right)])].every(key=>same(left[key],right[key]));
+  }
+  return false;
 }
 
 function plainObject(value: unknown): value is Record<string, unknown> {
@@ -54,7 +75,7 @@ function mergeValue(base: unknown, local: unknown, remote: unknown, path: string
   if (same(local, remote)) return clone(local);
   if (same(local, base)) return clone(remote);
   if (same(remote, base)) return clone(local);
-  if (plainObject(base) && plainObject(local) && plainObject(remote)) {
+  if (!atomicPaths.has(path) && plainObject(base) && plainObject(local) && plainObject(remote)) {
     const result: Record<string, unknown> = {};
     for (const key of new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(remote)])) {
       const value = mergeValue(base[key], local[key], remote[key], path ? `${path}.${key}` : key, conflicts);
@@ -68,6 +89,13 @@ function mergeValue(base: unknown, local: unknown, remote: unknown, path: string
 
 export function mergeConversation(base: LocalConversation, local: LocalConversation, remote: LocalConversation): ConversationMergeResult {
   const conflicts: ConversationConflict[] = [];
+  if (local.model !== remote.model) {
+    const selected = mergeValue(generationConditions(base),generationConditions(local),generationConditions(remote),generationPath,conflicts) as GenerationConditions;
+    // Merge the remaining prompt and tag edits with the same complete conditions on all three drafts.
+    base = withGenerationConditions(base,selected);
+    local = withGenerationConditions(local,selected);
+    remote = withGenerationConditions(remote,selected);
+  }
   const merged = mergeValue(base, local, remote, "", conflicts) as LocalConversation;
   // Revisions are concurrency metadata, not user content. Always continue from the server revision.
   merged.baseRevision = remote.baseRevision;
@@ -84,9 +112,22 @@ function setPath(target: Record<string, unknown>, path: string, value: unknown):
 }
 
 export function resolveConversationConflicts(result: ConversationMergeResult, choices: ConversationConflictChoices): LocalConversation {
-  const resolved = structuredClone(result.merged) as unknown as Record<string, unknown>;
+  let resolved = structuredClone(result.merged);
   for (const conflict of result.conflicts) {
-    setPath(resolved, conflict.path, choices[conflict.path] === "local" ? conflict.local : conflict.remote);
+    const selected = choices[conflict.path] === "local" ? conflict.local : conflict.remote;
+    if (conflict.path === generationPath) resolved = withGenerationConditions(resolved,clone(selected as GenerationConditions));
+    else setPath(resolved as unknown as Record<string,unknown>,conflict.path,selected);
   }
-  return resolved as unknown as LocalConversation;
+  return resolved;
+}
+
+export function conflictValueLabel(conflict: ConversationConflict, side: "local" | "remote"): string {
+  const value = conflict[side];
+  if (conflict.path !== generationPath) return typeof value === "string" ? value : JSON.stringify(value) ?? "";
+  const {model,settings,loras} = value as GenerationConditions;
+  const config = configurationFromSettings(settings,model,undefined,{preserveSnapshot:true});
+  const schema = settings.parameter_schema || basicWorkflowSchema(config.workflow.id,config.workflow.revision);
+  const {width,height,steps,cfg} = resolveConfiguration(config,schema).values;
+  const name = modelProfileChoices().find(item=>item.id === model)?.label || model;
+  return [name,config.workflow.id || "未选工作流",`${width ?? "?"}×${height ?? "?"}`,`${steps ?? "?"} 步`,`CFG ${cfg ?? "?"}`,`LoRA ${loras.length}`].join(" · ");
 }

@@ -34,3 +34,30 @@ it("blocks refresh when address or key has unsaved changes", async () => {
   fireEvent.change(address, {target: {value: "https://other.example/v1"}});
   expect(screen.getByRole("button", {name: "刷新模型列表"})).toBeDisabled();
 });
+
+it("saves edited connection settings before explicitly testing the connection", async () => {
+  vi.mocked(apiRequest).mockImplementation(async path => String(path).endsWith("/llm/test")
+    ? {ok: true, message: "连接可用"} : settings);
+  render(<LlmSettingsPanel />);
+  await screen.findByLabelText("服务商");
+  fireEvent.change(screen.getByLabelText("模型名称"), {target: {value: "custom-model"}});
+  fireEvent.change(screen.getByLabelText("API 地址（Base URL）"), {target: {value: "https://custom.example/v1"}});
+  fireEvent.change(screen.getByLabelText("API Key"), {target: {value: "fake-key"}});
+  expect(vi.mocked(apiRequest).mock.calls.some(([path]) => String(path).endsWith("/llm/test"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", {name: "保存并测试连接"}));
+  await screen.findByText("连接可用");
+  const writes = vi.mocked(apiRequest).mock.calls.filter(([,init]) => init?.method === "PUT" || init?.method === "POST");
+  expect(writes.map(([path]) => path)).toEqual(["/api/v3/llm/settings", "/api/v3/llm/test"]);
+  expect(JSON.parse(String(writes[0][1]?.body))).toMatchObject({model_name: "custom-model", base_url: "https://custom.example/v1", api_key: "fake-key"});
+  expect(JSON.parse(String(writes[1][1]?.body))).toEqual({});
+});
+
+it("clears unsaved credentials when switching providers", async () => {
+  vi.mocked(apiRequest).mockResolvedValue(settings);
+  render(<LlmSettingsPanel />);
+  await screen.findByLabelText("API Key");
+  fireEvent.change(screen.getByLabelText("API Key"), {target: {value: "provider-a-key"}});
+  fireEvent.change(screen.getByLabelText("服务商"), {target: {value: "custom"}});
+  expect(screen.getByLabelText("API Key")).toHaveValue("");
+  expect(screen.getByLabelText("模型名称")).toHaveValue("");
+});

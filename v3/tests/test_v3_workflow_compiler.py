@@ -11,8 +11,9 @@ from anima_prompt_studio_v3.core.workflow_compiler import V3WorkflowCompiler
 @pytest.mark.parametrize("label", ["quality", "balanced", "custom", "turbo_v11_baseline", "yume_creator"])
 def test_explicit_edits_reach_actual_sampler_regardless_of_recipe_label(profile, label):
     model = profile.compatible_model_profiles[0]
+    positive, negative = "  a crane in a garden,\n\n   (wide view:1.2)\t ", " \n haze,\twatermark  "
     prepared = CandidateToV2PromptJobAdapter().prepare_direct(
-        positive_prompt="a crane in a garden", negative_prompt="text",
+        positive_prompt=positive, negative_prompt=negative,
         model_profile_id=model,
         settings=V2GenerationSettings(preset_id=label, steps=47, cfg=6.25,
             sampler="euler", scheduler="normal", seed=123, width=768, height=1024),
@@ -28,8 +29,8 @@ def test_explicit_edits_reach_actual_sampler_regardless_of_recipe_label(profile,
         47, 6.25, "euler", "normal", 123, 768, 1024]
     assert actual("checkpoint") != "wrong-legacy-alias.safetensors"
     assert result.metadata["compiler"] == "v3-workflow/1"
-    assert actual("positive_prompt") == "a crane in a garden"
-    assert actual("negative_prompt") == "text"
+    assert actual("positive_prompt") == positive
+    assert actual("negative_prompt") == negative
 
 
 def test_missing_parameters_use_v3_defaults_even_for_old_quality_label():

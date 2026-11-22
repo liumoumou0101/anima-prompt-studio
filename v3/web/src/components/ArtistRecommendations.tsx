@@ -3,6 +3,7 @@ import {Link} from "react-router-dom";
 import {apiRequest} from "../lib/api";
 import type {ArtistRanking, ArtistSuggestion} from "../lib/types";
 import {ArtistReferencePreview} from "./ArtistReferencePreview";
+import {normalizeIdentityTags} from "../lib/conversation";
 
 export const artistRankings: {id: ArtistRanking; label: string; detail: string}[] = [
   {id: "tag_fit", label: "题材贴合", detail: "按标签关联强度排序，专项作者会靠前。"},
@@ -18,14 +19,14 @@ export function artistSeeds(text: string): string[] {
 function savedRanking(): ArtistRanking | null {
   try {const value = localStorage.getItem(preferenceKey); return artistRankings.some(item => item.id === value) ? value as ArtistRanking : null;} catch {return null;}
 }
-type Props = {prompt: string; selected: string[]; disabled: boolean; onChange: (artists: string[]) => void};
+type Props = {prompt: string; selected: string[]; alreadySelected?:string[]; disabled: boolean; onChange: (artists: string[]) => void;onRemoveArtist?:(name:string)=>void};
 
 export function ArtistRecommendations(props: Props) {
   const [open, setOpen] = useState(false);
   return <section className="conversation-artist-extension"><button aria-expanded={open} aria-controls="conversation-artist-panel" onClick={() => setOpen(value => !value)}>画师推荐（可选）</button>
     {open && <ArtistPanel {...props} />}</section>;
 }
-function ArtistPanel({prompt, selected, disabled, onChange}: Props) {
+function ArtistPanel({prompt, selected, alreadySelected=[], disabled, onChange,onRemoveArtist}: Props) {
   const [input, setInput] = useState(() => artistSeeds(prompt).slice(0, 50).join(", "));
   const [sourcePrompt, setSourcePrompt] = useState(prompt);
   const [ranking, setRanking] = useState<ArtistRanking>(() => savedRanking() || "tag_fit");
@@ -44,6 +45,8 @@ function ArtistPanel({prompt, selected, disabled, onChange}: Props) {
     return () => {controller.abort(); request.current?.abort();};
   }, []);
   const tags = artistSeeds(input);
+  const selectedNames=[...selected,...alreadySelected].filter((name,index,names)=>names.findIndex(other=>
+    normalizeIdentityTags([other],true)[0]===normalizeIdentityTags([name],true)[0])===index);
   const valid = tags.length > 0 && tags.length <= 50 && tags.every(tag => tag.length <= 200);
   function invalidate(value: string) {request.current?.abort(); setBusy(false); setReading(false); setItems(null); setError(""); setReadNote(""); setInput(value);}
   async function readPromptTags() {
@@ -95,13 +98,13 @@ function ArtistPanel({prompt, selected, disabled, onChange}: Props) {
     {error && <p role="alert">{error}</p>}
     {items && !items.length && <p role="status">没有匹配的画师。请使用数据包中已有的题材标签，或尝试其他推荐模式。</p>}
     <div className="conversation-artist-cards">{items?.map(item => {
-      const added = selected.some(name => canonical(name) === canonical(item.name));
+      const added = normalizeIdentityTags(selectedNames,true).includes(normalizeIdentityTags([item.name],true)[0]);
       return <article key={item.name}><Link to={`/artists/${encodeURIComponent(item.name)}`}>{item.render_name}</Link>
         <p>匹配：{item.sources.join("、")}</p><small>历史作品 {item.post_count.toLocaleString()} · 命中 {item.hit_count} 个标签</small>
         <ArtistReferencePreview artist={item.name} />
         <button disabled={disabled || added || selected.length >= 32} onClick={() => onChange([...selected, item.name])}>{added ? "已加入" : "加入画面要求"}</button></article>;
     })}</div>
-    <div aria-label="已选画师"><strong>已选画师 · {selected.length} / 32</strong>{selected.length ? selected.map((name, index) => <span key={`${name}-${index}`} className="conversation-artist-selected">@{name}<button aria-label={`移除画师 ${name}`} disabled={disabled} onClick={() => onChange(selected.filter((_, i) => i !== index))}>移除</button></span>) : <p>还没有选择画师。</p>}</div>
-    <p className="conversation-muted">加入或移除只修改画面要求，更新提示词后才会用于生成。未保存输入和原有画师都会保留。</p>
+    <div aria-label="已选画师"><strong>已选画师 · {selectedNames.length}</strong>{selectedNames.length ? selectedNames.map((name, index) => <span key={`${name}-${index}`} className="conversation-artist-selected">@{name}<button aria-label={`移除画师 ${name}`} disabled={disabled} onClick={() => onRemoveArtist?onRemoveArtist(name):onChange(selected.filter(other=>canonical(other)!==canonical(name)))}>移除</button></span>) : <p>还没有选择画师。</p>}</div>
+    <p className="conversation-muted">加入或移除会同步当前正向中的完整画师 tag，无需调用 LLM。本次生成使用当前正向提示词，原有正文会保留。</p>
   </div>;
 }

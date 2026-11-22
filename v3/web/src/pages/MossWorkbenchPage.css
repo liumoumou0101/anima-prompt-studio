@@ -1,0 +1,131 @@
+.moss-workbench {
+  --moss-top: 0px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px;
+  width: 100%; max-width: 2400px; height: calc(100dvh - var(--moss-top)); min-height: 0;
+  margin: 0 auto; padding: 14px clamp(16px, 1.8vw, 40px) 20px;
+}
+.moss-header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px 24px; min-width: 0; }
+.moss-header > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; min-width: 0; }
+.moss-header h1 { order: -1; margin: 0; font-size: 21px; line-height: 1.5; }
+.moss-header p { margin: 0; color: var(--muted); font-size: 12px; }
+.moss-eyebrow { font-size: 12px; color: var(--accent); }
+.moss-header .moss-header-actions { flex: 0 0 auto; align-items: center; gap: 8px 12px; }
+.moss-header-actions > a { font-size: 12px; }
+.moss-header-actions > button { min-height: 34px; padding: 6px 12px; border: 1px solid var(--line-bright); border-radius: 6px; background: var(--panel); color: var(--text); font-size: 13px; white-space: nowrap; }
+.moss-header-actions > button:disabled { opacity: .5; cursor: not-allowed; }
+.moss-studio { display: flex; flex: 1 1 0; flex-direction: column; min-height: 0; min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
+.moss-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; flex: 0 0 auto; padding: 12px 22px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.moss-tools > .prompt-tools { max-width: 100%; margin-left: auto; }
+.moss-columns { display: grid; flex: 1 1 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; min-width: 0; }
+.moss-card { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; padding: 22px 24px; }
+.moss-card + .moss-card { border-left: 1px solid var(--line); }
+.moss-result-tabs { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 5px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.moss-result-tabs > button { padding: 7px 12px; font-size: 13px; }
+.moss-result-tabs > button[aria-selected=true] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.moss-text-pane { display: flex; flex: 1 1 0; flex-direction: column; gap: 14px; min-height: 0; }
+.moss-text-pane[hidden], .moss-results-pane[hidden] { display: none; }
+.moss-results-pane { display: flex; flex: 1 1 0; min-height: 0; }
+.moss-results-pane .workbench-image-stage { min-height: 0; }
+.moss-results { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; gap: 12px; }
+.moss-result-empty { display: grid; flex: 1; align-content: center; text-align: center; color: var(--muted); }
+.moss-result-empty h3 { color: var(--text); font-size: 18px; }
+.moss-result-status { display: flex; flex: 0 0 auto; align-items: center; gap: 12px; font-size: 13px; }
+.moss-result-status progress { flex: 1; max-width: 200px; }
+.moss-result-images { display: flex; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
+.moss-result-images > button { position: relative; display: block; flex: 1; min-width: 0; min-height: 0; overflow: hidden; padding: 0; background: var(--panel-raised); }
+.moss-result-images img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; }
+.moss-result-navigation { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 14px; font-size: 13px; }
+.moss-result-navigation > button { min-height: 32px; padding: 6px 12px; }
+.moss-result-links { display: flex; flex: 0 0 auto; gap: 15px; margin: 0; font-size: 12px; }
+.moss-card-heading { min-height: 32px; display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.moss-card-heading h2 { margin: 0; font-size: 18px; }
+.moss-card-heading > span { font-size: 12px; color: var(--muted); }
+.moss-card-heading .moss-text-status { border: 1px solid var(--line); border-radius: 5px; padding: 4px 8px; color: var(--accent); background: var(--accent-soft); }
+.moss-card-heading .moss-text-status.is-pending { color: var(--amber); background: var(--amber-soft); }
+.moss-prompt-field { display: flex; flex: 1 1 0; flex-direction: column; gap: 9px; min-height: 0; margin: 0; font-size: 13px; }
+.moss-workbench textarea { box-sizing: border-box; width: 100%; padding: 13px 14px; border: 1px solid var(--line-bright); border-radius: 6px; color: var(--text); background: var(--panel); font: 15px/1.8 var(--font-body); resize: vertical; }
+.moss-prompt-field > textarea { flex: 1 1 0; height: 0; min-height: 180px; resize: none; }
+.moss-prompt-field > textarea[readonly] { background: var(--panel-raised); }
+.moss-modes { max-width: 100%; display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; min-width: 0; margin: 0; border: 0; padding: 0; }
+.moss-modes legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.moss-modes label { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; cursor: pointer; }
+.moss-modes label.is-selected { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.moss-modes input { width: auto; margin: 0; accent-color: var(--accent); }
+.moss-hint { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.moss-editor-note { flex: 0 0 auto; margin: 0; }
+.moss-output-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 36px; }
+.moss-workbench button { cursor: pointer; }
+.moss-output-actions button { min-height: 32px; padding: 6px 12px; font-size: 12px; }
+.moss-workbench button:disabled { cursor: default; opacity: .55; }
+.moss-dock { flex: 0 0 auto; min-width: 0; padding: 12px 22px; border-top: 1px solid var(--line); background: var(--bg); }
+.moss-dock-status { max-height: 110px; overflow: auto; overscroll-behavior: contain; font-size: 12px; line-height: 1.6; }
+.moss-dock-status:has(> .moss-receipts:empty):not(:has(> p)) { display: none; }
+.moss-dock-status p { margin: 0 0 7px; overflow-wrap: anywhere; }
+.moss-dock-status [role=alert] { color: var(--danger); }
+.moss-dock-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.moss-environment { flex: 0 1 360px; min-width: 220px; }
+.moss-environment .execution-environment-control { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; }
+.moss-environment .execution-environment-control > label { margin: 0; font-size: 12px; }
+.moss-environment .execution-environment-control > select { flex: 1; min-width: 0; width: auto; min-height: 34px; padding: 6px 10px; font-size: 12px; }
+.moss-environment .execution-environment-control > small { flex-basis: 100%; font-size: 11px; color: var(--muted); }
+.moss-environment .execution-environment-control > div { flex-basis: 100%; max-height: 100px; overflow: auto; font-size: 12px; }
+.moss-environment .execution-environment-control > div p { margin: 5px 0; }
+.moss-condition-summary { flex: 1 1 auto; color: var(--muted); font-size: 12px; }
+.moss-dock-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.moss-dock-actions > [role=status] { max-width: 300px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.moss-dock-actions > button { min-height: 40px; padding: 8px 17px; border: 1px solid var(--line-bright); border-radius: 6px; font-size: 13px; }
+.moss-dock-actions .moss-generate { min-width: 160px; border-color: var(--accent); color: var(--on-accent); background: var(--accent); font-weight: 600; }
+.moss-tool-content { min-width: 0; font-size: 13px; }
+.moss-tool-content h3 { margin: 0 0 14px; font-size: 17px; }
+.moss-tool-content label { display: grid; gap: 8px; margin: 14px 0; }
+.moss-tool-content :is(input, select) { min-width: 0; }
+.moss-tool-content button { min-height: 34px; padding: 7px 12px; font-size: 13px; }
+.moss-tool-content .moss-suggestion { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.moss-suggestion > button { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+.moss-suggestion li, .moss-suggestion p { line-height: 1.7; overflow-wrap: anywhere; }
+.moss-workbench .generation-settings-panel fieldset { min-width: 0; }
+@media (min-width: 1800px) and (min-height: 950px) {
+  .moss-card { padding: 26px 28px; gap: 18px; }
+  .moss-prompt-field > textarea { font-size: 16px; line-height: 1.9; }
+  .moss-dock { padding: 15px 28px; }
+}
+@media (max-height: 850px) and (min-width: 1024px) {
+  .moss-workbench { gap: 8px; padding-block: 8px 10px; }
+  .moss-header h1 { font-size: 19px; }
+  .moss-header p { display: none; }
+  .moss-card { padding: 14px 18px; gap: 10px; overflow: auto; }
+  .moss-tools { padding: 9px 18px; }
+  .moss-prompt-field > textarea { min-height: 140px; }
+  .moss-modes label { padding: 6px 8px; font-size: 12px; }
+  .moss-dock { padding: 9px 18px; }
+}
+@media (max-width: 1023px) {
+  .moss-header > div { gap: 4px 8px; }
+  .moss-header p { display: none; }
+  .moss-columns { grid-template-columns: 1fr; overflow: auto; overscroll-behavior: contain; }
+  .moss-card { min-height: 340px; padding: 16px; }
+  .moss-card + .moss-card { border-left: 0; border-top: 1px solid var(--line); }
+  .moss-tools { padding: 10px 16px; }
+  .moss-dock { padding: 10px 16px; }
+  .moss-condition-summary { flex: 1 1 160px; }
+  .moss-dock-actions { width: 100%; }
+  .moss-dock-actions > [role=status] { flex: 1; max-width: none; }
+}
+@media (max-width: 600px) {
+  .moss-workbench { gap: 8px; min-height: 0; padding: 12px 10px; }
+  .moss-header { gap: 8px; align-items: flex-start; flex-wrap: wrap; }
+  .moss-header h1 { font-size: 18px; }
+  .moss-header .moss-eyebrow { display: none; }
+  .moss-header .moss-header-actions { flex-basis: 100%; justify-content: space-between; }
+  .moss-header-actions > a { font-size: 11px; }
+  .moss-tools { padding: 9px 10px; }
+  .moss-environment { flex-basis: 100%; }
+  .moss-condition-summary { flex-basis: 100%; font-size: 11px; }
+  .moss-dock-actions > [role=status] { flex-basis: 100%; font-size: 11px; }
+  .moss-dock-actions > button { flex: 1; min-width: 0; }
+  .moss-dock-status { max-height: 75px; }
+  .moss-modes label { padding: 7px; font-size: 12px; }
+}
+@media (pointer: coarse) {
+  .moss-workbench :is(button, select) { min-height: 44px; }
+  .moss-workbench textarea { font-size: 16px; }
+}

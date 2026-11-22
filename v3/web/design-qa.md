@@ -1,49 +1,60 @@
-# Four-appearance workbench design QA — 2026-09-12
+# 单一工作台设计 QA — 2026-10-25
 
-final result: passed
+本页替代 2026-09-12 的四外观 QA 作为当前实现记录。旧版 studio/editorial、fixed dock 与旧测试总数不代表当前状态；历史材料仍可从 Git 历史及当时交接文档查阅。
 
-## Visual truth and comparison scope
+当前范围是统一工作台、导航、编辑/结果/参数/版本区域、意见区和生成条。业务与迁移边界见[迁移说明](../../docs/v3/SINGLE_WORKBENCH_MIGRATION.md)。本轮截图来自本地浏览器的界面验证状态，不能用于证明真实 LLM/GPU 生成效果。
 
-Source directory: `C:/Users/MSN/.codex/generated_images/01a09066-e406-7140-8751-697ff98c5783/`.
+## 屏幕、视口与证据
 
-- Studio light: `exec-0c06b537-c878-4579-98e7-36a206012aea.png`.
-- Studio dark: `exec-fe6f0fc6-c301-49fa-92c1-8eff02a86a69.png`.
-- Editorial light: `exec-c2abd623-dd9d-4e16-836d-65b25581a8a9.png`.
-- Editorial dark: `exec-29e68dfc-cffa-43fe-a322-819c838211e0.png`.
+系统查询确认本机主屏为 **2560×1440**。2048×1152、1707×960、1280×720 是分别近似 125%、150%、200% 的等效 CSS 视口检查；没有把这些视口截图声称为真实操作系统缩放或浏览器缩放实测。
 
-Implementation evidence: `H:/soft/提示词工具2/docs/v3/audits/2026-09-12-ui/`. The final four files are `{studio,editorial}-{light,dark}-1440-final.png`; two laptop captures are `studio-1280-final.png` and `editorial-1280-final.png`. Combined source/implementation evidence: the four `*-final-comparison.jpg` files. A focused scene-controls/prompt comparison is saved as `focused-controls.jpg` (density iteration before the final action bar).
+文件名表示请求的宽度，PNG 像素可能受截图区域、滚动条或整页捕获影响。下表列出实际文件尺寸，不按文件名推定像素：
 
-Source images measure 1487×1058 pixels. Main implementation captures measure 1425×1013 pixels for a requested 1440×1024 CSS viewport (browser capture excludes viewport chrome/scrollbar edges). Source images are contained to the implementation image size for combined comparisons; no stretching or pixel-level equality claims. The reference and implementation were opened together in the same review input, and an independent reviewer inspected all four pairs plus the 1280 captures.
+| 请求 CSS 视口 | 用途 | 证据 PNG 像素 | 截图 |
+| --- | --- | --- | --- |
+| 2560×1440 | 2K 主屏基准，浅色 | 2560×1440 | [2560](../../reports/single-workbench-implementation/workbench-2560.png) |
+| 2048×1152 | 约 125% 等效可用面积 | 2048×1152 | [2048](../../reports/single-workbench-implementation/workbench-2048.png) |
+| 1707×960 | 约 150% 等效可用面积 | 1707×960 | [1707](../../reports/single-workbench-implementation/workbench-1707.png) |
+| 1366×768 | 常见桌面短窗口 | 1366×768 | [1366](../../reports/single-workbench-implementation/workbench-1366.png) |
+| 1280×720 | 约 200% 等效可用面积、低屏高 | 1280×720 | [1280](../../reports/single-workbench-implementation/workbench-1280.png) |
+| 900×768 | 单栏切换 | 885×498，当前捕获区域 | [900](../../reports/single-workbench-implementation/workbench-900.png) |
+| 390×844 | 窄屏导航与参数 | 375×812，当前捕获区域 | [390](../../reports/single-workbench-implementation/workbench-390.png) |
+| 2560×1440 | 夜间主题 | 2560×1440 | [2560 夜间](../../reports/single-workbench-implementation/workbench-2560-dark.png) |
+| 390×844 | 夜间提示词模式、整页滚动 | 375×2045，整页 | [390 夜间整页](../../reports/single-workbench-implementation/workbench-390-dark-prompt.png) |
 
-State: an existing conversation with one completed-image fixture, editable prompt, empty optional identity selection, five scene controls, and explicit actions. Final captures also show a local unsent change and selected shot to verify disabled generation. The concept uses imaginary multi-image Frieren content; the offline fixture uses a locally collected meadow reference and a single image, explicitly labelled as a layout sample. Different content, absence of fabricated character portraits and additional runtime controls are intentional, based on the implementation constraints in `docs/v3/UI_REDESIGN_20260912.md`. This is an implementation of the selected layouts and interaction requirements, not evidence of image-generation fidelity.
+这些是本机开发证据，`reports/` 不保证包含在安装包内。900 的局部截图只证明已捕获区域，不单独证明完整页面的所有内容均在首屏。
 
-## Findings and iteration history
+## 当前浏览器检查结果
 
-- P1 fixed: the interrupted implementation had new layout markup but old hardcoded black/purple workbench CSS. Replaced the workbench presentation and connected shared tokens throughout controls and states.
-- P2 fixed: the optional identity editor used tall multi-line fields and pushed the prompt far below the fold (`01-studio-before-density-fix.png`). It now uses three compact rows when expanded, folds to one line when empty, and preserves mounted fields and their values.
-- P2 fixed after first full comparison: model information and all three main actions were below the desktop viewport (`*-1440.png`, `*-1280.png`). Final screenshots show a fixed desktop bar containing model/size/count, readiness, Update Prompt, Save, and Generate. In a 1280×800 CSS viewport its bottom is 784px; at 1440×1024 it is 1008px. Narrow screens place the same controls in normal flow. No duplicated business actions were introduced.
-- P2 fixed: selecting Generation Settings opened a distant section without showing it. It now opens and scrolls to the actual parameter section. The action-bar shortcut also reopens a manually collapsed section. Evidence: `editorial-390-settings.png`; regression tests retain prompt-node identity, manual text and negative text.
-- Post-fix review: no remaining actionable P0/P1/P2 visual issue found in the captured scope. Keyboard Tab from the gaze selector focuses the target input above the bar: input bottom 413.9px, bar top 701.6px at 1280×800. Inputs use scroll margins; page bottom padding keeps final content reachable.
+- 浅色各请求尺寸未发现文档横向溢出。桌面生成条可见，参数/版本区域与编辑区可同时使用；短窗口允许编辑区内部滚动，不用固定浮层覆盖正文。
+- 2560 夜间视口实测 `scrollWidth=2560`，生成条底部为 1414 px；编辑区和参数区可用。
+- 创作记录打开后，实际 Escape 操作可关闭记录，并把焦点返回版本按钮。
+- 390 请求视口实际 `innerWidth=390`，文档宽 375 px，15 px 差值为滚动条占位。窄屏提示词模式可用，内容高度使用页面滚动；不要求所有参数和操作在一屏内出现。
+- 1024 px 以下提示词/图片为单栏；860 px 以下导航改为顶部布局。截图中的 900 仍保留侧栏，但工作区已单栏，这与两个断点的职责一致。
 
-## Required fidelity surfaces
+检查仅覆盖上述状态。没有据此宣称所有弹窗、所有页面、屏幕阅读器、全键盘顺序、真实 IME 输入和硬件缩放场景均已完成验收。
 
-- Fonts/typography: shared Chinese-capable Segoe UI / Microsoft YaHei UI / PingFang SC sans-serif; main prompt 14px in studio and 16px in editorial, with generous line height. Editorial's Latin brand uses Georgia while Chinese body remains sans-serif as required. Metadata uses smaller secondary text. No oversized English decoration remains.
-- Spacing/layout rhythm: side navigation and paired editing/result regions in studio; top navigation and prompt-priority composition in editorial. Shared actions remain available at desktop size. The five-control schema and explicit source review intentionally require more vertical space than the illustrative mock. Single-column reflow preserves all controls.
-- Colors/tokens: warm light panels, neutral charcoal night panels, green and terracotta accents. Automated palette checks cover text, semantic colors, primary-button text, control boundaries and focus for all four combinations. No purple backgrounds remain in the workbench. Disabled controls remain readable.
-- Image quality/assets: real imported/reference thumbnails are used; images retain aspect ratio and have no theme filter (`filter: none` in all four combinations). A single result is shown as one result, without fake thumbnail variants or generated identity portraits. Icons come from the established Phosphor library.
-- Copy/content: Chinese operational labels retain separate meanings for advice, adopting a suggestion, updating prompts, saving and generating. Requirements, pending input and unavailable generation remain explicit. Unknown model parameters are not supplied by the visual layer.
+## 实现与回归关注点
 
-## Interactions and validation
+| 表面 | 当前实现与检查范围 |
+| --- | --- |
+| 布局 | 同一 `ConversationStudioView` 保留编辑与控制器生命周期；结果、参数、版本共享右侧区域，窄屏使用单栏切换 |
+| 密度 | 76/196 px 导航、中文操作标签、同层创作工具；意见区与生成条属于布局流，短窗口给正文滚动空间 |
+| 参数 | 常用、采样和声明的工作流字段分组；配方先预览再应用；空数字保留错误，精确 Seed 不转成不安全 Number |
+| 历史 | 可搜索、按有图/全部操作筛选；V 编号与旧修订分开；提示词继续和图片继续具有不同恢复范围 |
+| 状态 | 未应用意见、存储错误、待同步、环境待检测/待确认、未知 Seed 均有明确状态；在线不等于已可执行 |
+| 图像 | 使用实际返回的缩略图/内容地址，保持比例；不复制假结果，也不从界面截图推定模型画质 |
+| 可达性 | 现有 aria 标签在收起导航时保留；可见焦点样式、标签关联、错误提示、Esc/返回焦点有组件及所述浏览器检查 |
 
-- Four-mode switching retained unsent text, manually edited prompt, selected shot and image. Layout changes keep the same route/component nodes, maintain reading anchors when scrolled and do not steal focus; theme changes do not add scrolling.
-- Scene controls change local drafts; an offline advice failure preserves inputs. Unit/integration coverage includes stale results, target ownership, locked layers, sources, clear/undo and conflict handling.
-- Actual local production app was opened after rebuilding and restarting the API. Its existing conversation list and reference thumbnails loaded; reference light/dark rendering was checked (`references-dark-1440.png`). Captured production/browser error and warning logs were empty in the checked flow.
-- Requested viewports and measured document widths: 1440→1425px; 1280→1265px; 720→705px; 390→375px. No horizontal document overflow found. 720×512 is a reflow-width check; the in-app browser did not respond to zoom keyboard shortcuts, so actual browser 200% zoom is still unverified.
-- Backend full suite: 609 passed. Frontend full suite before the final parameter-navigation/action-bar changes: 33 files, 208 passed. Final affected workbench/shell/appearance suites: 55 passed; the current frontend contains 209 tests. TypeScript and production build passed.
-- Build command: `npm run build -- --emptyOutDir false`. Regular output-directory cleanup hit the previously documented Windows native-process exit; preserving dist succeeds. The existing bundle-size advisory remains.
+主题测试按当前浅/深色 token 校验正文、次级字、提示、语义色与主按钮文本至少 4.5:1，控件边界与焦点至少 3:1。这是限定 token 组合的自动检查，不是对所有渲染文本/图片叠层的完整 WCAG 审计。
 
-## Follow-up polish and limits
+专项功能回归包括：多步 AI 撤销/重做、草稿与日志重载、恢复迟到响应、原文导入稳定键重试、当前草稿备份失败、空 legacy 原文元数据、字段级配方保留、冻结两阶段参数、意图并发/取消/重启和来源恢复。jsdom 通过不被当作像素几何证据。
 
-P3: studio at 1280×800 still requires scrolling to read the full prompt; the action bar makes the key actions immediately accessible. Repeated title/selector/state metadata could be compressed further, and the bar could show the recipe name alongside the model.
+## 最终验证记录
 
-No new real LLM or GPU request was made. Visual/state checks do not prove natural-language semantic correctness or model image quality. Actual 200% browser zoom and a new Windows installer roundtrip remain outside this verified pass. Existing alpha.3 release packages have not been rebuilt with this UI.
+- 最终前端全量：**582 项通过，无失败或跳过**；包含最后的恢复冲突退出回归。
+- 最终后端全量：**1142 项通过**，1 条既有 Starlette/AnyIO 弃用警告。
+- 最终 TypeScript / 生产构建：**通过**，采用已有 Node 24.19.0；Vite 单包体积提示保留。系统 Node 24.12.0 的原生异常构建未作为交付产物。
+- 实际截图与浏览器结论采用本页上方限定范围；专项时间点的测试数见本机实现报告，不汇总成新的总数。
+
+仍未完成：真实浏览器/OS 125%/150%/200% 缩放组合、所有工具弹窗与页面的全键盘/IME/读屏检查、新安装包安装/卸载回合，以及真实改词语义质量、远端身份行为、大资源清单耗时、GPU 出图和高清第二阶段画质。当前 CSS 视口检查与受控测试不替代这些验收。

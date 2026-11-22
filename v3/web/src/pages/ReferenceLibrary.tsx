@@ -182,7 +182,7 @@ export function ReferenceLibrary({record, disabled = false, onPin, onUnpin, stan
       {catalog.error && <div className="reference-catalog-state" role="alert"><p>{catalog.error.message}</p><button type="button" onClick={() => void catalog.retry()}>{catalog.error.cursorConflict ? "刷新列表" : "重试"}</button></div>}
       {page && page.items.length > 0 && !page.next_cursor && <p className="reference-catalog-state">已显示全部结果。</p>}
       </div>
-      {selected && <section className="reference-detail" aria-label="参考详情">
+      {selected && <section className={`reference-detail${standalone ? " library-scroll-panel" : ""}`} aria-label="参考详情">
         <header className="reference-detail-heading"><h2>{selected.title}</h2><button disabled={requirementsDirty || notesDirty} onClick={() => setSelected(null)}>关闭详情</button></header>
         {standalone && <><button className="reference-image-open" onClick={() => setPreviewOpen(true)} aria-label="预览案例原图"><img src={`/api/v3/gallery/reference-examples/${selected.id}/thumbnail?size=640`} alt={selected.title} /></button>
           <p>案例版本：{selected.source_version} · {selected.provenance?.run_id ? "来自生成记录" : "参考素材"}</p>

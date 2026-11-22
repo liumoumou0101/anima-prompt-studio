@@ -21,7 +21,7 @@ beforeEach(() => {
   writes = []; failCompilation = false;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input), body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    if (body) writes.push({url, body});
+    if (body && !url.endsWith("/editor-context") && !url.endsWith("/checkpoints")) writes.push({url, body});
     let response: unknown = {items: []};
     if (url.endsWith("/llm/settings")) response = {services: [], current: {service: "test", model: "test-model"}};
     else if (url.startsWith("/api/v3/workspaces?")) response = {items: [workspace]};
@@ -37,6 +37,7 @@ beforeEach(() => {
         }
         requirements.layers.lighting.mood ||= null;
         workspace = {...workspace, revision: workspace.revision + 1, draft: {...workspace.draft, ...body.draft,
+          compiled:body.draft.prompt_edit?{...workspace.draft.compiled!,...body.draft.prompt_edit}:workspace.draft.compiled,
           requirements: {...requirements, contract: "anima-requirements/1", revision: 2}, compile_state: "stale"}};
       }
       response = workspace;
@@ -57,8 +58,7 @@ afterEach(() => {cleanup(); vi.restoreAllMocks();});
 function draft(): LocalConversation {return readConversationDraft("workspace_scene")!.local!;}
 async function mount() {
   const view = render(<MemoryRouter><ConversationWorkbenchPage /></MemoryRouter>);
-  fireEvent.click(await screen.findByText("更多创作工具", {selector: "summary"}));
-  fireEvent.click(await screen.findByText("角色、画师与画面设计", {selector: "summary"}));
+  fireEvent.click(await screen.findByRole("button", {name: "画面设计"}));
   await screen.findByRole("region", {name: "画面设计辅助"});
   await waitFor(() => expect(screen.getByRole("combobox", {name: "景别"})).toBeEnabled());
   return view;

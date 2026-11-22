@@ -11,6 +11,7 @@ dist/
 *.log
 /reports/
 /.local/
+/loras/
 /release/
 web_gallery/node_modules/
 /*.zip

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pydantic import Field
+from anima_prompt_studio.domain.execution_models import LoRASlotBinding, WorkflowProfile
 
 from .requirements import ContractModel, RequirementLora, ShortText, digest, dump
 
@@ -33,8 +34,55 @@ class LoraBindingsRequest(ContractModel):
 
 
 def resource_digest(resource: RequirementLora) -> str:
+    if resource.sha256:
+        return resource.sha256
     value = dump(resource)
     return digest({key: value[key] for key in ("file_name", "source", "trigger_words")})
+
+
+def materialize_lora_stack(profile: WorkflowProfile, resources: list[RequirementLora]) -> WorkflowProfile:
+    extension = profile._lora_extension
+    if extension is None or not resources:
+        return profile
+    if profile.lora_slots:
+        raise ResourceUnavailable("incompatible_workflow", "动态 LoRA 模板包含固定插槽。")
+    profile = profile.model_copy(deep=True)
+    profile._lora_extension = None
+    graph = profile.api_workflow
+    model = list(extension.model_source)
+    clip = list(extension.clip_source) if extension.clip_source is not None else None
+    dual = extension.loader == "LoraLoader"
+    if dual != bool(clip and extension.clip_targets):
+        raise ResourceUnavailable("incompatible_workflow", "LoRA 文本编码扩展点声明不完整。")
+    for targets, source in ((extension.model_targets, model), (extension.clip_targets, clip)):
+        for target in targets:
+            if graph.get(target.node_id, {}).get("inputs", {}).get(target.input_name) != source:
+                raise ResourceUnavailable("incompatible_workflow", "LoRA 扩展点与工作流原接线不匹配。")
+    for index, resource in enumerate(resources, 1):
+        node_id = f"anima_lora_{index}"
+        if node_id in graph:
+            raise ResourceUnavailable("incompatible_workflow", "LoRA 扩展节点与工作流原节点冲突。")
+        inputs = {"model": model, "lora_name": resource.file_name, "strength_model": resource.weight}
+        if dual:
+            inputs.update(clip=clip, strength_clip=resource.weight if resource.clip_weight is None else resource.clip_weight)
+            clip = [node_id, 1]
+        graph[node_id] = {"class_type": extension.loader, "inputs": inputs}
+        profile.lora_slots.append(LoRASlotBinding(node_id=node_id, clip_strength_input="strength_clip" if dual else None))
+        model = [node_id, 0]
+    for targets, source in ((extension.model_targets, model), (extension.clip_targets, clip)):
+        for target in targets:
+            graph[target.node_id]["inputs"][target.input_name] = source
+    profile.runtime_assets["lora_stack"] = "ordered/1"
+    return profile
+
+
+def apply_slot(slot, graph, filename=None, weight=0.0, clip_weight=None):
+    inputs = graph[slot.node_id]["inputs"]
+    if filename is not None:
+        inputs[slot.name_input] = filename
+    inputs[slot.model_strength_input] = weight
+    if slot.clip_strength_input is not None:
+        inputs[slot.clip_strength_input] = weight if clip_weight is None else clip_weight
 
 
 def slot_choices(profile, info) -> dict[str, list[str]]:
@@ -52,6 +100,7 @@ def slot_choices(profile, info) -> dict[str, list[str]]:
 
 
 def resolve_loras(resources: list[RequirementLora], profile, info, bindings=(), *, mapping_current=True):
+    resources = [r for r in resources if r.enabled]
     choices = slot_choices(profile, info)
     if len(resources) > len(choices):
         raise ResourceUnavailable("incompatible_workflow", "所选 LoRA 数量超过工作流插槽数。",
@@ -73,6 +122,8 @@ def resolve_loras(resources: list[RequirementLora], profile, info, bindings=(), 
                 raise ResourceUnavailable("lora_unmapped", "映射指向不存在或重复占用的插槽。")
             if binding.remote_file_name not in choices[binding.slot_key]:
                 raise ResourceUnavailable("missing_lora", "映射文件已不在远端资源列表中。", resources=[resource.logical_id])
+            if resource.sha256 and binding.remote_file_name != resource.file_name:
+                raise ResourceUnavailable("lora_unmapped", "库 LoRA 的映射文件与声明的 SHA-256 不一致。")
             selected[resource.logical_id] = (binding.slot_key, binding.remote_file_name)
             used.add(binding.slot_key)
     for resource in resources:
@@ -86,9 +137,15 @@ def resolve_loras(resources: list[RequirementLora], profile, info, bindings=(), 
         selected[resource.logical_id] = (key, resource.file_name)
         used.add(key)
     result = []
+    dual_slots = {f"{slot.node_id}.{slot.name_input}" for slot in profile.lora_slots if slot.clip_strength_input}
     for resource in resources:
         key, file = selected[resource.logical_id]
-        result.append({"logical_id": resource.logical_id, "resource_digest": resource_digest(resource),
-                       "slot_key": key, "remote_file_name": file, "weight": resource.weight,
-                       "trigger_words": resource.trigger_words})
+        item = {"logical_id": resource.logical_id, "resource_digest": resource_digest(resource),
+                "slot_key": key, "remote_file_name": file, "weight": resource.weight,
+                "trigger_words": resource.trigger_words}
+        if resource.sha256:
+            item["sha256"] = resource.sha256
+        if resource.clip_weight is not None and key in dual_slots:
+            item["clip_weight"] = resource.clip_weight
+        result.append(item)
     return sorted(result, key=lambda b: list(choices).index(b["slot_key"]))

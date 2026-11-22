@@ -2,11 +2,11 @@ import {useEffect, useState} from "react";
 import {Link, useSearchParams} from "react-router-dom";
 import {apiRequest} from "../lib/api";
 import {modelProfileChoices} from "../lib/modelProfiles";
-import type {ModelProfileOption} from "../lib/types";
+import type {ModelProfileOption, WorkflowParameterSchema} from "../lib/types";
 import {WorkflowManager} from "../components/WorkflowManager";
 import {workflowLabel, workflowName} from "../lib/workflowTargets";
 
-type Template = {workflow_id: string; display_name: string; revision: string; origin: string; enabled: boolean;
+type Template = {parameter_schema?: WorkflowParameterSchema; workflow_id: string; display_name: string; revision: string; origin: string; enabled: boolean;
   experimental: boolean; model_profiles: string[]; workflow_kind: string; notes: string; nodes: string[];
   assets: {key: string; value: string; node_type: string}[]; source?: {id: string; revision: string} | null};
 type Environment = {connection_type?: "ssh" | "local"; id: string; display_name: string; enabled: boolean; host_fingerprint_confirmed: boolean; auth_type: string; has_saved_password: boolean};
@@ -95,6 +95,7 @@ export function WorkflowsPage({enabled, modelProfiles}: {enabled: boolean; model
               <button onClick={() => setView("environment")}>配置执行环境</button>
             </div>
             <h3>模板声明的文件</h3><ul>{selected.assets.map(asset => <li key={asset.key}><strong>{asset.node_type}</strong> · {asset.value}</li>)}</ul>
+            <details><summary>参数声明与绑定</summary>{selected.parameter_schema ? <><p>声明版本 {selected.parameter_schema.version} · 仅允许已声明节点输入</p><ul>{selected.parameter_schema.fields.map(field=><li key={field.key}>{field.label}：{String(field.default)} · {field.readOnlyReason || `${field.binding?.node_id}.${field.binding?.input_name}`}</li>)}</ul>{selected.parameter_schema.seedDerivation && <p>{selected.parameter_schema.seedDerivation}</p>}</> : <p>参数能力待检测；复杂图请使用高级 JSON。</p>}</details>
             <details><summary>依赖节点（{selected.nodes.length} 类）</summary><ul>{selected.nodes.map(node => <li key={node}>{node}</li>)}</ul></details>
             {selected.origin === "official" && <details><summary onClick={() => void action(async () => {setVersions((await apiRequest<{items: typeof versions}>(`/api/v3/workflows/${encodeURIComponent(selected.workflow_id)}/versions`)).items);})}>已保存的内置版本</summary>
               {versions.map(version => <p key={version.revision}>{version.revision.slice(0, 12)} <button disabled={busy} onClick={() => void action(async () => {const result = await apiRequest<{id: string}>(`/api/v3/workflows/${encodeURIComponent(selected.workflow_id)}/restore`, {method: "POST", body: JSON.stringify({revision: version.revision})}); await refresh(result.id); setNotice("已恢复为独立用户副本。");})}>恢复为副本</button></p>)}

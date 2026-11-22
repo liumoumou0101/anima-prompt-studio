@@ -70,6 +70,36 @@ def test_large_seed_digest_keeps_legacy_receipt_identity():
     assert payload_digest(request, "direct") == payload_digest(payload(settings={"seed": seed}), "direct")
 
 
+def test_random_seed_is_saved_at_acceptance_and_reused_after_retry_and_restart(harness, monkeypatch):
+    from anima_prompt_studio_v3.runtime import submissions
+    _, start, _, executed, finished, _ = harness
+    draws = iter([8798399215689017476, 42])
+    monkeypatch.setattr(submissions.secrets, "randbelow", lambda _: next(draws))
+    queue, service = start()
+    request = payload(settings={"seed": "-1"})
+    first = submit(service, request, key="random-first")
+    entry = service.store.lookup("random-first")
+    assert entry["snapshot"]["run"]["request_json"]["resolved_seed"] == 8798399215689017476
+    assert entry["snapshot"]["job"]["generation_params"]["seed"] == 8798399215689017476
+    assert queue.get(first["id"]).request_json["resolved_seed"] == 8798399215689017476
+    assert request.settings.seed == -1
+    assert submit(service, request, key="random-first", prepare=lambda: pytest.fail("accepted retry must reuse the frozen job")) == first
+    second = submit(service, request, key="random-second")
+    assert second["id"] != first["id"]
+    assert service.store.lookup("random-second")["snapshot"]["run"]["request_json"]["resolved_seed"] == 42
+    service.close()
+    queue.shutdown()
+    restored_queue, restored_service = start()
+    assert submit(restored_service, request, key="random-first", prepare=lambda: pytest.fail("restart retry must reuse the frozen job")) == first
+    assert restored_queue.get(first["id"]).request_json["resolved_seed"] == 8798399215689017476
+    restored_service.dispatch_pending()
+    assert finished.wait(2)
+    restored_queue.shutdown()
+    seeds = {run_id: job.generation_params.seed for job, run_id in executed}
+    assert seeds[first["id"]] == 8798399215689017476
+    assert all(seed in {8798399215689017476, 42} for seed in seeds.values())
+
+
 def submit(service, request=None, key="key", prepare=None):
     request = request or payload()
     return service.submit(request, key, "direct", prepare or (lambda: CandidateToPromptJobAdapter().prepare_direct(
@@ -299,6 +329,42 @@ def test_restart_before_delivery_reuses_run_once(harness, persisted):
     assert [run_id for _, run_id in executed] == [response["id"]]
 
 
+@pytest.mark.parametrize('journal_state', ['accepted', 'enqueued'])
+def test_http_journal_replay_rejects_replaced_session_before_plan(harness, tmp_path, journal_state):
+    from dataclasses import replace
+    from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
+    store, start, saved, executed, _, original_plan = harness
+    database = tmp_path / 'runtime.db'
+    old_profile = remote_profile().model_copy(update={'connection_type': 'http',
+        'http_base_url': 'https://old.test', 'http_session_id': 'old-session'})
+    def http_plan(*args):
+        prepared, target, resolution = original_plan(*args)
+        target = replace(target, remote_profile=old_profile)
+        resolution['remote_fingerprint'] = fingerprint(old_profile)
+        return prepared, target, resolution
+    queue, service = start(plan_resolver=http_plan)
+    response = submit(service)
+    saved[response['id']] = queue.get(response['id'])
+    if journal_state == 'enqueued':
+        service.store.mark(response['submission_id'], 'enqueued')
+    service.close()
+    queue.shutdown()
+    repo = SQLiteRepository(database)
+    repo.save_remote_profile(old_profile.model_copy(update={'http_base_url': 'https://new.test', 'http_session_id': 'new-session'}))
+    repo.close()
+    calls = []
+    def forbidden_network_plan(*args):
+        calls.append('network-capability-plan')
+        raise RuntimeError('a capability check would reach the replacement environment')
+    next_queue, next_service = start(plan_resolver=forbidden_network_plan)
+    next_service.runtime_database = database
+    next_service.dispatch_pending()
+    assert calls == []
+    assert not executed
+    assert next_queue.get(response['id']).state == GenerationRunState.FAILED
+    assert next_service.store.lookup('key')['dispatch_state'] == 'failed'
+
+
 @pytest.mark.parametrize("state", ["canceled", "uncertain", "missing_enqueued"])
 def test_restart_never_resubmits_canceled_or_uncertain_run(harness, state):
     _, start, saved, executed, _, _ = harness
@@ -387,6 +453,65 @@ def test_concurrent_retry_allocates_one_run(harness):
     assert len(queue.reserved_ids()) == len(service.store.list()) == 1
 
 
+def test_direct_preparation_deadline_rejects_before_acceptance_and_never_dispatches(harness, monkeypatch):
+    from anima_prompt_studio_v3.core.requirements import WorkbenchError
+    from anima_prompt_studio_v3.runtime import submissions
+    store, start, _, executed, _, base_plan = harness
+    clock = [0.0]
+    monkeypatch.setattr(submissions.time, "monotonic", lambda: clock[0])
+    def late_plan(*args):
+        result = base_plan(*args)
+        clock[0] = 9.0
+        return result
+    queue, service = start(plan_resolver=late_plan)
+    workspace, request = workspace_payload(store)
+    with pytest.raises(WorkbenchError) as error:
+        submit(service, request)
+    assert error.value.code == "direct_preparation_timeout"
+    assert service.store.lookup("key") is None and queue.reserved_ids() == []
+    service.dispatch_pending()
+    assert executed == [] and store.get(workspace["id"]) == workspace
+
+
+def test_direct_dispatch_and_worker_revalidate_cached_plan_without_network_refresh(harness):
+    _, start, _, executed, finished, base_plan = harness
+    refreshes, cached = [], []
+    def first_plan(*args):
+        refreshes.append(1)
+        assert len(refreshes) == 1, "Accepted direct jobs must not refresh capabilities again"
+        return base_plan(*args)
+    def cached_plan(*args):
+        cached.append(1)
+        return base_plan(*args)
+    _, service = start(plan_resolver=first_plan, cached_plan_resolver=cached_plan)
+    submit(service)
+    service.dispatch_pending()
+    assert finished.wait(2)
+    assert len(refreshes) == len(executed) == 1 and len(cached) == 2
+
+
+def test_receipt_lookup_is_authenticated_read_only_and_never_submits(harness, reference_db):
+    from fastapi.testclient import TestClient
+    from anima_prompt_studio_v3.api import create_api_runtime
+    store, start, _, executed, _, _ = harness
+    queue, service = start()
+    runtime = create_api_runtime(reference_db, workspace_db=store.path, generation_queue=queue)
+    runtime.app.state.submission_service.close()
+    accepted = submit(service, key="original")
+    with TestClient(runtime.app, base_url="http://127.0.0.1") as client:
+        client.headers["Origin"] = "http://127.0.0.1"
+        assert client.get("/api/v3/generation-submissions/by-key", params={"key": "original"}).status_code == 401
+        exchange = client.post("/api/v3/session/exchange", json={"bootstrap_token": runtime.bootstrap_token})
+        client.headers["X-Anima-Session"] = exchange.json()["session_token"]
+        for key in ("original", "not-created"):
+            response = client.get("/api/v3/generation-submissions/by-key", params={"key": key})
+            assert response.status_code == 200, response.text
+            assert response.headers["Cache-Control"] == "no-store"
+            assert response.json() == {"found": key == "original", "response": accepted if key == "original" else None}
+        assert len(service.store.list()) == len(queue.reserved_ids()) == 1
+        assert executed == []
+
+
 def test_api_durable_submission_and_global_conflict(harness, reference_db):
     from fastapi.testclient import TestClient
     from anima_prompt_studio_v3.api import create_api_runtime
@@ -446,8 +571,12 @@ def test_lost_remote_ack_is_uncertain_and_has_no_resampling_action(harness, tmp_
         def submit(self, *_):
             submitted.set()
             raise TimeoutError("private connection details")
+    class BudgetTunnel(FakeTunnel):
+        def __init__(self, profile, **options):
+            assert options["max_attempts"] == 1
+            super().__init__(profile)
     queue, service = start(coordinator_factory=lambda path, update: RemoteExecutionCoordinator(
-        organizer=ResultOrganizer(path), tunnel_factory=FakeTunnel,
+        organizer=ResultOrganizer(path), tunnel_factory=BudgetTunnel,
         client_factory=lambda _: LostAckClient(), on_update=update))
     response = submit(service)
     service.dispatch_pending()

@@ -5,6 +5,7 @@ import hashlib
 import json
 import sqlite3
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Lock, Thread
 from uuid import uuid4
@@ -12,12 +13,15 @@ from uuid import uuid4
 from anima_prompt_studio.domain.execution_models import WorkflowProfile, RemoteCredentials, RemoteAuthType
 from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 from anima_prompt_studio_v3.remote.comfy_client import ComfyUIClient
+from anima_prompt_studio_v3.remote.connections import connection_factory, client_for_connection
+from anima_prompt_studio_v3.remote.runtime_identity import identity_state
 from anima_prompt_studio_v3.remote.credential_store import CredentialStore
 from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
 from anima_prompt_studio_v3.remote.local_connection import LocalComfyConnection
 from ..core.workflow_compiler import V3WorkflowCompiler as WorkflowRenderer
 from ..core.model_versions import workflow_models, requires_expanded_anima, expanded_anima_version_error
 from .packaged_workflows import packaged_workflow_profiles, workflow_revision, workflow_catalog_manifest
+from ..core.workflow_parameters import build_workflow_parameter_schema
 
 ASSET_INPUTS = {"unet_name", "ckpt_name", "clip_name", "clip_name1", "clip_name2", "vae_name", "lora_name"}
 TTL = 900
@@ -53,13 +57,17 @@ def graph_errors(profile):
 def fingerprint(profile):
     values = profile.model_dump(mode="json")
     values.pop("display_name", None)
+    if values.get("connection_type") != "http":
+        for key in tuple(values):
+            if key.startswith("http_"):
+                values.pop(key)
     # Preserve existing SSH snapshot hashes across the additive schema change.
     if values.get("connection_type") == "ssh":
         values.pop("connection_type")
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
 
-def catalog(database, *, repository=None):
+def catalog(database, *, repository=None, include_removed=False):
     official = {p.id: p for p in packaged_workflow_profiles()}
     repo = repository if repository is not None else SQLiteRepository(database)
     try:
@@ -82,7 +90,7 @@ def catalog(database, *, repository=None):
                 value = inputs[binding.input_name]
                 if isinstance(value, list):
                     dimension_nodes.add(value[0])
-                inputs[binding.input_name] = default
+                inputs[binding.input_name] = 1024 if "moss_image_sft_int8" in p.compatible_model_profiles else default
             for node_id in dimension_nodes:
                 referenced = any(isinstance(value, list) and value and value[0] == node_id
                                  for node in p.api_workflow.values() for value in node.get("inputs", {}).values())
@@ -91,6 +99,8 @@ def catalog(database, *, repository=None):
             if p.id in user_ids:
                 p = p.model_copy(update={"id": "official:" + p.id})
             result.append((p, "official"))
+        if not include_removed:
+            result = [pair for pair in result if not repo.get_setting("workflow_removed:" + pair[0].id, False)]
         return sorted(result, key=lambda pair: (is_experimental(pair[0]), pair[1] != "official", pair[0].display_name))
     finally:
         if repository is None:
@@ -107,6 +117,7 @@ def is_experimental(profile):
 
 def apply_mapping(profile, mapping):
     result = profile.model_copy(deep=True)
+    result.runtime_assets["binding_template_revision"] = profile.runtime_assets.get("binding_template_revision", workflow_revision(profile))
     for key, value in mapping.items():
         node_id, input_name = key.rsplit(".", 1)
         node = result.api_workflow.get(node_id, {})
@@ -133,6 +144,7 @@ class WorkflowCatalog:
             items = []
             for profile, origin in catalog(self.database, repository=repo):
                 items.append({
+                    "parameter_schema": build_workflow_parameter_schema(profile),
                     "workflow_id": profile.id, "display_name": profile.display_name,
                     "revision": workflow_revision(profile), "origin": origin,
                     "enabled": not repo.get_setting("workflow_disabled:" + profile.id, False),
@@ -175,6 +187,57 @@ class WorkflowCatalog:
             raise KeyError(revision)
         return self.import_profile(payload)
 
+    def remove_many(self, workflow_ids, expected_revisions, *, reason="历史工作流清理"):
+        """Remove exact reviewed choices, retaining versions and frozen history.
+
+        The marker affects the public catalog only. Already accepted runs and
+        explicit historical snapshots never resolve their graph through it.
+        """
+        ids = list(workflow_ids) if not isinstance(workflow_ids, str) else []
+        if (not ids or any(not isinstance(item, str) or not item for item in ids)
+                or len(set(ids)) != len(ids) or set(expected_revisions) != set(ids)):
+            raise ValueError("请提供唯一的工作流 ID 及对应版本。")
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
+            raise ValueError("请提供有效的工作流移除原因。")
+        repo = SQLiteRepository(self.database)
+        try:
+            removed, already_removed = [], []
+            with repo.connection:
+                repo.connection.execute("BEGIN IMMEDIATE")
+                profiles = {profile.id: (profile, origin) for profile, origin
+                            in catalog(self.database, repository=repo, include_removed=True)}
+                selected = []
+                # Validate the entire batch before writing even its first archive.
+                for workflow_id in ids:
+                    if workflow_id not in profiles:
+                        raise KeyError(workflow_id)
+                    profile, origin = profiles[workflow_id]
+                    revision = workflow_revision(profile)
+                    if expected_revisions[workflow_id] != revision:
+                        raise ValueError("工作流版本已变化，请重新检查后再清理：" + workflow_id)
+                    selected.append((profile, origin, revision))
+                removed_at = datetime.now(timezone.utc).isoformat()
+                for profile, origin, revision in selected:
+                    key = "workflow_removed:" + profile.id
+                    existing = repo.get_setting(key, {})
+                    if isinstance(existing, dict) and existing.get("revision") == revision:
+                        already_removed.append(profile.id)
+                        continue
+                    source = repo.get_setting("workflow_source:" + profile.id)
+                    if not isinstance(source, dict) or not source.get("id") or not source.get("revision"):
+                        source = {"id": profile.id, "revision": revision}
+                    metadata = {"workflow_id": profile.id, "revision": revision, "origin": origin,
+                                "source": {"id": source["id"], "revision": source["revision"]},
+                                "reason": reason.strip(), "removed_at": removed_at}
+                    repo.connection.execute("INSERT OR IGNORE INTO settings(key,value_json) VALUES(?,?)",
+                        ("workflow_version:" + profile.id + ":" + revision, profile.model_dump_json()))
+                    repo.connection.execute("INSERT INTO settings(key,value_json) VALUES(?,?) "
+                        "ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json", (key, json.dumps(metadata, ensure_ascii=False)))
+                    removed.append(profile.id)
+            return {"removed": removed, "already_removed": already_removed}
+        finally:
+            repo.close()
+
     def _read(self, key, default=None):
         repo = SQLiteRepository(self.database)
         try:
@@ -203,38 +266,66 @@ class WorkflowCatalog:
             self._write(key, {**snapshot, "checked_at": 0})
 
     def inspect(self, remote_id, credentials=None, cancel=None):
+        from ..remote.preparation_budget import current_preparation_budget
+        budget = current_preparation_budget()
         profile = self.remote(remote_id)
         if not profile.enabled or not profile.connection_ready:
             raise ValueError("请启用连接并确认 SSH 主机指纹。")
         credentials = credentials or RemoteCredentials()
         if profile.connection_type == "ssh" and profile.auth_type == RemoteAuthType.PASSWORD and not credentials.password:
             credentials = credentials.model_copy(update={"password": CredentialStore().read_password(profile.id)})
-        tunnel = (LocalComfyConnection if profile.connection_type == "local" else SshTunnel)(profile, connect_timeout=10)
+        options = {"connect_timeout": 10}
+        if budget:
+            options.update(connect_timeout=min(5.0, budget.check()), deadline=budget.deadline, max_attempts=1)
+        tunnel = connection_factory(profile, ssh_factory=SshTunnel, **options)
         stamp = fingerprint(profile)
+        epoch = self._read('environment_epoch:' + remote_id, 0)
         try:
             tunnel.open(credentials)
-            client = ComfyUIClient(tunnel.base_url, timeout=(10, 30))
+            client = client_for_connection(tunnel, ComfyUIClient, identity_database=self.database, timeout=(10, 30))
             environment = client.validate_environment()
             info = client.object_info(refresh=True)
+            if budget:
+                budget.check()
             if cancel and cancel.is_set():
                 return
             if fingerprint(self.remote(remote_id)) != stamp:
                 raise ValueError("连接配置已更改，请重新检测。")
             # Persist capability data, not SSH credentials or raw system arguments.
-            self._write("workflow_capabilities:" + remote_id, {
-                "fingerprint": stamp, "checked_at": time.time(), "object_info": info,
+            if not self._save_inspection(profile, epoch, {
+                "fingerprint": stamp, "environment_epoch": epoch, "checked_at": time.time(), "object_info": info,
                 "devices": environment.devices, "error": None,
                 "comfyui_version": environment.system_stats.get("system", {}).get("comfyui_version"),
-            })
+            }):
+                raise ValueError("连接或运行时已变化，请重新检测。")
+            if profile.connection_type == 'http':
+                from .cloud_model_catalog import CloudModelCatalog
+                CloudModelCatalog(self.database).record_inspection(profile, epoch, client, info)
         except Exception:
             if not cancel or not cancel.is_set():
-                self._write("workflow_capabilities:" + remote_id, {
+                self._save_inspection(profile, epoch, {
                     **self._read("workflow_capabilities:" + remote_id, {}),
                     "fingerprint": stamp, "checked_at": time.time(), "error": "连接或能力检测失败，请检查连接后重试。",
                 })
             raise
         finally:
             tunnel.close()
+
+    def _save_inspection(self, profile, epoch, value):
+        repo = SQLiteRepository(self.database)
+        try:
+            with repo.connection:
+                repo.connection.execute('BEGIN IMMEDIATE')
+                current = repo.get_remote_profile(profile.id)
+                if (fingerprint(current) != fingerprint(profile)
+                        or repo.get_setting('environment_epoch:' + profile.id, 0) != epoch
+                        or identity_state(repo, current).get('conflicted')):
+                    return False
+                repo.connection.execute('INSERT INTO settings(key,value_json) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json',
+                                        ('workflow_capabilities:' + profile.id, json.dumps(value)))
+                return True
+        finally:
+            repo.close()
 
     def report(self, remote_id):
         repository = SQLiteRepository(self.database)
@@ -253,6 +344,8 @@ class WorkflowCatalog:
                 state = "stale"
         if not remote.enabled or not remote.connection_ready:
             state = "unchecked"
+        if identity_state(repository, remote).get('conflicted'):
+            state = "connection_failed"
         info = snapshot.get("object_info", {})
         items = []
         for profile, origin in catalog(self.database, repository=repository):
@@ -317,8 +410,8 @@ class WorkflowCatalog:
         return {"remote_profile_id": remote_id, "checked_at": snapshot.get("checked_at"),
                 "devices": snapshot.get("devices", []), "items": items, "generation_verified": False}
 
-    def save_mapping(self, remote_id, workflow_id, revision, mapping):
-        report = self.report(remote_id)
+    def save_mapping(self, remote_id, workflow_id, revision, mapping, *, repository=None):
+        report = self._report(remote_id, repository) if repository is not None else self.report(remote_id)
         item = next((i for i in report["items"] if i["workflow_id"] == workflow_id), None)
         if not item or item["revision"] != revision:
             raise ValueError("模板已改变，请刷新后重新配置。")
@@ -327,9 +420,14 @@ class WorkflowCatalog:
         allowed = {a["key"]: a["choices"] for a in item["assets"]}
         if any(k not in allowed or v not in allowed[k] for k, v in mapping.items()):
             raise ValueError("所选资产不在该服务器的可选文件中。")
-        self._write("workflow_mapping:" + remote_id + ":" + workflow_id, {
-            "revision": revision, "fingerprint": fingerprint(self.remote(remote_id)), "mapping": mapping,
-        })
+        value = {
+            "revision": revision, "fingerprint": fingerprint(repository.get_remote_profile(remote_id) if repository is not None else self.remote(remote_id)), "mapping": mapping,
+        }
+        if repository is not None:
+            repository.connection.execute('INSERT INTO settings(key,value_json) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json',
+                                          ('workflow_mapping:' + remote_id + ':' + workflow_id, json.dumps(value)))
+            return self._report(remote_id, repository)
+        self._write('workflow_mapping:' + remote_id + ':' + workflow_id, value)
         return self.report(remote_id)
 
     def resolve_for_submission(self, remote_id, workflow_id, credentials):
@@ -394,7 +492,8 @@ class WorkflowCatalog:
         source = {"id": source["id"], "revision": source["revision"]} if source else {"id": profile.id, "revision": workflow_revision(profile)}
         result = profile.model_dump(mode="json")
         result["source_path"] = ""
-        return {"schema": "anima-user-workflow/1", "profile": result, "source": source}
+        return {"schema": "anima-user-workflow/1", "profile": result, "source": source,
+                "parameter_schema": build_workflow_parameter_schema(profile)}
 
     def import_profile(self, payload):
         prepared = self.preview_import(payload)
@@ -422,7 +521,7 @@ class WorkflowCatalog:
                 "source": {"id": profile.id, "revision": workflow_revision(profile)}}
 
     def read_remote_file(self, remote_id, path, credentials):
-        if self.remote(remote_id).connection_type == "local":
+        if self.remote(remote_id).connection_type != "ssh":
             raise ValueError("本地环境请使用文件导入或粘贴 JSON，无需云端文件读取。")
         if not path.startswith("/") or not path.lower().endswith(".json") or len(path) > 2048:
             raise ValueError("请输入云端 JSON 文件的绝对路径。")

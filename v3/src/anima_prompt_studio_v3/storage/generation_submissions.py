@@ -59,52 +59,61 @@ class SubmissionStore:
                               (workspace_id,)).fetchall()
         return [row["run_id"] for row in rows]
 
-    def accept(self, *, submission_id, key, payload_hash, run_id, snapshot, response,
-               workspace_id=None, revision=None, token=None, prompt=None, use_current_prompt=False):
+    def accept(self, **kwargs):
         with self.workspaces._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            old = db.execute("SELECT * FROM generation_submissions WHERE idempotency_key=?", (key,)).fetchone()
-            if old:
-                if old["payload_hash"] != payload_hash:
-                    raise IdempotencyConflict("同一幂等键不能用于不同请求。")
-                return self.record(old)
-            if workspace_id:
-                row = db.execute("SELECT * FROM workspaces WHERE id=? AND deleted_at IS NULL", (workspace_id,)).fetchone()
-                if row is None:
-                    raise WorkspaceNotFoundError(workspace_id)
-                if row["revision"] != revision:
-                    raise WorkspaceRevisionConflictError(row["revision"])
-                draft = json.loads(row["draft_json"])
-                compiled = draft.get("compiled")
-                fresh = compile_state(draft) == "fresh"
-                if not compiled or compiled["compiled_token"] != token or (not use_current_prompt and not fresh):
-                    raise WorkbenchError("stale_compiled_prompt", "要求或编译版本已变化，请重新编译。")
-                accepted_revision = revision
-                # Explicit generation uses reviewed English even when semantic
-                # requirements/model changed. Rebind it only inside this CAS,
-                # after resource resolution; do not call the language model.
-                if not fresh or any(compiled[name] != value for name, value in dump(prompt).items()):
-                    draft["compiled"] = compile_prompt(draft, prompt, source="user")
-                    accepted_revision += 1
-                    self.workspaces._save_revision(db, row, title=row["title"],
-                        draft_json=json.dumps(draft, ensure_ascii=False, allow_nan=False),
-                        candidate_snapshot_json=row["candidate_snapshot_json"])
-                # Derive the immutable source from the row actually compared under lock.
-                snapshot.update(requirements=draft["requirements"], reference_pin=draft.get("reference_pin"),
-                                mode=draft["mode"], compiled=draft["compiled"],
-                                workspace_revision=accepted_revision, workspace_id=workspace_id)
-                snapshot["provenance"].update(requirements=draft["requirements"],
-                    reference_pin=draft.get("reference_pin"), mode=draft["mode"], compiled=draft["compiled"],
-                    workspace_revision=accepted_revision, workspace_id=workspace_id)
-                response.update(workspace_id=workspace_id, workspace_revision=accepted_revision,
-                                compiled_token=draft["compiled"]["compiled_token"])
-            now = _utc_now()
-            db.execute("INSERT INTO generation_submissions VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                       (submission_id, key, payload_hash, run_id, workspace_id,
-                        json.dumps(snapshot, ensure_ascii=False, allow_nan=False),
-                        json.dumps(response, ensure_ascii=False, allow_nan=False), "accepted", None, now, now))
-            result = db.execute("SELECT * FROM generation_submissions WHERE submission_id=?", (submission_id,)).fetchone()
-            return self.record(result)
+            return self.accept_in_transaction(db, **kwargs)
+
+    def accept_in_transaction(self, db, *, submission_id, key, payload_hash, run_id, snapshot, response,
+               workspace_id=None, revision=None, token=None, prompt=None, use_current_prompt=False,
+               acceptance_hook=None):
+        old = db.execute("SELECT * FROM generation_submissions WHERE idempotency_key=?", (key,)).fetchone()
+        if old:
+            if old["payload_hash"] != payload_hash:
+                raise IdempotencyConflict("同一幂等键不能用于不同请求。")
+            return self.record(old)
+        if acceptance_hook:
+            acceptance_hook(db)
+        if workspace_id:
+            row = db.execute("SELECT * FROM workspaces WHERE id=? AND deleted_at IS NULL", (workspace_id,)).fetchone()
+            if row is None:
+                raise WorkspaceNotFoundError(workspace_id)
+            if row["revision"] != revision:
+                raise WorkspaceRevisionConflictError(row["revision"])
+            draft = json.loads(row["draft_json"])
+            compiled = draft.get("compiled")
+            fresh = compile_state(draft) == "fresh"
+            if not compiled or compiled["compiled_token"] != token or (not use_current_prompt and not fresh):
+                raise WorkbenchError("stale_compiled_prompt", "要求或编译版本已变化，请重新编译。")
+            accepted_revision = revision
+            # Explicit generation uses reviewed English even when semantic
+            # requirements/model changed. Rebind it only inside this CAS,
+            # after resource resolution; do not call the language model.
+            if not fresh or any(compiled[name] != value for name, value in dump(prompt).items()):
+                draft["compiled"] = compile_prompt(draft, prompt, source="user")
+                accepted_revision += 1
+                self.workspaces._save_revision(db, row, title=row["title"],
+                    draft_json=json.dumps(draft, ensure_ascii=False, allow_nan=False),
+                    candidate_snapshot_json=row["candidate_snapshot_json"])
+            # Derive the immutable source from the row actually compared under lock.
+            snapshot.update(requirements=draft["requirements"], reference_pin=draft.get("reference_pin"),
+                            mode=draft["mode"], compiled=draft["compiled"],
+                            workspace_revision=accepted_revision, workspace_id=workspace_id)
+            snapshot["provenance"].update(requirements=draft["requirements"],
+                reference_pin=draft.get("reference_pin"), mode=draft["mode"], compiled=draft["compiled"],
+                workspace_revision=accepted_revision, workspace_id=workspace_id)
+            response.update(workspace_id=workspace_id, workspace_revision=accepted_revision,
+                            compiled_token=draft["compiled"]["compiled_token"])
+        now = _utc_now()
+        db.execute("INSERT INTO generation_submissions VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                   (submission_id, key, payload_hash, run_id, workspace_id,
+                    json.dumps(snapshot, ensure_ascii=False, allow_nan=False),
+                    json.dumps(response, ensure_ascii=False, allow_nan=False), "accepted", None, now, now))
+        result = db.execute("SELECT * FROM generation_submissions WHERE submission_id=?", (submission_id,)).fetchone()
+        entry = self.record(result)
+        if acceptance_hook:
+            acceptance_hook(db, entry)
+        return entry
 
     def mark(self, submission_id, state, error_code=None):
         with self.workspaces._connect() as db:

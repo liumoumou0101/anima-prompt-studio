@@ -131,7 +131,7 @@ async def test_connection() -> dict[str, object]:
         result = await asyncio.wait_for(LLMService.complete(
             messages=[{"role": "system", "content": (
                 'Verify workbench JSON support. Return only this JSON shape, not plain OK: '
-                '{"touched_layers":[],"layer_updates":{},"positive":"1girl, blue coat","negative":"","warnings":[]}. '
+                '{"layer_updates":{},"positive":"1girl, blue coat","negative":"","warnings":[]}. '
                 'positive and negative must be strings; no extra fields or explanation.')},
                       {"role": "user", "content": "Compile a girl wearing a blue coat using that JSON shape. Do not reply just OK."}],
             task="rewrite", timeout_s=30,
@@ -145,7 +145,7 @@ async def test_connection() -> dict[str, object]:
         raise RuntimeError(failure_message)
     try:
         output = parse_turn_output(text)
-        compatible = not output.touched_layers and not output.layer_updates and not output.conflicts
+        compatible = not output.layer_updates and not output.conflicts
     except (ValueError, TypeError):
         compatible = False
     message = ("连接可用，工作台结构化输出测试通过；实际改写仍需检查，不代表生图效果已验证。" if compatible else

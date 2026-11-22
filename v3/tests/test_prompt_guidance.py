@@ -114,6 +114,31 @@ def test_mode_selection_sends_distinct_task_without_fabricating_user_delta(tmp_p
     assert second["draft"]["conversation_events"][-1]["delta"] == ""
 
 
+def test_faithful_request_requires_complete_english_translation_without_chinese_echo(tmp_path, monkeypatch):
+    store, record = workspace(tmp_path)
+    calls = capture_transport(monkeypatch)
+    rewrite(store, record)
+    system = calls[0]["messages"][0]["content"]
+    context = json.loads(calls[0]["messages"][1]["content"])
+
+    assert "positive and negative must be entirely in English" in system
+    assert "Do not append the Chinese source text or parenthesized translations" in system
+    assert "Translate every explicit fact" in system
+    assert "counts, attribute ownership, relationships and local exclusions" in system
+    assert "Keep compatible reviewed facts" in system
+    assert "layer_updates and warnings may remain in Chinese" in system
+    assert "完整翻译" in context["rewrite_goal"]
+
+
+def test_guidance_v3_marks_previous_llm_output_stale_without_changing_user_prompt(tmp_path):
+    store, record = workspace(tmp_path)
+    draft = deepcopy(record["draft"])
+    draft["compiled"] = compile_prompt(draft, PromptEdit(positive="starry sky", negative=""), source="llm")
+    assert draft["compiled"]["guidance_version"] == "anima-scene-guidance/3"
+    draft["compiled"]["guidance_version"] = "anima-scene-guidance/2"
+    assert compile_state(draft) == "stale"
+
+
 def test_expansion_can_save_lighting_prose_and_review_notes_without_inventing_requirements(tmp_path, monkeypatch):
     store, record = workspace(tmp_path)
     expanded = "1girl, black hair, school uniform, full body. Soft moonlight reaches her face and collar beneath the dark starry sky."

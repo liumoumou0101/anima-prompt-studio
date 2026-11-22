@@ -36,7 +36,10 @@ def profile_from_api(document):
         raise ValueError("不能唯一识别模型加载器，请提供明确的 bindings。")
     loader = unet or checkpoint
     bind("checkpoint", loader, "unet_name" if loader[1]["class_type"] == "UNETLoader" else "ckpt_name")
-    latent = single("EmptyLatentImage")
+    latent_link = sampler[1]["inputs"].get("latent_image")
+    if not isinstance(latent_link, list) or len(latent_link) != 2 or latent_link[0] not in graph or graph[latent_link[0]].get("class_type") not in {"EmptyLatentImage", "EmptyFlux2LatentImage"}:
+        raise ValueError("不能识别采样器潜空间输入，请提供明确的 bindings。")
+    latent = (latent_link[0], graph[latent_link[0]])
     for field in ("width", "height", "batch_size"):
         bind(field, latent, field)
     bind("filename_prefix", single("SaveImage"), "filename_prefix")
@@ -47,7 +50,8 @@ def profile_from_api(document):
     bind("model_shift", single("ModelSamplingAuraFlow", False), "shift")
     assets = {key: graph[b.node_id]["inputs"][b.input_name] for key, b in bindings.items()
               if key in {"checkpoint", "text_encoder", "text_encoder_type", "vae", "model_shift"}}
-    loras = [LoRASlotBinding(node_id=str(k)) for k, n in graph.items() if isinstance(n, dict) and n.get("class_type") == "LoraLoader"]
+    loras = [LoRASlotBinding(node_id=str(k), clip_strength_input="strength_clip" if n["class_type"] == "LoraLoader" else None)
+             for k, n in graph.items() if n["class_type"] in ("LoraLoader", "LoraLoaderModelOnly")]
     return WorkflowProfile(id="import-preview", display_name="导入的 API 工作流", api_workflow=graph,
                            bindings=bindings, runtime_assets=assets, lora_slots=loras, workflow_kind="txt2img_basic",
                            compatible_model_profiles=infer_workflow_model_profiles(graph, "user-import"))

@@ -30,9 +30,67 @@ from anima_prompt_studio.services.gallery_upscale import (
     GalleryUpscaleManager,
     GalleryUpscaleRenderer,
 )
-from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteCredentials
+from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteCredentials, WorkflowProfile
 from anima_prompt_studio_v3.remote.credential_store import CredentialStore, CredentialStoreError
-from .workflow_catalog import catalog
+from anima_prompt_studio_v3.remote.connections import http_connection_snapshot
+
+
+def _gallery_upscale_workflow(repository: SQLiteRepository) -> WorkflowProfile:
+    # Preserve a configured upscaler filename, not the old template's generation graph.
+    candidates = sorted(repository.list_workflow_profiles(), key=lambda p: not (
+        p.id.startswith("20_") or p.display_name.startswith("20_") or "Tile_Upscale" in p.display_name))
+    preferred_model = ""
+    for profile in candidates:
+        if (GalleryUpscaleRenderer.supports(profile)
+                and not repository.get_setting("workflow_removed:" + profile.id, False)):
+            loader = next(node for node in profile.api_workflow.values()
+                          if isinstance(node, dict) and str(node.get("class_type")).casefold() == "upscalemodelloader")
+            inputs = loader.get("inputs")
+            name = inputs.get("model_name") if isinstance(inputs, dict) else None
+            if isinstance(name, str) and name.strip():
+                preferred_model = name
+                break
+    return WorkflowProfile(id="v3_gallery_upscale_1_5x", display_name="画廊 1.5× 超分放大", bindings={},
+        api_workflow={
+            "1": {"class_type": "LoadImage", "inputs": {}},
+            "2": {"class_type": "UpscaleModelLoader", "inputs": {"model_name": preferred_model}},
+            "3": {"class_type": "ImageUpscaleWithModel", "inputs": {"image": ["1", 0], "upscale_model": ["2", 0]}},
+            "4": {"class_type": "SaveImage", "inputs": {"images": ["3", 0]}},
+        })
+
+
+class V3GalleryUpscaleCoordinator(GalleryUpscaleCoordinator):
+    """Keep V2's gallery processing while using V3's frozen HTTP task metadata."""
+    def execute(self, **options):
+        self._profile = options['remote_profile'].model_copy(deep=True)
+        return super().execute(**options)
+
+    def resolve_workflow(self, profile, client):
+        info = client.object_info()
+        required = {"LoadImage", "UpscaleModelLoader", "ImageUpscaleWithModel", "ImageScale", "SaveImage"}
+        missing = sorted(required.difference(info))
+        if missing:
+            raise GalleryUpscaleError("当前 ComfyUI 缺少画廊放大节点：" + "、".join(missing))
+        spec = info["UpscaleModelLoader"].get("input", {}).get("required", {}).get("model_name", [])
+        choices = spec[0] if isinstance(spec, (list, tuple)) and spec else []
+        if choices == "COMBO" and len(spec) > 1 and isinstance(spec[1], dict):
+            choices = spec[1].get("options")
+        if not isinstance(choices, (list, tuple)):
+            choices = []
+        models = sorted((name for name in choices if isinstance(name, str) and name.strip()),
+                        key=lambda name: (name.casefold(), name))
+        if not models:
+            raise GalleryUpscaleError("当前 ComfyUI 未提供可用的超分模型。请把模型放入 models/upscale_models，刷新服务器后重试。")
+        resolved = profile.model_copy(deep=True)
+        loader = next(node for node in resolved.api_workflow.values() if node.get("class_type") == "UpscaleModelLoader")
+        if loader["inputs"].get("model_name") not in models:
+            loader["inputs"]["model_name"] = models[0]
+        return resolved
+
+    def _notify(self, run):
+        if self._profile.connection_type == 'http':
+            run.request_json.setdefault('http_connection', http_connection_snapshot(self._profile))
+        return super()._notify(run)
 
 
 class V2GalleryReadService:
@@ -692,35 +750,48 @@ def build_v2_gallery_service(
             "generation_output_root",
             str(Path.home() / "Pictures" / "AnimaPromptStudio"),
         ))
-        profile_id = str(repository.get_setting("last_remote_profile_id", "") or "")
-        profiles = repository.list_remote_profiles(enabled_only=True)
-        remote_profile = next((item for item in profiles if item.id == profile_id), profiles[0] if profiles else None)
-        workflows = [p for p, _ in catalog(database)]
-        upscale_workflow = next((
-            item for item in workflows
-            if GalleryUpscaleRenderer.supports(item)
-            and (item.id.startswith("20_") or item.display_name.startswith("20_") or "Tile_Upscale" in item.display_name)
-        ), None)
+        upscale_workflow = _gallery_upscale_workflow(repository)
     finally:
         repository.close()
-    from anima_prompt_studio_v3.remote.local_connection import LocalComfyConnection
-    from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
+    from anima_prompt_studio_v3.remote.connections import connection_factory, client_for_connection
+    store = credential_store or CredentialStore()
 
     def coordinator_factory(**options):
-        return GalleryUpscaleCoordinator(
-            tunnel_factory=lambda profile: (LocalComfyConnection if profile.connection_type == "local" else SshTunnel)(profile),
+        connections = []
+        def open_connection(profile):
+            connection = connection_factory(profile)
+            connections[:] = [connection]
+            return connection
+        return V3GalleryUpscaleCoordinator(
+            tunnel_factory=open_connection,
+            client_factory=lambda _url: client_for_connection(connections[0], identity_database=database),
             **options,
         )
 
-    manager = GalleryUpscaleManager(database, output_root, allow_legacy_regeneration=False,
-                                   coordinator_factory=coordinator_factory)
-    credentials = RemoteCredentials()
-    if remote_profile is not None and remote_profile.connection_type == "ssh" and remote_profile.auth_type == RemoteAuthType.PASSWORD:
+    def resolve_connection():
+        current_repository = SQLiteRepository(database)
         try:
-            password = (credential_store or CredentialStore()).read_password(remote_profile.id)
-            credentials = RemoteCredentials(password=password)
+            selected_id = str(current_repository.get_setting("last_remote_profile_id", "") or "")
+            enabled = current_repository.list_remote_profiles(enabled_only=True)
+            current = next((item for item in enabled if item.id == selected_id), enabled[0] if enabled else None)
+            if current is None:
+                return None, RemoteCredentials()
+            if current.connection_type == "http":
+                key = store.read_comfy_api_key(current.http_session_id)
+                if current.http_auth_required and not key:
+                    return None, RemoteCredentials()
+                return current, RemoteCredentials(comfy_api_key=key)
+            if current.connection_type == "ssh" and current.auth_type == RemoteAuthType.PASSWORD:
+                return current, RemoteCredentials(password=store.read_password(current.id))
+            return current, RemoteCredentials()
         except CredentialStoreError:
-            remote_profile = None
+            return None, RemoteCredentials()
+        finally:
+            current_repository.close()
+
+    remote_profile, credentials = resolve_connection()
+    manager = GalleryUpscaleManager(database, output_root, allow_legacy_regeneration=False,
+                                   coordinator_factory=coordinator_factory, connection_resolver=resolve_connection)
     manager.configure(remote_profile, upscale_workflow, credentials)
     return V2GalleryReadService(database, output_root, process_manager=manager)
 

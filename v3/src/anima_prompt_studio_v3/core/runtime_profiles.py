@@ -25,6 +25,7 @@ class V3RuntimeProfiles:
     def __init__(self) -> None:
         self.profiles = {
             p.id: p for p in (
+                RuntimeProfile("moss_image_sft_int8", 25, 2.5, "er_sde", "simple", 1024, 1024),
                 RuntimeProfile("anima_base_v1", 35, 4.5, "er_sde", "normal"),
                 RuntimeProfile("anima_aesthetic_v1", 35, 4.5, "euler", "normal"),
                 RuntimeProfile("anima_aesthetic_v1_0", 35, 4.5, "euler", "normal"),
@@ -35,6 +36,7 @@ class V3RuntimeProfiles:
                 RuntimeProfile("anima_2_9b_preview_v1", 30, 4.0, "euler", "sgm_uniform"),
                 RuntimeProfile("animayume_v1_5_base", 30, 5.5, "euler_ancestral", "normal"),
                 RuntimeProfile("miaomiao_harem_anima_v1_6", 30, 4.5, "euler", "normal"),
+                RuntimeProfile("wai_anima_v1_0", 25, 4.5, "euler_ancestral", "normal"),
             )
         }
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .moss import MossPromptAssistRequest, assist_prompt
+
 from dataclasses import dataclass
 from ipaddress import ip_address
 import json
@@ -120,6 +122,7 @@ from .models import (
     WorkspaceUpdateRequest,
 )
 from .security import SessionInvalidError, SessionManager
+from .reference_examples import source_generation_settings, workspace_run_source as _workspace_run_source
 from .workspace_store import (
     WorkspaceCreateConflictError, WorkspaceIdempotencyKeyError,
     WorkspaceNotFoundError, WorkspaceProposalNotFoundError, WorkspaceRevisionConflictError,
@@ -256,7 +259,8 @@ def create_api_runtime(
     app.state.submission_service = None
     if app.state.workspace_store is not None and hasattr(generation_queue, "accept_durable"):
         app.state.submission_service = SubmissionService(app.state.workspace_store, generation_queue,
-                                                        lambda run: _generation_run_response(run, generation_queue))
+                                                        lambda run: _generation_run_response(run, generation_queue),
+                                                        runtime_database=app.state.v2_database)
         app.router.add_event_handler("shutdown", app.state.submission_service.close)
     app.state.intent_parser = intent_parser
     app.state.gallery_service = gallery_service
@@ -286,7 +290,11 @@ def create_api_runtime(
             return _error_response(request, 400, "invalid_request", "Host 不在本地服务允许列表中。")
         if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path.startswith(API_PREFIX):
             content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-            is_reference_upload = (request.method == "POST" and request.url.path == f"{API_PREFIX}/reference-examples")
+            artist_sample_path = request.url.path.removeprefix(f"{API_PREFIX}/artist-presets/").split("/")
+            is_artist_sample_upload = (request.method == "POST"
+                and request.url.path.startswith(f"{API_PREFIX}/artist-presets/")
+                and len(artist_sample_path) == 2 and artist_sample_path[1] == "samples")
+            is_reference_upload = (request.method == "POST" and request.url.path == f"{API_PREFIX}/reference-examples") or is_artist_sample_upload
             expected_content_type = "multipart/form-data" if is_reference_upload else "application/json"
             if content_type != expected_content_type:
                 return _error_response(request, 415, "invalid_request", "写请求必须使用 application/json。")
@@ -299,6 +307,8 @@ def create_api_runtime(
                     is_personal_import = request.url.path in {
                         f"{API_PREFIX}/personal-tags/imports/preview",
                         f"{API_PREFIX}/personal-tags/imports/commit",
+                        f"{API_PREFIX}/artist-presets/import-preview",
+                        f"{API_PREFIX}/artist-presets/import",
                     }
                     body_limit = (21 * 1024 * 1024 if is_reference_upload else
                                   50 * 1024 * 1024 if is_personal_import else MAX_JSON_BODY)
@@ -439,6 +449,8 @@ def create_api_runtime(
         register_personal_tag_routes(app, workspace_db, require_session)
         from .reference_examples import register_reference_routes
         register_reference_routes(app, workspace_db, require_session)
+        from .artist_presets import register_artist_preset_routes
+        register_artist_preset_routes(app, workspace_db, require_session)
         from .identities import register_identity_routes
         register_identity_routes(app, reference_db, workspace_db, require_session)
 
@@ -447,6 +459,14 @@ def create_api_runtime(
         if store is None:
             raise ApiError(503, "workspace_store_missing", "工作台状态库尚未配置。", retryable=True)
         return store
+
+    if app.state.workspace_store is not None:
+        from .editor_context import make_editor_router
+        app.include_router(make_editor_router(app.state.workspace_store), dependencies=[Depends(require_session)])
+    if app.state.workspace_store is not None and app.state.submission_service is not None and app.state.v2_database is not None:
+        from .generation_intents import install_generation_intents
+        install_generation_intents(app, app.state.workspace_store, app.state.submission_service,
+                                   generation_bridge, app.state.v2_database, require_session)
 
     from .scene_design import register_scene_design_routes
     register_scene_design_routes(app, require_workspace_store, require_session)
@@ -466,6 +486,8 @@ def create_api_runtime(
     ) -> dict[str, object]:
         try:
             profile = profiles.get(model_profile)
+            if profile.family != "anima":
+                raise ApiError(422, "unsupported_model_family", "MOSS 不支持 ANIMA 标签候选，请使用 MOSS 工作台。")
         except KeyError as exc:
             raise ApiError(
                 422,
@@ -614,6 +636,7 @@ def create_api_runtime(
                     "id": profile.id,
                     "display_name": profile.display_name,
                     "variant": profile.variant.value,
+                    "family": profile.family,
                 }
                 for profile in profiles.all()
             ],
@@ -950,6 +973,13 @@ def create_api_runtime(
             raise ApiError(422, "invalid_workbench_intent", str(exc)) from exc
         return candidate_response(intent, payload.model_profile, database)
 
+    @app.post(f"{API_PREFIX}/moss/prompt-assist", dependencies=[Depends(require_session)])
+    async def moss_prompt_assist(payload: MossPromptAssistRequest) -> dict[str, object]:
+        try:
+            return await assist_prompt(payload)
+        except RuntimeError as exc:
+            raise ApiError(502, "moss_assistance_failed", str(exc), retryable=True) from None
+
     @app.post(f"{API_PREFIX}/workbench/prompt", dependencies=[Depends(require_session)])
     async def generate_workbench_prompt(payload: PromptGenerateRequest) -> dict[str, object]:
         """Generate an explicit, reviewable positive/negative pair; never enqueue here."""
@@ -1124,6 +1154,13 @@ def create_api_runtime(
                 translator=translator,
             )
         return inspection.model_dump(mode="json")
+
+    @app.get(f"{API_PREFIX}/generation-submissions/by-key", dependencies=[Depends(require_session)])
+    def get_generation_submission_receipt(response: FastAPIResponse, key: str = Query(min_length=1, max_length=256)) -> dict[str, object]:
+        response.headers["Cache-Control"] = "no-store"
+        service = app.state.submission_service
+        entry = service.store.lookup(key) if service is not None else None
+        return {"found": entry is not None, "response": entry["response"] if entry else None}
 
     @app.post(
         f"{API_PREFIX}/direct-prompt/runs",
@@ -1497,7 +1534,12 @@ def create_api_runtime(
         queue = app.state.generation_queue
         if queue is None:
             raise ApiError(503, "remote_not_configured", "远程生成队列尚未配置。")
-        return {"items": [_generation_run_response(run, queue) for run in queue.list(limit=limit)]}
+        runs = queue.list(limit=limit)
+        submissions = app.state.submission_service
+        entries = submissions.store.for_runs([run.id for run in runs]) if submissions is not None else []
+        snapshots = {entry["run_id"]: entry["snapshot"] for entry in entries}
+        return {"items": [{**_generation_run_response(run, queue),
+                           "source": _workspace_run_source(snapshots.get(run.id))} for run in runs]}
 
     @app.get(f"{API_PREFIX}/generation-targets", dependencies=[Depends(require_session)])
     def list_generation_targets() -> dict[str, object]:
@@ -1560,6 +1602,11 @@ def create_api_runtime(
         finally:
             repository.close()
 
+    from .temporary_connections import register_temporary_connection_routes
+    register_temporary_connection_routes(app, require_session, require_v2_settings_database, _remote_profile_settings_response)
+    from .cloud_model_catalog import register_cloud_model_catalog_routes
+    register_cloud_model_catalog_routes(app, require_session, require_v2_settings_database)
+
     @app.get(f"{API_PREFIX}/settings/remote-profiles", dependencies=[Depends(require_session)])
     def list_remote_profiles_for_settings(
         database: Path = Depends(require_v2_settings_database),
@@ -1572,7 +1619,8 @@ def create_api_runtime(
         try:
             credentials = CredentialStore()
             profiles = repository.list_remote_profiles()
-            workflows = repository.list_workflow_profiles()
+            from ..runtime.workflow_catalog import catalog
+            workflows = [profile for profile, _ in catalog(database, repository=repository)]
             return {
                 "items": [_remote_profile_settings_response(item, credentials) for item in profiles],
                 "workflows": [
@@ -1646,11 +1694,13 @@ def create_api_runtime(
         from anima_prompt_studio_v3.storage.runtime_repository import RemoteProfileInUseError, SQLiteRepository
 
         def delete_from_store() -> None:
+            from anima_prompt_studio_v3.remote.temporary_connections import delete_http_credentials
             repository = SQLiteRepository(database)
             try:
                 repository.delete_remote_profile(
                     profile_id,
-                    before_delete=lambda _profile: CredentialStore().delete_password(profile_id),
+                    before_delete=lambda _profile: (delete_http_credentials(repository, CredentialStore(), _profile)
+                        if _profile.connection_type == "http" else CredentialStore().delete_password(profile_id)),
                 )
             finally:
                 repository.close()
@@ -1705,7 +1755,7 @@ def create_api_runtime(
         database: Path = Depends(require_v2_settings_database),
     ) -> dict[str, object]:
         profile = _get_v2_remote_profile(database, profile_id)
-        if profile.connection_type == "local":
+        if profile.connection_type != "ssh":
             raise ApiError(409, "local_connection_no_ssh", "本地 ComfyUI 不使用 SSH 指纹。")
         try:
             from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
@@ -1724,7 +1774,7 @@ def create_api_runtime(
         database: Path = Depends(require_v2_settings_database),
     ) -> dict[str, object]:
         profile = _get_v2_remote_profile(database, profile_id)
-        if profile.connection_type == "local":
+        if profile.connection_type != "ssh":
             raise ApiError(409, "local_connection_no_ssh", "本地 ComfyUI 不使用 SSH 指纹。")
         try:
             from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
@@ -1759,7 +1809,7 @@ def create_api_runtime(
         """Validate SSH authentication, the tunnel and the remote ComfyUI API."""
         from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteCredentials
         from anima_prompt_studio_v3.remote.comfy_client import ComfyUIClient
-        from anima_prompt_studio_v3.remote.credential_store import CredentialStore
+        from anima_prompt_studio_v3.remote.credential_store import CredentialStore, CredentialStoreError
         from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
 
         profile = _get_v2_remote_profile(database, profile_id)
@@ -1775,16 +1825,17 @@ def create_api_runtime(
         if profile.connection_type == "ssh" and profile.auth_type == RemoteAuthType.PASSWORD and not password:
             raise ApiError(409, "ssh_credentials_missing", "没有可用的 SSH 密码；请填写并保存密码后再测试。")
         from anima_prompt_studio_v3.remote.local_connection import LocalComfyConnection
-        tunnel = (LocalComfyConnection if profile.connection_type == "local" else SshTunnel)(profile)
+        from anima_prompt_studio_v3.remote.connections import connection_factory, client_for_connection
+        tunnel = connection_factory(profile, ssh_factory=SshTunnel)
         try:
             tunnel.open(RemoteCredentials(password=password, passphrase=passphrase))
-            client = ComfyUIClient(tunnel.base_url)
+            client = client_for_connection(tunnel, ComfyUIClient, identity_database=database)
             report = client.validate_environment()
             inspection = None
             if inspect_templates:
-                from ..runtime.packaged_workflows import packaged_workflow_profiles
+                from ..runtime.workflow_catalog import catalog
                 from ..runtime.workflow_inspection import inspect_workflows
-                inspection = inspect_workflows(client, packaged_workflow_profiles())
+                inspection = inspect_workflows(client, (workflow for workflow, _ in catalog(database)))
                 inspection["remote_profile_id"] = profile.id
         except Exception as exc:
             raise ApiError(502, "remote_connection_test_failed", f"远程连接测试失败：{exc}", retryable=True) from exc
@@ -1795,13 +1846,15 @@ def create_api_runtime(
             "devices": report.devices,
             "queue_running": report.queue_running,
             "queue_pending": report.queue_pending,
-            "comfy_endpoint": f"{profile.comfy_host}:{profile.comfy_port}",
+            "comfy_endpoint": profile.http_base_url if profile.connection_type == "http" else f"{profile.comfy_host}:{profile.comfy_port}",
             **({"workflow_inspection": inspection} if inspect_templates else {}),
         }
 
     if v2_database is not None:
         from .workflows import register_workflow_routes
         register_workflow_routes(app, v2_database, require_session)
+        from .loras import register_lora_routes
+        register_lora_routes(app, v2_database, require_session)
 
     @app.get(
         f"{API_PREFIX}/settings/comfy-access",
@@ -2161,9 +2214,13 @@ def create_api_runtime(
     ) -> dict[str, object]:
         from .workspace_store import WorkspaceCreateConflictError, WorkspaceIdempotencyKeyError
         try:
+            draft = payload.draft
+            if draft.model_profile == "moss_image_sft_int8":
+                explicit = draft.generation_settings.model_dump(mode="json", exclude_unset=True)
+                draft = draft.model_copy(update={"generation_settings": source_generation_settings(draft.model_profile, explicit)})
             return store.create(
                 payload.title,
-                payload.draft.persistence_payload(),
+                draft.persistence_payload(),
                 payload.candidate_snapshot.model_dump(mode="json") if payload.candidate_snapshot else None,
                 idempotency_key=idempotency_key,
             )
@@ -2298,20 +2355,6 @@ def create_api_runtime(
     return ApiRuntime(app=app, bootstrap_token=bootstrap_token)
 
 
-def _workspace_run_source(snapshot: dict | None) -> dict[str, object] | None:
-    if snapshot is None:
-        return None
-    from ..core.seeds import display_seed
-    job = snapshot.get("job") or {}
-    settings = {key: value for key, value in (job.get("generation_params") or {}).items()
-                if key in {"width", "height", "steps", "cfg", "sampler", "scheduler", "seed", "batch_size", "denoise", "clip_skip"}}
-    if isinstance(settings.get("seed"), int):
-        settings["seed"] = display_seed(settings["seed"])
-    return {"workspace_revision": snapshot.get("workspace_revision"),
-            "positive_prompt": job.get("positive_prompt", ""), "negative_prompt": job.get("negative_prompt", ""),
-            "model_profile": job.get("model_profile_id"), "settings": settings}
-
-
 def _generation_run_response(run, queue) -> dict[str, object]:
     from ..core.seeds import display_seed
     try:
@@ -2349,10 +2392,16 @@ def _generation_run_response(run, queue) -> dict[str, object]:
 
 
 def _remote_profile_settings_response(profile, credentials) -> dict[str, object]:
+    from anima_prompt_studio_v3.remote.temporary_connections import web_url
     return {
         "id": profile.id,
         "display_name": profile.display_name,
         "connection_type": profile.connection_type,
+        "http_base_url": profile.http_base_url,
+        "http_session_id": profile.http_session_id,
+        "http_runtime_id": profile.http_runtime_id,
+        "has_saved_api_key": profile.connection_type == "http" and bool(credentials.read_comfy_api_key(profile.http_session_id)),
+        "web_url": web_url(profile) if profile.connection_type == "http" else "",
         "comfy_host": profile.comfy_host,
         "comfy_port": profile.comfy_port,
         "ssh_host": profile.ssh_host,
@@ -2364,7 +2413,7 @@ def _remote_profile_settings_response(profile, credentials) -> dict[str, object]
         "has_saved_password": profile.connection_type == "ssh" and bool(credentials.read_password(profile.id)),
         "host_fingerprint_confirmed": bool(profile.known_host_fingerprint.strip()),
         "connection_ready": profile.connection_ready,
-        "comfy_endpoint": f"{profile.comfy_host}:{profile.comfy_port}",
+        "comfy_endpoint": profile.http_base_url if profile.connection_type == "http" else f"{profile.comfy_host}:{profile.comfy_port}",
     }
 
 
@@ -2399,6 +2448,14 @@ def _save_remote_profile_settings(database: Path, payload: RemoteProfileSettings
                 existing = repository.get_remote_profile(profile_id)
             except KeyError as exc:
                 raise ApiError(404, "remote_profile_not_found", "云主机配置不存在。") from exc
+        if existing is not None and existing.connection_type == "http":
+            if payload.connection_type != "http":
+                raise ApiError(409, "temporary_connection_type_change", "临时连接仅支持修改名称与启用状态。")
+            profile = existing.model_copy(update={"display_name": payload.display_name, "enabled": payload.enabled})
+            repository.save_remote_profile(profile)
+            return _remote_profile_settings_response(profile, credentials)
+        if payload.connection_type == "http":
+            raise ApiError(422, "temporary_connection_import_required", "请使用导入临时连接入口。")
         changes = {
             "display_name": payload.display_name,
             "connection_type": payload.connection_type,

@@ -49,9 +49,9 @@ def test_manual_tags_normalize_deduplicate_and_remove_on_recompile():
 
 def test_manual_prompt_stays_exact_and_subject_updates_preserve_tags():
     req = manual_requirements()
-    changed = apply_layer_updates(req, ['subject'], {'subject': {'text': '站在海边'}})
+    changed = apply_layer_updates(req, {'subject': {'text': '站在海边'}})
     assert changed.layers.subject.character_tags == req.layers.subject.character_tags
-    changed = apply_layer_updates(req, ['style'], {'style': {'text': '水彩', 'medium': 'watercolor', 'artists': []}})
+    changed = apply_layer_updates(req, {'style': {'text': '水彩', 'medium': 'watercolor', 'artists': []}})
     assert changed.layers.style.manual_artist_tags == ['sample artist']
     draft = {'requirements': dump(req)}
     result = compile_prompt(draft, PromptEdit(positive='my exact text', negative=''), source='user')
@@ -78,7 +78,7 @@ def test_old_empty_fields_do_not_invalidate_fingerprint():
 def test_explicit_general_tags_survive_rewrite_and_removal():
     req = Requirements.empty()
     req.layers.subject.general_tags = ["blue sky", "wide shot"]
-    changed = apply_layer_updates(req, ["subject"], {"subject": {"text": "山间小屋"}})
+    changed = apply_layer_updates(req, {"subject": {"text": "山间小屋"}})
     assert changed.layers.subject.general_tags == ["blue sky", "wide shot"]
     draft = {"requirements": dump(changed)}
     first = compile_prompt(draft, PromptEdit(positive="cabin, blue_sky", negative=""), source="llm")

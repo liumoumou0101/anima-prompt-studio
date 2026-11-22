@@ -135,6 +135,8 @@ class LiteralCandidateGenerator:
         self.mapper = LiteralMapper(store)
 
     def generate(self, intent: IntentDocument, profile: ModelProfile) -> CandidateSet:
+        if profile.family != "anima":
+            raise LiteralGenerationError("MOSS 不支持 ANIMA 标签编译，请使用原文出图。")
         conflicts = intent.graph.find_conflicts()
         if conflicts:
             ids = sorted({item for conflict in conflicts for item in conflict.element_ids})

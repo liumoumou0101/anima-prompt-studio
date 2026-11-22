@@ -6,6 +6,7 @@ export type IdentityKind = "character" | "series" | "artist";
 export type IdentitySuggestion = {
   name: string; render_name: string; cn_name: string | null; kind: IdentityKind;
   favorite: boolean; match_kind?: string; match_text?: string; match_source?: string;
+  aliases?:string[];
   user_aliases: string[]; related_series: {name: string; cn_name: string | null; render_name: string; cooc_count: number}[];
   knowledge: {status: "unknown"; model_profile_id: string | null; reason: string};
 };
@@ -16,6 +17,10 @@ const kindNames: Record<IdentityKind, string> = {character: "角色", series: "�
 const matchNames: Record<string, string> = {canonical: "标准 tag", render_name: "正式名称", cn_name: "中文名称",
   alias: "词库别名", user_alias: "我的别名", related_term: "关联词匹配", name_contains: "名称包含", custom: "自由 tag"};
 function errorText(error: unknown) {return error instanceof Error ? error.message : "暂时无法读取补全，仍可自由输入。";}
+function namesFor(item:IdentitySuggestion):string[] {
+  return [item.name,item.render_name,...(item.aliases||[]),...item.user_aliases,
+    ...(["alias","user_alias"].includes(item.match_kind||"")&&item.match_text?[item.match_text]:[])];
+}
 
 export function IdentityTagField({kind, label, placeholder, values, onChange, onPick, modelProfileId, compact = false}: {
   kind: IdentityKind; label: string; placeholder: string; values: string[]; onChange: (values: string[]) => void;
@@ -86,8 +91,12 @@ export function IdentityTagField({kind, label, placeholder, values, onChange, on
   }
   function choose(item: IdentitySuggestion, append = false) {
     const next = [...values];
-    if (append) next.push(item.name);
-    else next.splice(line.current, 1, item.name);
+    // Match only names supplied for the explicitly clicked candidate. Free
+    // input elsewhere is never looked up or silently rewritten.
+    const equivalents=new Set(normalizeIdentityTags(namesFor(item),kind==="artist"));
+    if (append) {
+      if(!next.some(name=>equivalents.has(normalizeIdentityTags([name],kind==="artist")[0])))next.push(item.name);
+    } else next.splice(line.current, 1, item.name);
     onChange([...new Set(next.filter(value => value.trim()))]);
     setOpen(false); setQuery(""); setItems([]); setActive(-1);
     recordUsed([item.name]); onPick?.(item);
@@ -134,7 +143,7 @@ export function IdentityTagField({kind, label, placeholder, values, onChange, on
       }}
       onKeyDown={event => {
         if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
-        if (event.key === "Escape") {event.preventDefault(); setOpen(false); return;}
+        if (event.key === "Escape" && open) {event.preventDefault(); setOpen(false); return;}
         if (!open || !items.length) return;
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault(); setActive(value => event.key === "ArrowDown" ? (value + 1) % items.length : (value <= 0 ? items.length - 1 : value - 1));
@@ -166,7 +175,7 @@ export function IdentityTagField({kind, label, placeholder, values, onChange, on
     {normalized.length > 0 && <ul className="identity-tag-selected" aria-label={`已添加${kindName} tag`}>
       {normalized.map(name => {
         const canonical = name.replaceAll(" ", "_");
-        const favorite = preferences.favorites.some(item => item.name === canonical);
+        const favorite = preferences.favorites.some(item => normalizeIdentityTags(namesFor(item),kind==="artist").includes(name));
         return <li key={name}><span>{kind === "artist" ? "@" : ""}{name}</span> <button type="button" aria-label={`移除${kindName} ${name}`}
           onClick={() => onChange(values.filter(value => normalizeIdentityTags([value], kind === "artist")[0] !== name))}>移除</button>{" "}
           <button type="button" aria-label={`${favorite ? "取消收藏" : "收藏"}${kindName} ${name}`} aria-pressed={favorite}

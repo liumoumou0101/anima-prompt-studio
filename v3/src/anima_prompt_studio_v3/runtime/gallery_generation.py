@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from anima_prompt_studio.domain.models import PromptJob
-from ..api.models import DirectPromptSubmitRequest
+from ..api.models import DirectPromptSubmitRequest, SubmissionLora
 from ..core.requirements import WorkbenchError, digest
 from .generation import PreparedGeneration
 
@@ -34,7 +34,7 @@ class GalleryGenerationService:
             remote_profile_id=source_run["remote_profile_id"],
             workflow_profile_id=source_run["workflow_profile_id"],
             workflow_snapshot_run_id=source_run["id"],
-            lora_selection=[{k: resource[k] for k in ("logical_id", "file_name", "weight", "trigger_words")}
+            lora_selection=[{k: v for k, v in resource.items() if k in SubmissionLora.model_fields}
                             for resource in snapshot["resources"]],
         )
 

@@ -1,6 +1,8 @@
 import {describe, expect, it, vi} from "vitest";
 import {defaultGenerationSettings} from "./generationSettings";
 import {emptyRequirements, type LocalConversation} from "./conversation";
+import {applyArtistPreset, type ArtistPresetSnapshot} from "./artistPresetApplication";
+import {createJournal,appendOperation,operationBetween} from "./editorHistory";
 import {conversationDraftKey, getConversationPendingKey, getConversationTabId,
   cleanupConversationDrafts, initializeConversationTab, listConversationDraftCandidates, preserveConversationDraft,
   readConversationDraft, readConversationDraftCandidate, saveConversationDraft, type ConversationDraftStorage} from "./conversationDrafts";
@@ -25,12 +27,22 @@ function environment(localStorage = new MemoryStorage(), sessionStorage = new Me
 }
 
 describe("conversation draft persistence", () => {
+  it("persists the draft, shortcut cursor and outbox together and preserves a corrupt journal",()=>{
+    const storage=environment(),before=draft(),after={...before,positive:"green coat"};
+    const journal=appendOperation(createJournal("workspace_test","tab-a"),operationBetween(before,after,"manual","edit",0)!);
+    expect(saveConversationDraft("workspace_test",after,before,storage,journal).ok).toBe(true);
+    expect(readConversationDraft("workspace_test",storage)?.editorJournal).toEqual(journal);
+    expect(readConversationDraft("workspace_test",storage)?.savedAt).toBe(123);
+    const key=conversationDraftKey("workspace_test","tab-a"),corrupted=JSON.parse(storage.localStorage.getItem(key)!);corrupted.editorJournal.cursor=999;
+    const raw=JSON.stringify(corrupted);storage.localStorage.setItem(key,raw);
+    const result=readConversationDraft("workspace_test",storage);expect(result?.invalidRaw).toBe(raw);expect(storage.localStorage.getItem(result!.invalidBackupKey!)).toBe(raw);
+  });
   it("stores a versioned local/base envelope under a tab-scoped key", () => {
     const storage = environment();
     const base = draft(); const local = structuredClone(base); local.delta = "未发送";
     expect(saveConversationDraft("workspace_test", local, base, storage)).toEqual({ok: true, warning: ""});
     expect(storage.localStorage.getItem(conversationDraftKey("workspace_test", "tab-a"))).toContain('"version":1');
-    expect(readConversationDraft("workspace_test", storage)).toEqual({local, base, warning: ""});
+    expect(readConversationDraft("workspace_test", storage)).toEqual({local, base,savedAt:123, warning: ""});
   });
 
   it("accepts nullable scene defaults and empty identity arrays emitted by the API", () => {
@@ -43,7 +55,30 @@ describe("conversation draft persistence", () => {
     local.requirements.layers.lighting.mood = null;
     local.requirements.layers.composition.design = null;
     expect(saveConversationDraft("workspace_test", local, structuredClone(local), storage).ok).toBe(true);
-    expect(readConversationDraft("workspace_test", storage)).toEqual({local, base: local, warning: ""});
+    expect(readConversationDraft("workspace_test", storage)).toEqual({local, base: local,savedAt:123, warning: ""});
+  });
+
+  it("round trips frozen presets and exact managed spans in durable drafts", () => {
+    const storage = environment();
+    const preset: ArtistPresetSnapshot = {id: "a", revision: 1, name: "组合", positive: "  (@a:1.2), @b  ", negative: "",
+      model_family: "anima", model_label: "Anima base", syntax: "comfy", source_url: "", content_hash: "a".repeat(64)};
+    const local = applyArtistPreset(draft(), preset);
+    saveConversationDraft("workspace_test", local, draft(), storage);
+    expect(readConversationDraft("workspace_test", storage)?.local).toEqual(local);
+  });
+
+  it.each([
+    {artist_preset: {positive: []}},
+    {artistPresetPlacement: {positive: {start: -1, end: 100, prefix: ""}}},
+    {artistPresetCustomized: []},
+  ])("preserves corrupt artist metadata as a recovery backup: %s", damaged => {
+    const storage = environment(), local = draft();
+    if ("artist_preset" in damaged) Object.assign(local.requirements.layers.style, damaged);
+    else Object.assign(local, damaged);
+    saveConversationDraft("workspace_test", local, draft(), storage);
+    const recovered = readConversationDraft("workspace_test", storage);
+    expect(recovered?.local).toBeNull();
+    expect(recovered?.invalidRaw).toContain("artist");
   });
 
   it.each([
@@ -105,7 +140,7 @@ describe("conversation draft persistence", () => {
     expect(recovered.local).not.toBeNull();
     const local = recovered.local!; local.positive = "edited after recovery";
     expect(saveConversationDraft("workspace_test", local, recovered.base, storage)).toEqual({ok: true, warning: ""});
-    expect(readConversationDraft("workspace_test", storage)).toEqual({local, base: null,
+    expect(readConversationDraft("workspace_test", storage)).toEqual({local, base: null,savedAt:123,
       warning: "缺少可靠的合并基准；保存到服务端前请逐项核对版本。"});
   });
 
@@ -402,6 +437,14 @@ function pending(workspace = "workspace_test", key = "request-original") {
 }
 
 describe("document-owned draft and pending recovery", () => {
+  it("keeps nested intent request bytes and idempotency key unchanged across reload",async()=>{
+    const storage=environment(),api=await document(storage,"intent-document-a");
+    const intent={key:"frozen-intent-key",body:JSON.stringify({source:{workspace_id:"workspace_test",submission_kind:"conversational",workspace_revision:3,positive_prompt:"old frozen prompt"},creationConfiguration:{workflow:{id:"workflow",revision:"v1"}},executionPolicy:{mode:"auto",preferredEnvironmentIds:[]}})};
+    api.saveConversationPending("workspace_test",intent,storage);
+    const reload=await document(storage,"intent-document-b");expect(reload.recoverConversationPending("workspace_test",storage)).toEqual(intent);
+    expect(()=>reload.saveConversationPending("workspace_test",{...intent,body:intent.body.replace("old frozen prompt","new draft")},storage)).toThrow(/变化/);
+    reload.clearConversationPending("workspace_test",intent,storage);expect(reload.recoverConversationPending("workspace_test",storage)).toBeNull();
+  });
   it.each(["missing", "constructor error", "post error"])("isolates duplicated draft writes when BroadcastChannel is %s", async failure => {
     const previous = globalThis.BroadcastChannel;
     vi.stubGlobal("BroadcastChannel", failure === "missing" ? undefined : class {
@@ -435,7 +478,7 @@ describe("document-owned draft and pending recovery", () => {
     clone.saveConversationDraft("workspace_test", other, draft(), cloneStorage);
     await document(storage, "document-reload-1");
     const reloaded = await document(storage, "document-reload-2");
-    expect(reloaded.readConversationDraft("workspace_test", storage)).toEqual({local: own, base: draft(), warning: ""});
+    expect(reloaded.readConversationDraft("workspace_test", storage)).toEqual({local: own, base: draft(),savedAt:123, warning: ""});
     expect(first.getConversationTabId(storage)).not.toBe(reloaded.getConversationTabId(storage));
     expect(first.getConversationTabId(storage)).not.toBe(clone.getConversationTabId(cloneStorage));
   });

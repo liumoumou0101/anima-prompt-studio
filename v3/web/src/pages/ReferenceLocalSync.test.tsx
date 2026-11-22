@@ -19,7 +19,8 @@ it("polls only while scanning, reports counts, and announces a newly completed r
   expect(await screen.findByText("正在扫描本地案例…")).toBeInTheDocument();
   expect(screen.getByRole("button", {name: "重新扫描本地案例"})).toBeDisabled();
   expect(await screen.findByText("新增 2 · 已有 4 · 保留已删除 1 · 共 6 条")).toBeInTheDocument();
-  expect(completed).toHaveBeenCalledTimes(1);
+  // Status rendering can precede the passive effect that announces completion.
+  await waitFor(() => expect(completed).toHaveBeenCalledTimes(1));
   expect(completed).toHaveBeenCalledWith(7);
   await new Promise(resolve => setTimeout(resolve, 25));
   expect(apiRequest).toHaveBeenCalledTimes(3);

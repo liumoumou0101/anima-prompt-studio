@@ -48,6 +48,89 @@ def test_library_start_creates_new_workspace_and_leaves_existing_untouched(conve
         json={"source_version": "999", "mode": "requirements"}).status_code == 409
 
 
+@pytest.mark.parametrize("mode", ["requirements", "prompt"])
+@pytest.mark.parametrize("model,sampling,size", [
+    ("anima_base_v1", (35, 4.5, "er_sde", "normal"), (896, 1152)),
+    ("anima_aesthetic_v1", (35, 4.5, "euler", "normal"), (896, 1152)),
+    ("anima_aesthetic_v1_0", (35, 4.5, "euler", "normal"), (896, 1152)),
+    ("anima_aesthetic_v1_1", (35, 4.5, "euler", "normal"), (896, 1152)),
+    ("anima_turbo_v1", (10, 1.0, "er_sde", "simple"), (896, 1152)),
+    ("anima_turbo_v1_1", (10, 1.0, "er_sde", "simple"), (896, 1152)),
+    ("anima_2_9b_preview_v1", (30, 4.0, "euler", "sgm_uniform"), (896, 1152)),
+    ("animayume_v1_0_final", (30, 5.5, "euler_ancestral", "normal"), (896, 1152)),
+    ("animayume_v1_5_base", (30, 5.5, "euler_ancestral", "normal"), (896, 1152)),
+    ("miaomiao_harem_anima_v1_6", (30, 4.5, "euler", "normal"), (896, 1152)),
+    ("wai_anima_v1_0", (25, 4.5, "euler_ancestral", "normal"), (896, 1152)),
+    ("moss_image_sft_int8", (25, 2.5, "er_sde", "simple"), (1024, 1024)),
+])
+def test_reference_fresh_workspace_uses_selected_model_defaults(conversation_client, mode, model, sampling, size):
+    client, calls = conversation_client
+    example = client.app.state.example_store.create(picture(), "model defaults",
+        ExampleMetadata(requirements_edit=edit(), compat={"model_profiles": [model]}),
+        provenance={"positive": "original garden", "negative": "text", "model_profile": model,
+                    "settings": {"steps": 99, "cfg": 9, "width": 768, "height": 640, "seed": 123}})
+    response = client.post(f"/api/v3/reference-examples/{example['id']}/workspace",
+        json={"source_version": example["source_version"], "mode": mode})
+    assert response.status_code == 201, response.text
+    draft = response.json()["draft"]
+    assert draft["model_profile"] == model
+    settings = draft["generation_settings"]
+    assert tuple(settings[key] for key in ("steps", "cfg", "sampler", "scheduler")) == sampling
+    assert (settings["width"], settings["height"]) == size
+    # A fixed portrait aspect would replace MOSS's square dimensions on submission.
+    assert settings["aspect"] == "custom"
+    assert settings["seed"] == -1 and settings["batch_size"] == 1
+    configuration = settings["creation_configuration"]
+    assert configuration is not None
+    assert configuration["modelProfile"] == model
+    assert configuration["workflow"] == {"id": "", "revision": ""}
+    assert configuration["baseRecipeId"] == settings["preset_id"]
+    assert configuration["recipeValues"] == {
+        **dict(zip(("steps", "cfg", "sampler", "scheduler"), sampling)),
+        "width": size[0], "height": size[1], "seed": "-1", "batch_size": 1,
+    }
+    assert configuration["parameterOverrides"] == {}
+    assert configuration["resourceRequirements"] == []
+    assert configuration["seedMode"] == "random"
+    assert draft["generation_source"] is None
+    assert calls == []
+
+
+def test_reference_requirements_preserves_unknown_model_declaration(conversation_client):
+    client, _ = conversation_client
+    example = client.app.state.example_store.create(picture(), "external model",
+        ExampleMetadata(requirements_edit=edit(), compat={"model_profiles": ["external-model"]}))
+    response = client.post(f"/api/v3/reference-examples/{example['id']}/workspace",
+        json={"source_version": example["source_version"], "mode": "requirements"})
+    assert response.status_code == 201, response.text
+    assert response.json()["draft"]["model_profile"] == "external-model"
+    assert response.json()["draft"]["generation_settings"]["creation_configuration"] is None
+
+
+@pytest.mark.parametrize("model", [None,"external-model"])
+def test_borrow_original_prompt_with_unknown_model_does_not_create_a_workspace(conversation_client, model):
+    client,_=conversation_client
+    example=client.app.state.example_store.create(picture(),"source model",ExampleMetadata(),
+        provenance={"positive":"original prompt", "model_profile":model})
+    before=client.get("/api/v3/workspaces").json()
+    response=client.post(f"/api/v3/reference-examples/{example['id']}/workspace",json={"source_version":example["source_version"],"mode":"prompt"})
+    assert response.status_code==422,response.text
+    assert response.json()["error"]["code"]=="model_profile_unknown"
+    assert client.get("/api/v3/workspaces").json()==before
+
+
+def test_fresh_generation_configuration_has_no_shared_mutable_values():
+    from anima_prompt_studio_v3.api.reference_examples import _fresh_generation_settings
+    first = _fresh_generation_settings("moss_image_sft_int8")
+    assert first.creation_configuration is not None
+    first.creation_configuration.recipeValues["width"] = 768
+    first.creation_configuration.parameterOverrides["steps"] = 99
+    second = _fresh_generation_settings("moss_image_sft_int8")
+    assert second.creation_configuration is not None
+    assert second.creation_configuration.recipeValues["width"] == 1024
+    assert second.creation_configuration.parameterOverrides == {}
+
+
 def test_gallery_case_keeps_metadata_and_owns_its_image_copy(conversation_client, tmp_path):
     from types import SimpleNamespace
     client, _ = conversation_client
@@ -109,6 +192,28 @@ def test_continue_missing_generation_does_not_create_workspace(conversation_clie
     assert response.status_code == 422
     assert client.get("/api/v3/workspaces").json() == before
     assert calls == []
+
+
+def test_continue_generation_restores_all_frozen_workflow_values_without_ai(conversation_client):
+    from types import SimpleNamespace
+    from test_generation_run_source import frozen_parameter_snapshot
+    client,calls=conversation_client
+    snapshot=frozen_parameter_snapshot()
+    client.app.state.submission_service=SimpleNamespace(store=SimpleNamespace(for_runs=lambda _: [{"snapshot":snapshot}]))
+    first=client.post("/api/v3/generation-runs/source-run/workspace",json={},headers={"Idempotency-Key":"continue-frozen"})
+    assert first.status_code==201,first.text
+    settings=first.json()["draft"]["generation_settings"]
+    frozen=snapshot["job"]["integration_metadata"]["workflow_parameters"]
+    assert settings["parameter_schema"]==frozen["schema"]
+    assert settings["workflow_parameter_overrides"]==frozen["values"]
+    assert settings["creation_configuration"]["workflow"]["revision"]=="old-template-revision"
+    assert settings["creation_configuration"]["parameterOverrides"]["refiner_steps"]==24
+    assert settings["creation_configuration"]["parameterOverrides"]["seed"]=="8798399215689017476"
+    assert settings["seed"]=="8798399215689017476"
+    assert first.json()["draft"]["generation_source"]["run_id"]=="source-run"
+    replay=client.post("/api/v3/generation-runs/source-run/workspace",json={},headers={"Idempotency-Key":"continue-frozen"})
+    assert replay.json()==first.json()
+    assert calls==[]
 
 
 @pytest.mark.parametrize("origin_kind", ["verified", "missing_version", "wrong_prompt", "absent"])

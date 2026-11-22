@@ -49,6 +49,49 @@ def rewrite(store, record, **changes):
     return asyncio.run(ConversationService(store).turn(request))
 
 
+@pytest.mark.parametrize("legacy_list", [None, [], ["style"], ["subject", "subject"]])
+def test_manual_turn_uses_actual_patches_not_a_second_model_declaration(tmp_path, monkeypatch, legacy_list):
+    store, record = prepared(tmp_path)
+    visible = {"positive": "  desk,\n(blue lamp:1.2)  ", "negative": "  glare\n"}
+    record = store.update(record["id"], expected_revision=record["revision"], title=record["title"],
+                          draft={"model_profile": "anima_base_v1", "prompt_edit": visible})
+    reply = {"layer_updates": {"subject": {"text": "书桌上的红灯"}}, "positive": "desk, (red lamp:1.2)",
+             "negative": visible["negative"], "warnings": []}
+    if legacy_list is not None:
+        reply["touched_layers"] = legacy_list
+    calls = mock_results(monkeypatch, reply)
+    result = rewrite(store, record, compiled=visible)
+    assert len(calls) == 1
+    prompt_seen = json.loads(calls[0]["messages"][1]["content"])["compiled"]
+    assert {key: prompt_seen[key] for key in visible} == visible
+    assert result["changed_layers"] == ["subject"]
+    assert result["draft"]["compiled"]["positive"] == reply["positive"]
+    assert result["draft"]["compiled"]["negative"] == visible["negative"]
+    assert store.get(record["id"])["draft"]["requirements"]["layers"]["subject"]["text"] == "书桌上的红灯"
+
+
+def test_existing_manual_prompt_can_be_rewritten_without_inventing_layer_changes(tmp_path, monkeypatch):
+    store = WorkspaceStore(tmp_path / "manual.db")
+    visible = {"positive": "a blue desk lamp", "negative": "glare"}
+    record = store.create("原文", {"model_profile": "anima_base_v1", "prompt_edit": visible})
+    mock_results(monkeypatch, {"layer_updates": {}, "positive": "a red desk lamp", "negative": "glare", "warnings": []})
+    result = rewrite(store, record, compiled=visible)
+    assert result["changed_layers"] == []
+    assert result["positive"] == "a red desk lamp"
+
+
+def test_recompile_reads_manual_prompt_when_no_layers_have_been_filled(tmp_path, monkeypatch):
+    store = WorkspaceStore(tmp_path / "manual.db")
+    visible = {"positive": "  an oak desk,\n  a blue lamp  ", "negative": "  glare  "}
+    record = store.create("手写正文", {"model_profile": "anima_base_v1", "prompt_edit": visible})
+    calls = mock_results(monkeypatch, output(**visible))
+    result = asyncio.run(ConversationService(store).turn(TurnRequest(
+        workspace_id=record["id"], revision=record["revision"], delta={"text": ""}, compiled=visible)))
+    assert json.loads(calls[0]["messages"][1]["content"])["compiled"] == visible
+    assert {key: result[key] for key in visible} == visible
+    assert result["changed_layers"] == []
+
+
 @pytest.mark.parametrize("wrap", [
     lambda value: "```json\n" + json.dumps(value) + "\n```",
     lambda value: json.dumps({"result": value}),
@@ -69,7 +112,7 @@ def test_partial_content_update_preserves_other_content_and_manual_tags():
     canonical.layers.style.manual_artist_tags = ["custom artist"]
     canonical.layers.composition.shot = "半身"
     canonical.layers.exclusions.global_ = ["文字"]
-    revised = apply_layer_updates(canonical, ["style", "composition", "exclusions"], {
+    revised = apply_layer_updates(canonical, {
         "style": {"text": "柔和"}, "composition": {"text": "居中"}, "exclusions": {"scoped": []},
     })
     assert revised.layers.style.medium == "水彩"
@@ -92,7 +135,7 @@ def test_partial_updates_never_edit_locked_content_or_control_fields(name, patch
     getattr(canonical.layers, name).locked = locked
     before = dump(canonical)
     with pytest.raises(WorkbenchError):
-        apply_layer_updates(canonical, [name], {name: patch})
+        apply_layer_updates(canonical, {name: patch})
     assert dump(canonical) == before
 
 
@@ -288,6 +331,19 @@ def test_locked_layer_violation_is_rejected_without_repair_or_proposal(tmp_path,
     assert store.get(record["id"]) == record
 
 
+def test_echoing_a_locked_layer_does_not_block_an_unrelated_edit():
+    requirements = Requirements.empty()
+    requirements.layers.style.text = "平涂"
+    requirements.layers.style.locked = True
+    requirements.layers.subject.text = "一名乐手站在椅旁"
+    updated = apply_layer_updates(requirements, {
+        "subject": {"text": "同一名乐手坐在椅上"},
+        "style": {"text": "平涂"},
+    })
+    assert updated.layers.style == requirements.layers.style
+    assert updated.layers.subject.text == "同一名乐手坐在椅上"
+
+
 def test_control_only_changes_keep_prompt_fresh_but_content_changes_do_not():
     draft = {"requirements": dump(Requirements.empty()), "mode": "faithful"}
     draft["compiled"] = compile_prompt(draft, PromptEdit(positive="detective", negative=""), source="llm")
@@ -350,7 +406,8 @@ def test_connection_distinguishes_transport_from_workbench_compatibility(monkeyp
     result = asyncio.run(connection_test())
     assert result["ok"] is True
     assert result["workbench_compatible"] is compatible
-    assert "touched_layers" in calls[0]["messages"][0]["content"]
+    assert "layer_updates" in calls[0]["messages"][0]["content"]
+    assert "touched_layers" not in calls[0]["messages"][0]["content"]
     assert len(calls) == 1
 
 
@@ -361,7 +418,7 @@ def test_sync_requirements_preserves_authoritative_manual_prompt_and_only_propos
             **draft["requirements"]["layers"], "subject": {
                 **draft["requirements"]["layers"]["subject"], "character_tags": ["custom identity"]}}}})
     manual = {"positive": "detective, red coat, custom embroidery, custom identity", "negative": "text, my reviewed exclusion"}
-    mock_results(monkeypatch, output(touched_layers=["subject"],
+    mock_results(monkeypatch, output(touched_layers=["lighting", "lighting"],
         layer_updates={"subject": {"text": "红外套侦探，定制刺绣"}},
         positive="model attempted to replace user wording", negative=""))
     result = asyncio.run(ConversationService(store).turn(TurnRequest(
@@ -409,7 +466,7 @@ def test_sync_requirements_cannot_overwrite_locked_requirements_or_control_field
         **draft, "requirements": {**draft["requirements"], "layers": {
             **draft["requirements"]["layers"], "subject": {
                 **draft["requirements"]["layers"]["subject"], "locked": locked}}}})
-    mock_results(monkeypatch, output(touched_layers=["subject"], layer_updates={"subject": patch}))
+    mock_results(monkeypatch, output(touched_layers=[], layer_updates={"subject": patch}))
     with pytest.raises(WorkbenchError) as error:
         asyncio.run(ConversationService(store).turn(TurnRequest(
             workspace_id=record["id"], revision=record["revision"], task="sync_requirements", delta={"text": ""},

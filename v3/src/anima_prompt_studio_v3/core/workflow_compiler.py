@@ -13,6 +13,8 @@ from anima_prompt_studio.domain.execution_models import (
 )
 from anima_prompt_studio.domain.models import PromptJob
 from .model_versions import model_matches_workflow
+from .lora_resolution import apply_slot
+from .workflow_parameters import resolve_generation_parameters
 
 
 class WorkflowRenderError(ValueError):
@@ -63,7 +65,7 @@ class V3WorkflowCompiler:
                 continue
             inputs = node.get("inputs", {})
             for input_name in (slot.name_input, slot.model_strength_input, slot.clip_strength_input):
-                if input_name not in inputs:
+                if input_name is not None and input_name not in inputs:
                     errors.append(f"LoRA 插槽 {index} 的输入不存在：{slot.node_id}.{input_name}")
         return errors
 
@@ -88,6 +90,8 @@ class V3WorkflowCompiler:
                 f"工作流 {workflow_profile.display_name} 不支持模型配置 {job.model_profile_id}。"
             )
 
+        if job.model_profile_id == "moss_image_sft_int8" and any(value % 16 for value in (job.generation_params.width, job.generation_params.height)):
+            raise WorkflowRenderError("MOSS 宽高必须为 16 的倍数。")
         workflow = copy.deepcopy(workflow_profile.api_workflow)
         seed = job.generation_params.seed
         if seed < 0:
@@ -102,6 +106,11 @@ class V3WorkflowCompiler:
             )
         checkpoint = template_checkpoint
         params = job.generation_params
+        resolved_parameters = resolve_generation_parameters(workflow_profile, params,
+            job.integration_metadata.get("workflow_parameter_overrides", {}),
+            requested_schema=job.integration_metadata.get("parameter_schema"))
+        if "seed" in resolved_parameters["values"]:
+            resolved_parameters["values"]["seed"] = str(seed)
         common_values: dict[str, Any] = {
             "positive_prompt": job.positive_prompt,
             "negative_prompt": job.negative_prompt,
@@ -121,6 +130,8 @@ class V3WorkflowCompiler:
             "steps": params.steps, "cfg": params.cfg,
             "sampler": params.sampler, "scheduler": params.scheduler,
         })
+        values.update(resolved_parameters["values"])
+        values["seed"] = seed
         for field_name, value in values.items():
             binding = workflow_profile.bindings.get(field_name)
             if binding is not None:
@@ -131,6 +142,7 @@ class V3WorkflowCompiler:
             "base_sampler": self._sampler_snapshot(workflow, workflow_profile.bindings.get("seed")),
             "workflow_kind": workflow_profile.workflow_kind,
             "runtime_assets": self._runtime_asset_snapshot(workflow),
+            "workflow_parameters": resolved_parameters,
         }
         if workflow_profile.workflow_kind == HIRES_FIX_WORKFLOW_KIND:
             refiner_seed = (seed + 1) % (2**63 - 1)
@@ -150,9 +162,10 @@ class V3WorkflowCompiler:
                 "refiner_sampler": self._sampler_snapshot(workflow, refiner_seed_binding),
             })
 
-        if len(job.lora_selection) > len(workflow_profile.lora_slots):
+        active = [selection for selection in job.lora_selection if selection.enabled]
+        if len(active) > len(workflow_profile.lora_slots):
             raise WorkflowRenderError(
-                f"当前任务选择了 {len(job.lora_selection)} 个 LoRA，但工作流只有 "
+                f"当前任务选择了 {len(active)} 个 LoRA，但工作流只有 "
                 f"{len(workflow_profile.lora_slots)} 个 LoRA 插槽。"
             )
         resolved = job.integration_metadata.get("resolved_lora_bindings")
@@ -160,34 +173,31 @@ class V3WorkflowCompiler:
         if resolved is not None:
             by_slot = {item["slot_key"]: item for item in resolved}
             slots = {f"{slot.node_id}.{slot.name_input}" for slot in workflow_profile.lora_slots}
-            selections = {item.logical_id: item for item in job.lora_selection}
+            selections = {item.logical_id: item for item in active}
             if (len(by_slot) != len(resolved) or not set(by_slot).issubset(slots)
-                    or len(selections) != len(job.lora_selection)
+                    or len(selections) != len(active)
                     or len(resolved) != len(selections)
                     or {item["logical_id"] for item in resolved} != set(selections)):
                 raise WorkflowRenderError("已解析的 LoRA 绑定与任务或工作流不一致。")
             for item in resolved:
                 selection = selections[item["logical_id"]]
-                if selection.file_name != item["remote_file_name"] or selection.weight != item["weight"]:
+                if (selection.file_name != item["remote_file_name"] or selection.weight != item["weight"]
+                        or selection.sha256 != item.get("sha256") or selection.clip_weight != item.get("clip_weight")):
                     raise WorkflowRenderError("LoRA 绑定后的文件名或权重被改变。")
         for index, slot in enumerate(workflow_profile.lora_slots):
-            node_inputs = workflow[slot.node_id]["inputs"]
             if by_slot is not None:
                 binding = by_slot.get(f"{slot.node_id}.{slot.name_input}")
                 if binding is not None:
-                    node_inputs[slot.name_input] = binding["remote_file_name"]
-                node_inputs[slot.model_strength_input] = binding["weight"] if binding else 0.0
-                node_inputs[slot.clip_strength_input] = binding["weight"] if binding else 0.0
-            elif index < len(job.lora_selection):
-                selection = job.lora_selection[index]
+                    apply_slot(slot, workflow, binding["remote_file_name"], binding["weight"], binding.get("clip_weight"))
+                    continue
+            elif index < len(active):
+                selection = active[index]
                 lora_name = selection.file_name or selection.logical_id
-                node_inputs[slot.name_input] = remote_profile.model_aliases.get(lora_name, lora_name)
-                node_inputs[slot.model_strength_input] = selection.weight
-                node_inputs[slot.clip_strength_input] = selection.weight
-            else:
-                # Keep the template's valid filename but neutralize an unused fixed slot.
-                node_inputs[slot.model_strength_input] = 0.0
-                node_inputs[slot.clip_strength_input] = 0.0
+                filename = selection.file_name if selection.sha256 else remote_profile.model_aliases.get(lora_name, lora_name)
+                apply_slot(slot, workflow, filename, selection.weight, selection.clip_weight)
+                continue
+            # Keep the template's valid filename but neutralize an unused fixed slot.
+            apply_slot(slot, workflow)
 
         return WorkflowRenderResult(
             workflow=workflow,

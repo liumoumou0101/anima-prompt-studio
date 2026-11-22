@@ -24,7 +24,7 @@ class ModelProfile(BaseModel):
 
     id: str = Field(min_length=1)
     display_name: str = Field(min_length=1)
-    family: str = Field(pattern=r"^anima$")
+    family: str = Field(pattern=r"^(anima|moss)$")
     variant: ModelVariant
     positive_prefix: tuple[str, ...] = ()
     negative_prompt: tuple[str, ...] = ()

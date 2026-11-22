@@ -57,13 +57,15 @@ class _ForwardServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 
-def _handler_for(transport, remote_host: str, remote_port: int):
+def _handler_for(transport, remote_host: str, remote_port: int, channel_timeout=None):
     class ForwardHandler(socketserver.BaseRequestHandler):
         def handle(self) -> None:
+            options = {'timeout': channel_timeout} if channel_timeout is not None else {}
             channel = transport.open_channel(
                 "direct-tcpip",
                 (remote_host, remote_port),
                 self.request.getpeername(),
+                **options,
             )
             if channel is None:
                 return
@@ -94,6 +96,9 @@ class SshTunnel:
         *,
         local_bind_host: str = "127.0.0.1",
         local_bind_port: int = 0,
+        deadline: float | None = None,
+        cancel: threading.Event | None = None,
+        max_attempts: int = 3,
     ) -> None:
         self.profile = profile
         self.connect_timeout = connect_timeout
@@ -103,6 +108,18 @@ class SshTunnel:
         self.server: _ForwardServer | None = None
         self.thread: threading.Thread | None = None
         self.local_port = 0
+        self.deadline, self.cancel, self.max_attempts = deadline, cancel, max_attempts
+        self._close_lock = threading.Lock()
+
+    def _remaining_timeout(self):
+        if self.cancel is not None and self.cancel.is_set():
+            raise SSHError('连接检测已取消。')
+        if self.deadline is None:
+            return self.connect_timeout
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise SSHError('连接检测已超过截止时间。')
+        return min(self.connect_timeout, remaining)
 
     @property
     def base_url(self) -> str:
@@ -114,11 +131,11 @@ class SshTunnel:
         paramiko = self._paramiko()
         sock = socket.create_connection(
             (self.profile.ssh_host, self.profile.ssh_port),
-            timeout=self.connect_timeout,
+            timeout=self._remaining_timeout(),
         )
         transport = paramiko.Transport(sock)
         try:
-            transport.start_client(timeout=self.connect_timeout)
+            transport.start_client(timeout=self._remaining_timeout())
             key = transport.get_remote_server_key()
             return format_fingerprint(key)
         finally:
@@ -159,31 +176,42 @@ class SshTunnel:
             connect_args.update(look_for_keys=True, allow_agent=True)
         client = None
         last_error: Exception | None = None
-        for attempt in range(3):
+        for attempt in range(self.max_attempts):
+            remaining = self._remaining_timeout()
+            connect_args.update(timeout=remaining, banner_timeout=remaining, auth_timeout=remaining)
             candidate = paramiko.SSHClient()
             candidate.load_system_host_keys()
             candidate.set_missing_host_key_policy(_ExpectedFingerprintPolicy(expected))
+            self.client = candidate
             try:
                 candidate.connect(**connect_args)
+                self._remaining_timeout()
                 transport = candidate.get_transport()
                 if transport is None or not transport.is_active():
                     raise SSHError("SSH 已连接，但传输通道不可用。")
                 client = candidate
                 break
-            except (paramiko.AuthenticationException, HostKeyMismatchError):
+            except (paramiko.AuthenticationException, HostKeyMismatchError, SSHError):
                 candidate.close()
+                self.client = None
                 raise
             except (paramiko.SSHException, EOFError, OSError) as exc:
                 candidate.close()
+                self.client = None
                 last_error = exc
-                if attempt < 2:
-                    time.sleep(0.5 * (attempt + 1))
+                if attempt < self.max_attempts - 1:
+                    delay = min(0.5 * (attempt + 1), self._remaining_timeout())
+                    if self.cancel is not None:
+                        self.cancel.wait(delay)
+                    else:
+                        time.sleep(delay)
         if client is None:
-            raise SSHError(f"SSH 握手连续 3 次失败：{last_error}") from last_error
+            raise SSHError(f"SSH 握手连续 {self.max_attempts} 次失败：{last_error}") from last_error
         try:
             server = _ForwardServer(
                 (self.local_bind_host, self.local_bind_port),
-                _handler_for(transport, self.profile.comfy_host, self.profile.comfy_port),
+                _handler_for(transport, self.profile.comfy_host, self.profile.comfy_port,
+                             self._remaining_timeout() if self.deadline is not None else None),
             )
             thread = threading.Thread(target=server.serve_forever, name="anima-ssh-tunnel", daemon=True)
             thread.start()
@@ -204,17 +232,17 @@ class SshTunnel:
         return exit_code, stdout.read().decode("utf-8", "replace"), stderr.read().decode("utf-8", "replace")
 
     def close(self) -> None:
-        if self.server:
-            self.server.shutdown()
-            self.server.server_close()
-            self.server = None
-        if self.client:
-            self.client.close()
-            self.client = None
-        if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=2.0)
-        self.thread = None
-        self.local_port = 0
+        with self._close_lock:
+            server, client, thread = self.server, self.client, self.thread
+            self.server = self.client = self.thread = None
+            self.local_port = 0
+        if server:
+            server.shutdown()
+            server.server_close()
+        if client:
+            client.close()
+        if thread and thread.is_alive():
+            thread.join(timeout=2.0)
 
     def __enter__(self) -> SshTunnel:
         return self

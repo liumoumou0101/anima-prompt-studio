@@ -17,6 +17,7 @@ export interface BootstrapResponse {
 }
 
 export interface ModelProfileOption {
+  family?: string;
   id: string;
   display_name: string;
   variant: string;
@@ -476,6 +477,33 @@ export interface WorkbenchGenerationSettings {
   batch_size: number;
   remote_profile_id?: string | null;
   workflow_profile_id?: string | null;
+  creation_configuration?: CreationConfiguration;
+  model_configurations?: Record<string, CreationConfiguration>;
+  execution_policy?: ExecutionPolicy;
+  workflow_parameter_overrides?: Record<string, number | string>;
+  parameter_schema?: WorkflowParameterSchema;
+}
+
+export type ExecutionPolicy = {mode: "auto"; preferredEnvironmentIds: string[]} | {mode: "pinned"; environmentId: string};
+export interface WorkflowParameterField {
+  key: string; label: string; type: "integer" | "number" | "string" | "seed";
+  default: number | string; min?: number | string; max?: number | string; step?: number;
+  enum?: string[]; group: "common" | "sampling" | "workflow";
+  binding?: {node_id: string; input_name: string}; readOnlyReason?: string;
+}
+export interface WorkflowParameterSchema {
+  version: number; workflowId: string; templateRevision: string; fields: WorkflowParameterField[];
+  seedDerivation?: string;
+}
+export interface RequirementLora {
+  logical_id: string; file_name: string; weight: number; trigger_words: string[]; required: boolean;
+  sha256?: string | null; enabled?: boolean; clip_weight?: number | null;
+  source: {kind: "user" | "civitai" | "huggingface" | "official" | "run"; model_version_id?: string | null};
+}
+export interface CreationConfiguration {
+  modelProfile: string; workflow: {id: string; revision: string}; baseRecipeId: string;
+  recipeValues: Record<string, number | string>; parameterOverrides: Record<string, number | string>;
+  resourceRequirements: RequirementLora[]; seedMode: "random" | "fixed";
 }
 
 export interface GenerationRecipeParameters {
@@ -566,13 +594,18 @@ export interface GenerationRunListResponse {
 }
 
 export interface GenerationTarget {
+  lora_extension_supported?: boolean;
+  lora_slot_order?: string[];
+  lora_loader?: "LoraLoaderModelOnly" | "LoraLoader" | null;
+  parameter_schema?: WorkflowParameterSchema;
   availability?: string;
   availability_errors?: string[];
   experimental?: boolean;
   template_revision?: string;
   remote_profile_id: string;
   remote_display_name: string;
-  connection_type?: "ssh" | "local";
+  connection_type?: "ssh" | "local" | "http";
+  remote_http_base_url?: string | null;
   remote_ssh_host?: string;
   remote_ssh_port?: number;
   remote_comfy_host?: string;

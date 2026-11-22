@@ -105,3 +105,11 @@
 @media(max-width:1220px){.personal-tags-page .personal-tags-layout,.personal-tags-page .personal-tags-layout.is-managing{grid-template-columns:minmax(170px,25%) minmax(0,1fr)}.personal-tags-page .personal-tags-composition-column,.personal-tags-page .personal-tags-editor-column{grid-column:1/-1}.personal-tags-page .personal-tags-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:700px){.personal-tags-page .personal-tags-layout,.personal-tags-page .personal-tags-layout.is-managing{display:block}.personal-tags-page .personal-tags-panel,.personal-tags-page .personal-tags-composition-column{margin-bottom:10px}.personal-tags-page .personal-tags-categories nav{max-height:220px;overflow:auto}.personal-tags-page .personal-tags-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.personal-tags-page .personal-tags-compact-toggle{display:block;width:100%;padding:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);text-align:left}.personal-tags-page .personal-tags-composition-column>div{display:none}.personal-tags-page .personal-tags-composition-column>div.is-open{display:block}.personal-tags-page .personal-tags-search{flex-wrap:wrap}.personal-tags-page .personal-tags-search label:first-child{flex-basis:100%}}
 @media(max-width:450px){.personal-tags-page .personal-tags-cards{grid-template-columns:1fr}.personal-tags-page .personal-tags-dialog dl{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:900px) {
+ .personal-tags-page .personal-tags-layout,.personal-tags-page .personal-tags-layout.is-managing{display:block;}
+ .personal-tags-page .personal-tags-panel,.personal-tags-page .personal-tags-composition-column{margin-bottom:12px;}
+ .personal-tags-page .personal-tags-categories nav{max-height:none;overflow:visible;}
+ .personal-tags-page .personal-tags-card p,.personal-tags-page .personal-tags-side small{max-height:none;overflow:visible;}
+ .personal-tags-page .personal-tags-cards{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media(max-width:450px){.personal-tags-page .personal-tags-cards{grid-template-columns:1fr;}}

@@ -6,6 +6,7 @@ import type {ArtistSearchItem, ArtistSearchResponse} from "../lib/types";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
 import {ArtistLibraryThumbnail} from "./ArtistLibraryThumbnail";
 import "./libraryPages.css";
+import "./artistPresets.css";
 
 export function ArtistSearchPage() {
   const [params, setParams] = useSearchParams();
@@ -66,9 +67,11 @@ export function ArtistSearchPage() {
     setParams(next);
   }
 
-  if (error && !data) return <div className="page"><ErrorState message={error.message} requestId={error.requestId} onRetry={() => setRunId((value) => value + 1)} /></div>;
+  const libraryTabs = <nav className="artist-library-tabs" aria-label="画师资料类型"><Link to="/artists" aria-current="page">单个画师</Link><Link to="/artists/presets">画师串</Link></nav>;
+  if (error && !data) return <div className="page">{libraryTabs}<ErrorState message={error.message} requestId={error.requestId} onRetry={() => setRunId((value) => value + 1)} /></div>;
 
   return <div className="page library-page artist-search-page">
+    {libraryTabs}
     {loading && !data ? <LoadingState label="正在读取画师关联数据…" /> : data && <>
       <header className="artist-lab-hero">
         <div><h1>画师研究室</h1><p>浏览本地样图，寻找适合画面的画师 tag 与题材线索。</p></div>

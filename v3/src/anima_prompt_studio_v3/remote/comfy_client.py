@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from anima_prompt_studio.domain.execution_models import EnvironmentReport, RemoteArtifact
+from .preparation_budget import DirectPreparationTimeout, current_preparation_budget, preparation_request_timeout
 
 
 class ComfyAPIError(RuntimeError):
@@ -25,6 +26,7 @@ class ComfyUIClient:
         base_url: str,
         session=None,
         timeout: tuple[float, float] = (10.0, 60.0),
+        api_key: str = "",
     ) -> None:
         self.base_url = base_url.rstrip("/")
         if session is None:
@@ -35,8 +37,12 @@ class ComfyUIClient:
             session = requests.Session()
         self.session = session
         self.timeout = timeout
+        self._api_key = api_key
+        self._secure_http = self.base_url.startswith("https://")
         self._object_info_cache: dict[str, Any] | None = None
         self._uploaded_images: set[str] = set()
+        self._runtime_profile = None
+        self._observed_runtime_id = None
 
     def validate_environment(self) -> EnvironmentReport:
         stats = self._get_json("/system_stats")
@@ -75,6 +81,24 @@ class ComfyUIClient:
         """Validate enum-backed inputs such as model files before queueing."""
         object_info = self._object_info()
         errors: list[str] = []
+        # Gateway aggregate readiness catches size/regular-file failures which
+        # a ComfyUI filename enumeration alone cannot establish.
+        if self._runtime_profile is not None and self._runtime_profile.http_gateway:
+            from .cloud_model_catalog import parse_catalog, asset_path
+            try:
+                models = self._clean(parse_catalog(self.read_bounded('/_moss/models')))['models']
+            except ComfyAPIError as exc:
+                if exc.code.startswith('runtime_identity_'):
+                    raise
+                models = []  # Old gateways may use the ordinary full node preflight.
+            except ValueError:
+                models = []
+            checkpoints = {str(value) for node in workflow.values() if isinstance(node, dict)
+                           for name, value in node.get('inputs', {}).items() if name in {'unet_name', 'ckpt_name'} and isinstance(value, str)}
+            for model in models:
+                checkpoint = model.get('checkpoint')
+                if checkpoint and asset_path(checkpoint)['filename'] in checkpoints and not model['ready']:
+                    errors.append(f"云端模型 {model['display_name']} 文件缺失或大小不符，请先在笔记本准备该模型。")
         for node_id, node in workflow.items():
             if not isinstance(node, dict):
                 continue
@@ -155,18 +179,18 @@ class ComfyUIClient:
         filename = remote_name or source.name
         try:
             with source.open("rb") as stream:
-                response = self.session.post(
+                response = self._request("post",
                     f"{self.base_url}/upload/image",
                     files={"image": (filename, stream, "application/octet-stream")},
                     data={"type": "input", "subfolder": subfolder, "overwrite": "true"},
                     timeout=self.timeout,
                 )
             self._raise_for_status(response, "/upload/image")
-            result = response.json()
+            result = self._clean(response.json())
         except ComfyAPIError:
             raise
         except Exception as exc:
-            raise ComfyAPIError(f"上传原图到 ComfyUI 失败：{exc}", code="upload_failed") from exc
+            raise ComfyAPIError("上传原图到 ComfyUI 失败。" if self._secure_http else f"上传原图到 ComfyUI 失败：{exc}", code="upload_failed") from None
         if not isinstance(result, dict) or not result.get("name"):
             raise ComfyAPIError("ComfyUI 未返回上传文件名。", code="invalid_upload_response")
         uploaded_subfolder = str(result.get("subfolder") or subfolder).strip("/\\")
@@ -268,7 +292,7 @@ class ComfyUIClient:
             "subfolder": artifact.subfolder,
             "type": artifact.folder_type,
         }
-        response = self.session.get(
+        response = self._request("get",
             f"{self.base_url}/view?{urlencode(params)}",
             timeout=self.timeout,
         )
@@ -289,32 +313,128 @@ class ComfyUIClient:
 
     def _get_json(self, path: str) -> dict[str, Any]:
         try:
-            response = self.session.get(f"{self.base_url}{path}", timeout=self.timeout)
+            response = self._request("get", f"{self.base_url}{path}", timeout=self.timeout)
             self._raise_for_status(response, path)
-            result = response.json()
-        except ComfyAPIError:
+            result = self._clean(response.json())
+        except (ComfyAPIError, DirectPreparationTimeout):
             raise
         except Exception as exc:
-            raise ComfyAPIError(f"无法访问 ComfyUI {path}：{exc}", code="connection_error") from exc
+            raise ComfyAPIError(f"无法访问 ComfyUI {path}。" if self._secure_http else f"无法访问 ComfyUI {path}：{exc}", code="connection_error") from None
         if not isinstance(result, dict):
             raise ComfyAPIError(f"ComfyUI {path} 返回了无效数据。", code="invalid_response")
         return result
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            response = self.session.post(f"{self.base_url}{path}", json=payload, timeout=self.timeout)
+            response = self._request("post", f"{self.base_url}{path}", json=payload, timeout=self.timeout)
+            if path == "/prompt" and response.status_code == 400:
+                raise self._prompt_rejection(response, payload["prompt"])
             self._raise_for_status(response, path)
-            result = response.json()
-        except ComfyAPIError:
+            result = self._clean(response.json())
+        except (ComfyAPIError, DirectPreparationTimeout):
             raise
         except Exception as exc:
-            raise ComfyAPIError(f"无法提交到 ComfyUI {path}：{exc}", code="connection_error") from exc
+            raise ComfyAPIError(f"无法提交到 ComfyUI {path}。" if self._secure_http else f"无法提交到 ComfyUI {path}：{exc}", code="connection_error") from None
         if not isinstance(result, dict):
             raise ComfyAPIError(f"ComfyUI {path} 返回了无效数据。", code="invalid_response")
         return result
 
-    @staticmethod
-    def _raise_for_status(response, path: str) -> None:
+    def _prompt_rejection(self, response, workflow: dict) -> ComfyAPIError:
+        # Gateways can echo credentials, paths or prompt text. Use the submitted
+        # node names and recognized error types, never the remote diagnostic text.
+        reasons = {"value_not_in_list": "不在当前服务器的可选项中", "required_input_missing": "缺少必需输入",
+                   "bad_linked_input": "节点连接无效", "custom_validation_failed": "未通过输入校验"}
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+        rejected = data.get("node_errors") if isinstance(data, dict) else None
+        notes = []
+        for node_id, node_error in (rejected if isinstance(rejected, dict) else {}).items():
+            node = workflow.get(node_id)
+            if not isinstance(node, dict) or not isinstance(node_error, dict):
+                continue
+            issues = node_error.get("errors") or []
+            issue = issues[0] if isinstance(issues, list) and issues and isinstance(issues[0], dict) else {}
+            info = issue.get("extra_info")
+            name = info.get("input_name") if isinstance(info, dict) else None
+            field = f" 的 {name}" if isinstance(name, str) and name in node.get("inputs", {}) else ""
+            message = reasons.get(str(issue.get("type")), "输入或资源未通过校验")
+            notes.append(f"节点 {node_id} ({node.get('class_type', '')}){field}：{message}")
+            if len(notes) >= 3:
+                break
+        reason = "；".join(notes) or "请检查当前环境的工作流节点、模型和输入参数。"
+        return ComfyAPIError(self._clean(f"ComfyUI 拒绝了工作流（HTTP 400）：{reason}"), code="workflow_rejected")
+
+    def _request(self, method, url, **options):
+        if self._runtime_profile is not None and not url.endswith('/_moss/info'):
+            from .connections import read_runtime_identity
+            read_runtime_identity(self, self._runtime_profile)
+        options["timeout"] = preparation_request_timeout(options.get("timeout", self.timeout))
+        if self._secure_http:
+            options.update(allow_redirects=False, verify=True)
+            if self._api_key:
+                options['headers'] = {**(options.get('headers') or {}), 'Authorization': 'Bearer ' + self._api_key}
+        try:
+            return getattr(self.session, method)(url, **options)
+        except DirectPreparationTimeout:
+            raise
+        except Exception as error:
+            try:
+                from requests.exceptions import Timeout
+                timed_out = isinstance(error, (TimeoutError, Timeout))
+            except ImportError:
+                timed_out = isinstance(error, TimeoutError)
+            if timed_out:
+                if current_preparation_budget() is not None:
+                    raise DirectPreparationTimeout() from None
+                raise ComfyAPIError("ComfyUI 请求超时，请稍后重试或更换连接。", code="timeout") from None
+            if self._secure_http:
+                raise ComfyAPIError("HTTPS ComfyUI 请求失败，请检查地址、证书和访问密钥。", code="connection_error") from None
+            raise
+
+    def read_bounded(self, path, *, maximum=1024 * 1024):
+        """Stream fixed gateway resources with a strict decoded-byte ceiling."""
+        response = None
+        started = time.monotonic()
+        try:
+            response = self._request('get', self.base_url + path, timeout=self.timeout, stream=True)
+            if response.status_code == 404:
+                raise ComfyAPIError('云端未提供此接口。', code='unsupported')
+            self._raise_for_status(response, path)
+            chunks, size = [], 0
+            for chunk in response.iter_content(chunk_size=16384):
+                if time.monotonic() - started > 15:
+                    raise ComfyAPIError('读取云端信息超时。', code='timeout')
+                size += len(chunk)
+                if size > maximum:
+                    raise ComfyAPIError('云端响应超过大小限制。', code='response_too_large')
+                chunks.append(chunk)
+            return b''.join(chunks)
+        except (ComfyAPIError, DirectPreparationTimeout):
+            raise
+        except Exception:
+            raise ComfyAPIError('无法读取云端信息，请检查连接和访问密钥。', code='connection_error') from None
+        finally:
+            if response is not None:
+                response.close()
+
+    def _clean(self, value):
+        if not self._api_key:
+            return value
+        if isinstance(value, str):
+            return value.replace(self._api_key, '[redacted]')
+        if isinstance(value, dict):
+            return {self._clean(k): self._clean(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._clean(v) for v in value]
+        return value
+
+    def _raise_for_status(self, response, path: str) -> None:
+        if self._secure_http and not 200 <= response.status_code < 300:
+            raise ComfyAPIError(
+                f"ComfyUI {path} 请求失败（HTTP {response.status_code}），请检查地址和访问密钥。",
+                code="redirect_rejected" if 300 <= response.status_code < 400 else "http_error")
         try:
             response.raise_for_status()
         except Exception as exc:

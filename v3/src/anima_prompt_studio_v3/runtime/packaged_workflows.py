@@ -7,7 +7,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
-from anima_prompt_studio.domain.execution_models import WorkflowProfile
+from anima_prompt_studio.domain.execution_models import LoRAExtension, WorkflowProfile
 from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
 
@@ -30,8 +30,11 @@ def packaged_workflow_profiles() -> list[WorkflowProfile]:
     if set(manifest["templates"]) != {p.id for p in profiles}:
         raise ValueError("工作流目录声明与打包文件不一致。")
     for profile in profiles:
-        if manifest["templates"][profile.id]["model"] not in profile.compatible_model_profiles:
+        declaration = manifest["templates"][profile.id]
+        if declaration["model"] not in profile.compatible_model_profiles:
             raise ValueError("工作流模型声明不一致。")
+        if extension := declaration.get("lora_extension"):
+            profile._lora_extension = LoRAExtension.model_validate(manifest["lora_extensions"][extension])
     return profiles
 
 

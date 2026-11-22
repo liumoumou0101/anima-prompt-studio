@@ -1,4 +1,4 @@
-import {cleanup, fireEvent, render, screen, waitFor, within} from "@testing-library/react";
+import {act,cleanup, fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import {MemoryRouter} from "react-router-dom";
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {ConversationWorkbenchPage} from "./ConversationWorkbenchPage";
@@ -6,6 +6,8 @@ import {editableRequirements, emptyRequirements} from "../lib/conversation";
 import type {ConversationRecord} from "../lib/conversation";
 import {defaultGenerationSettings} from "../lib/generationSettings";
 import {conversationDraftKey, getConversationTabId, readConversationDraft} from "../lib/conversationDrafts";
+import * as editorHistoryStorage from "../lib/editorHistoryStore";
+import type {EditorBundle} from "../lib/editorHistoryStore";
 
 vi.mock("../components/ArtistRecommendations", () => ({ArtistRecommendations: () => null}));
 vi.mock("../components/ManualIdentityTags", () => ({ManualIdentityTags: () => null}));
@@ -26,13 +28,18 @@ beforeEach(() => {
   history = [structuredClone(workspace)]; proposal = null; calls = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input), method = init?.method || "GET", body = init?.body ? JSON.parse(String(init.body)) : null;
-    if (method !== "GET") calls.push({url, body, method});
+    if (method !== "GET"&&!url.includes("/checkpoints")) calls.push({url, body, method});
     let response: unknown = {items: []};
     if (url.endsWith("/llm/settings")) response = {current: {service: "test", model: "small", workbench_enable_thinking: false,
       thinking: {mode: "switchable", message: ""}}, services: []};
     else if (url.includes("/workspaces?")) response = {items: [workspace]};
     else if (url.includes("/versions?")) response = {items: history};
     else if (url.endsWith("/proposal")) response = {proposal};
+    else if(url.endsWith("/editor-context")&&method==="POST")response={token:"context-ux"};
+    else if(url.endsWith("/editor-restore")&&method==="POST"){
+      workspace={...workspace,revision:workspace.revision+1,draft:{...workspace.draft,model_profile:body.draft.model_profile,mode:body.draft.mode,generation_settings:body.draft.generation_settings,requirements:{...body.draft.requirements_edit,contract:"anima-requirements/1",revision:2},compiled:{...workspace.draft.compiled!,...body.draft.prompt_edit}}};
+      history.unshift(structuredClone(workspace));response=workspace;
+    }
     else if (url.endsWith("/workbench/turns")) {
       const candidate = structuredClone(workspace.draft);
       candidate.compiled!.positive = "woman, red coat";
@@ -65,7 +72,9 @@ beforeEach(() => {
 });
 afterEach(() => {cleanup(); vi.restoreAllMocks();});
 function openSection(name: string | RegExp) {
-  const summary = screen.getByText(name, {selector: "summary"});
+  if(name==="分层画面要求与锁定")fireEvent.click(screen.getByRole("button",{name:"分层要求"}));
+  const summary = screen.queryByText(name, {selector: "summary"});
+  if(!summary){if(name==="更多创作工具")return;throw new Error(`Missing section: ${name}`);}
   if (!(summary.parentElement as HTMLDetailsElement).open) fireEvent.click(summary);
 }
 async function openRecovery() {
@@ -228,11 +237,11 @@ it("restores an earlier saved version into the editor without deleting later his
   await mount();
   fireEvent.click(screen.getByRole("button", {name: "创作记录"}));
   const card = (await screen.findByText("woman, green coat")).closest("article")!;
-  const restore = within(card).getByRole("button", {name: "恢复到这里"});
+  const restore = within(card).getByRole("button", {name: "用此版本继续编辑"});
   fireEvent.click(restore);
   await waitFor(() => expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, green coat"));
-  expect(workspace.revision).toBe(3);
-  expect(history.map(item => item.revision)).toEqual([3, 2]);
+  await waitFor(()=>expect(workspace.revision).toBe(4));
+  expect(history.map(item => item.revision)).toEqual([4,3, 2]);
   fireEvent.click(screen.getByRole("button", {name: "撤销"}));
   expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, blue coat");
 });
@@ -256,6 +265,7 @@ it("forks a historical version with an idempotent request and exposes its parent
   expect(forkKey).not.toBe("");
   expect(workspace.revision).toBe(3);
   expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, green coat");
+  fireEvent.click(screen.getByRole("button",{name:"分层要求"}));
   expect(screen.getByRole("button", {name:"打开来源会话"})).toBeEnabled();
   expect(screen.getByLabelText("打开已有会话")).toHaveValue("workspace_branch");
 });
@@ -340,6 +350,111 @@ it("can undo and redo a manual prompt edit before saving", async () => {
   expect(calls).toHaveLength(0);
 });
 
+it("recovers the persisted undo and redo cursor in a new document",async()=>{
+ await mount();fireEvent.change(screen.getByLabelText("正向提示词"),{target:{value:"woman, white coat"}});
+ cleanup();await mount();expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, white coat");
+ fireEvent.click(screen.getByRole("button",{name:"撤销"}));expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, blue coat");
+ cleanup();await mount();expect(screen.getByRole("button",{name:"重做"})).toBeEnabled();
+ fireEvent.click(screen.getByRole("button",{name:"重做"}));expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, white coat");
+});
+
+it("preserves own-save undo but archives the shortcut chain when a remote baseline advances",async()=>{
+ await mount();fireEvent.change(screen.getByLabelText("正向提示词"),{target:{value:"woman, white coat"}});
+ fireEvent.click(screen.getByRole("button",{name:"保存当前版本"}));await waitFor(()=>expect(workspace.revision).toBe(4));
+ expect(screen.getByRole("button",{name:"撤销"})).toBeEnabled();cleanup();
+ workspace={...workspace,revision:5,draft:{...workspace.draft,compiled:{...workspace.draft.compiled!,positive:"remote green coat"}}};history.unshift(structuredClone(workspace));
+ await mount();expect(screen.getByLabelText("正向提示词")).toHaveValue("remote green coat");expect(screen.getByRole("button",{name:"撤销"})).toBeDisabled();expect(screen.getByRole("button",{name:"重做"})).toBeDisabled();
+ const recovered=readConversationDraft(workspace.id)!;expect(recovered.editorJournal?.archived.some(operation=>operation.snapshot.positive==="woman, white coat")).toBe(true);expect(recovered.editorJournal?.cursor).toBe(0);
+});
+
+it("continuing an old content version keeps current parameters and clears newer semantic requirements",async()=>{
+ workspace.draft.generation_settings={...defaultGenerationSettings(),steps:22,cfg:3.2};
+ workspace.draft.requirements!.layers.subject.text="newer requirement";
+ const older=structuredClone(workspace);older.revision=2;older.draft.compiled!.positive="old content";older.draft.requirements!.layers.subject.text="old requirement";older.draft.generation_settings={...defaultGenerationSettings(),steps:35,cfg:4.5};history.push(older);
+ await mount();fireEvent.click(screen.getByRole("button",{name:"创作记录"}));const card=(await screen.findByText("old content")).closest("article")!;
+ fireEvent.click(within(card).getByRole("button",{name:"用此版本继续编辑"}));
+ await waitFor(()=>expect(workspace.revision).toBe(4));expect(workspace.draft.generation_settings?.steps).toBe(22);expect(workspace.draft.generation_settings?.cfg).toBe(3.2);expect(workspace.draft.requirements?.layers.subject.text).toBe("old requirement");
+});
+
+it("a delayed restore acknowledgement cannot overwrite a newer undo",async()=>{
+ const older=structuredClone(workspace);older.revision=2;older.draft.compiled!.positive="old content";history.push(older);
+ const original=vi.mocked(fetch).getMockImplementation()!;let finish!:(response:Response)=>void;
+ vi.mocked(fetch).mockImplementation(async(input,init)=>String(input).endsWith("/editor-restore")?new Promise(resolve=>{finish=resolve;}):original(input,init));
+ await mount();fireEvent.click(screen.getByRole("button",{name:"创作记录"}));const card=(await screen.findByText("old content")).closest("article")!;
+ fireEvent.click(within(card).getByRole("button",{name:"用此版本继续编辑"}));fireEvent.click(screen.getByRole("button",{name:"撤销"}));
+ const restored={...workspace,revision:4,draft:{...older.draft,generation_settings:workspace.draft.generation_settings}};
+ await act(async()=>finish(new Response(JSON.stringify(restored))));
+ expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, blue coat");
+});
+
+it("recovers a newer IndexedDB draft after localStorage quota failure before adopting server text",async()=>{
+ const bundles=new Map<string,EditorBundle>();let timestamp=1700000000000;vi.spyOn(Date,"now").mockImplementation(()=>++timestamp);
+ vi.stubGlobal("indexedDB",{});
+ vi.spyOn(editorHistoryStorage,"saveEditorBundle").mockImplementation(async bundle=>{bundles.set(`${bundle.workspaceId}:${bundle.documentId}`,structuredClone(bundle));});
+ vi.spyOn(editorHistoryStorage,"readLatestEditorBundle").mockImplementation(async(workspaceId,documentIds)=>{
+   for(const id of documentIds){const bundle=bundles.get(`${workspaceId}:${id}`);if(bundle)return structuredClone(bundle);}return null;
+ });
+ try{
+   await mount();const previous=readConversationDraft(workspace.id)!;
+   const originalSetItem=Storage.prototype.setItem;
+   vi.spyOn(Storage.prototype,"setItem").mockImplementation(function(this:Storage,key,value){
+     if(this===localStorage&&key.startsWith("anima-conversation-draft:v1:"))throw new DOMException("quota","QuotaExceededError");originalSetItem.call(this,key,value);
+   });
+   fireEvent.change(screen.getByLabelText("正向提示词"),{target:{value:"newer IndexedDB coat"}});
+   fireEvent.change(screen.getByLabelText("这次想怎么改？"),{target:{value:"opinion backed up only in IndexedDB"}});
+   const slot=`${workspace.id}:${getConversationTabId()}`;
+   await waitFor(()=>expect(bundles.get(slot)?.local.delta).toBe("opinion backed up only in IndexedDB"));
+   expect(bundles.get(slot)?.savedAt).toBeGreaterThan(previous.savedAt!);expect(readConversationDraft(workspace.id)?.local?.positive).toBe("woman, blue coat");
+   expect(bundles.get(slot)?.journal.entries).toHaveLength(1);cleanup();
+   await mount();expect(screen.getByLabelText("正向提示词")).toHaveValue("newer IndexedDB coat");expect(screen.getByLabelText("这次想怎么改？")).toHaveValue("opinion backed up only in IndexedDB");
+   expect(bundles.get(slot)?.local.positive).toBe("newer IndexedDB coat");expect(screen.getByRole("button",{name:"撤销"})).toBeEnabled();
+   fireEvent.click(screen.getByRole("button",{name:"撤销"}));expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, blue coat");expect(screen.getByLabelText("这次想怎么改？")).toHaveValue("opinion backed up only in IndexedDB");expect(screen.getByRole("button",{name:"重做"})).toBeEnabled();
+ }finally{cleanup();vi.unstubAllGlobals();}
+});
+
+it("keeps a newer pending restore when an older restore receipt arrives first",async()=>{
+ const first=structuredClone(workspace),second=structuredClone(workspace);first.revision=2;first.draft.compiled!.positive="first historical restore";second.revision=1;second.draft.compiled!.positive="second historical restore";history.push(first,second);
+ const original=vi.mocked(fetch).getMockImplementation()!;const restores:{body:any;finish:(response:Response)=>void}[]=[];
+ vi.mocked(fetch).mockImplementation((input,init)=>String(input).endsWith("/editor-restore")?new Promise(resolve=>{restores.push({body:JSON.parse(String(init?.body)),finish:resolve});}):original(input,init));
+ await mount();fireEvent.click(screen.getByRole("button",{name:"创作记录"}));let card=(await screen.findByText("first historical restore")).closest("article")!;fireEvent.click(within(card).getByRole("button",{name:"用此版本继续编辑"}));
+ fireEvent.click(screen.getByRole("button",{name:"创作记录"}));card=(await screen.findByText("second historical restore")).closest("article")!;fireEvent.click(within(card).getByRole("button",{name:"用此版本继续编辑"}));
+ expect(restores).toHaveLength(2);const newerOperation=restores[1].body.operation_id;expect(newerOperation).not.toBe(restores[0].body.operation_id);
+ expect(readConversationDraft(workspace.id)?.editorJournal?.pendingRestore?.operationId).toBe(newerOperation);
+ workspace={...workspace,revision:4,draft:{...first.draft}};
+ await act(async()=>restores[0].finish(new Response(JSON.stringify(workspace))));
+ expect(screen.getByLabelText("正向提示词")).toHaveValue("second historical restore");expect(readConversationDraft(workspace.id)?.editorJournal?.pendingRestore?.operationId).toBe(newerOperation);
+ expect(calls.some(call=>call.method==="PUT")).toBe(false);
+ await act(async()=>restores[1].finish(new Response(JSON.stringify({error:{code:"workspace_revision_conflict",message:"another restore already saved"}}),{status:409})));
+ expect(screen.getByLabelText("正向提示词")).toHaveValue("second historical restore");expect(await screen.findByText("其他窗口已保存了更新，你的编辑仍在这里。")).toBeInTheDocument();
+});
+
+it.each(["merge","server"] as const)("finishes a rejected restore after an explicit %s decision and permits saving",async decision=>{
+ const older=structuredClone(workspace);older.revision=2;older.draft.compiled!.positive="rejected historical content";history.push(older);
+ const original=vi.mocked(fetch).getMockImplementation()!;const restoreRequests:any[]=[];
+ vi.mocked(fetch).mockImplementation(async(input,init)=>{
+   const url=String(input);if(url.endsWith("/checkpoints")&&init?.method==="POST")throw new TypeError("checkpoint sync offline");
+   if(url.endsWith("/editor-restore")){restoreRequests.push(JSON.parse(String(init?.body)));workspace={...workspace,revision:4,draft:{...workspace.draft,requirements:{...workspace.draft.requirements!,layers:{...workspace.draft.requirements!.layers,lighting:{...workspace.draft.requirements!.layers.lighting,text:"remote morning"}}}}};return new Response(JSON.stringify({error:{code:"workspace_revision_conflict",message:"restore rejected"}}),{status:409});}
+   return original(input,init);
+ });
+ await mount();fireEvent.click(screen.getByRole("button",{name:"创作记录"}));const card=(await screen.findByText("rejected historical content")).closest("article")!;fireEvent.click(within(card).getByRole("button",{name:"用此版本继续编辑"}));
+ await screen.findByText("其他窗口已保存了更新，你的编辑仍在这里。");const operationId=restoreRequests[0].operation_id;
+ fireEvent.click(screen.getByRole("button",{name:decision==="merge"?"合并双方修改":"采用服务端版本"}));
+ expect(readConversationDraft(workspace.id)?.editorJournal?.pendingRestore).toBeUndefined();
+ const journal=readConversationDraft(workspace.id)?.editorJournal;expect(journal?.archived.some(operation=>operation.id===operationId)).toBe(true);expect(journal?.outbox.some(operation=>operation.id===operationId)).toBe(true);
+ if(decision==="server")fireEvent.change(screen.getByLabelText("正向提示词"),{target:{value:"edited after choosing server"}});
+ fireEvent.click(screen.getByRole("button",{name:"保存当前版本"}));await waitFor(()=>expect(workspace.revision).toBe(5));
+ expect(restoreRequests).toHaveLength(1);expect(workspace.draft.compiled?.positive).toBe(decision==="merge"?"rejected historical content":"edited after choosing server");
+});
+
+it("retains an uncertain restore and retries exactly the same operation after a network failure",async()=>{
+ const older=structuredClone(workspace);older.revision=2;older.draft.compiled!.positive="uncertain historical content";history.push(older);
+ const original=vi.mocked(fetch).getMockImplementation()!;const bodies:string[]=[];
+ vi.mocked(fetch).mockImplementation(async(input,init)=>{if(String(input).endsWith("/editor-restore")){bodies.push(String(init?.body));if(bodies.length===1)throw new TypeError("response unavailable");}return original(input,init);});
+ await mount();fireEvent.click(screen.getByRole("button",{name:"创作记录"}));const card=(await screen.findByText("uncertain historical content")).closest("article")!;fireEvent.click(within(card).getByRole("button",{name:"用此版本继续编辑"}));
+ await screen.findByText(/无法连接本地服务/);expect(readConversationDraft(workspace.id)?.editorJournal?.pendingRestore?.body).toBe(bodies[0]);expect(screen.queryByRole("button",{name:"采用服务端版本"})).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole("button",{name:"保存当前版本"}));await waitFor(()=>expect(workspace.revision).toBe(4));expect(bodies).toHaveLength(2);expect(bodies[1]).toBe(bodies[0]);expect(readConversationDraft(workspace.id)?.editorJournal?.pendingRestore).toBeUndefined();
+});
+
 it("keeps an unpersisted modification request in the current conversation", async () => {
   const originalFetch = vi.mocked(fetch).getMockImplementation()!;
   vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes("/runs?limit=")
@@ -420,10 +535,10 @@ it("restores history with an unsent request and recovers that request through un
   fireEvent.change(screen.getByLabelText("这次想怎么改？"), {target: {value: "保留这段未发送意见"}});
   fireEvent.click(screen.getByRole("button", {name: "创作记录"}));
   const card = (await screen.findByText("woman, green coat")).closest("article")!;
-  fireEvent.click(within(card).getByRole("button", {name: "恢复到这里"}));
+  fireEvent.click(within(card).getByRole("button", {name: "用此版本继续编辑"}));
   expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, green coat");
   fireEvent.click(screen.getByRole("button", {name: "撤销"}));
   expect(screen.getByLabelText("正向提示词")).toHaveValue("woman, blue coat");
   expect(screen.getByLabelText("这次想怎么改？")).toHaveValue("保留这段未发送意见");
-  expect(workspace.revision).toBe(3);
+  expect(workspace.revision).toBe(4);
 });

@@ -52,10 +52,10 @@ it("links the selected server to the independent workflow resource page", async 
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-it("keeps appearance available without a connection and preserves connection drafts across all four modes", async () => {
+it("keeps appearance available without a connection and preserves connection drafts across both themes", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({items: [], workflows: [], credential_store_available: true})));
   const empty = render(<SettingsPage remoteEnabled={false} />);
-  expect(screen.getByLabelText("界面布局")).toBeEnabled();
+  expect(screen.queryByLabelText("界面布局")).not.toBeInTheDocument();
   expect(screen.getByLabelText("明暗主题")).toBeEnabled();
   expect(fetchMock).not.toHaveBeenCalled();
   empty.unmount();
@@ -63,19 +63,14 @@ it("keeps appearance available without a connection and preserves connection dra
   const name = await screen.findByLabelText("显示名称");
   fireEvent.change(name, {target: {value: "未保存的云主机名称"}});
   fireEvent.change(screen.getByLabelText("SSH 密码"), {target: {value: "unsaved-test-password"}});
-  const layout = screen.getByLabelText("界面布局") as HTMLSelectElement;
   const theme = screen.getByLabelText("明暗主题") as HTMLSelectElement;
-  const previous = {layout: layout.value, theme: theme.value};
-  for (const value of ["studio", "editorial"]) {
-    fireEvent.change(layout, {target: {value}});
+  const previous = {theme: theme.value};
     for (const mode of ["light", "dark"]) {
       fireEvent.change(theme, {target: {value: mode}});
       expect(name).toHaveValue("未保存的云主机名称");
       expect(screen.getByLabelText("SSH 密码")).toHaveValue("unsaved-test-password");
     }
-  }
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  fireEvent.change(layout, {target: {value: previous.layout}});
   fireEvent.change(theme, {target: {value: previous.theme}});
 });
 

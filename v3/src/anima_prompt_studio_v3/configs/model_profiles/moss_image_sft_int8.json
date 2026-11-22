@@ -1,0 +1,11 @@
+{
+  "id": "moss_image_sft_int8",
+  "display_name": "MOSS Image SFT INT8",
+  "family": "moss",
+  "variant": "community",
+  "positive_prefix": [],
+  "negative_prompt": [],
+  "negative_prompt_mode": "enabled",
+  "tag_separator": ", ",
+  "renderer_version": "moss-natural-v1"
+}

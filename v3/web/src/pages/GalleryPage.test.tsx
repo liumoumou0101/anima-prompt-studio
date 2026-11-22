@@ -39,24 +39,25 @@ beforeEach(() => {
 });
 
 function WorkspaceDestination() {
-  return <h1>工作台地址：{useLocation().search}</h1>;
+  const location=useLocation();return <h1>工作台地址：{location.pathname}{location.search}</h1>;
 }
 
-it("opens the selected gallery image in a new workspace directly without creating a reference", async () => {
+it.each([["anima_base_v1","/workbench"],["moss_image_sft_int8","/moss"]])("opens a gallery transfer in the confirmed %s workspace", async (model,pathname) => {
   const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     if (String(input).startsWith("/api/v3/gallery/assets?")) return new Response(JSON.stringify(galleryResponse));
     expect(String(input)).toBe("/api/v3/gallery/assets/workspace");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({path: "项目/batch/one.png"});
-    return new Response(JSON.stringify({id: "workspace_gallery"}), {status: 201});
+    return new Response(JSON.stringify({id: "workspace_gallery",revision:1,draft:{model_profile:model}}), {status: 201});
   });
   render(<MemoryRouter initialEntries={["/gallery"]}><Routes>
     <Route path="/gallery" element={<GalleryPage enabled />} />
     <Route path="/workbench" element={<WorkspaceDestination />} />
+    <Route path="/moss" element={<WorkspaceDestination />} />
   </Routes></MemoryRouter>);
   fireEvent.click(await screen.findByRole("button", {name: "查看 one.png"}));
   fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
-  expect(await screen.findByRole("heading", {name: "工作台地址：?workspace=workspace_gallery"})).toBeInTheDocument();
+  expect(await screen.findByRole("heading", {name:`工作台地址：${pathname}?workspace=workspace_gallery`})).toBeInTheDocument();
   expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
 });
 
@@ -101,7 +102,7 @@ it("recovers the same gallery creation request after its detail was closed mid-r
     if (init?.method !== "POST") return new Response(JSON.stringify(galleryResponse));
     expect(String(input)).toBe("/api/v3/gallery/assets/workspace");
     if (++posts === 1) return new Promise<Response>(resolve => {finishFirst = resolve;});
-    return new Response(JSON.stringify({id: "workspace_recovered"}), {status: 201});
+    return new Response(JSON.stringify({id: "workspace_recovered",revision:1,draft:{model_profile:"anima_base_v1"}}), {status: 201});
   });
   render(<MemoryRouter initialEntries={["/gallery"]}><Routes>
     <Route path="/gallery" element={<GalleryPage enabled />} />
@@ -110,10 +111,10 @@ it("recovers the same gallery creation request after its detail was closed mid-r
   fireEvent.click(await screen.findByRole("button", {name: "查看 one.png"}));
   fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
   fireEvent.click(screen.getByRole("button", {name: "关闭图片详情"}));
-  finishFirst(new Response(JSON.stringify({id: "workspace_recovered"}), {status: 201}));
+  finishFirst(new Response(JSON.stringify({id: "workspace_recovered",revision:1,draft:{model_profile:"anima_base_v1"}}), {status: 201}));
   fireEvent.click(screen.getByRole("button", {name: "查看 one.png"}));
   fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
-  await screen.findByRole("heading", {name: "工作台地址：?workspace=workspace_recovered"});
+  await screen.findByRole("heading", {name: "工作台地址：/workbench?workspace=workspace_recovered"});
   const requests = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
   expect(new Headers(requests[1][1]?.headers).get("Idempotency-Key"))
     .toBe(new Headers(requests[0][1]?.headers).get("Idempotency-Key"));
@@ -229,6 +230,88 @@ it("uses trash identities for renamed restores and keeps failed items selected",
   fireEvent.click(screen.getByRole("button", {name: /^恢复$/}));
   expect(await screen.findByText("已恢复 1 张，1 张未完成，已保留选择。")).toBeInTheDocument();
   expect(screen.queryByAltText("one.png")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("取消选择 two.jpg")).toHaveAttribute("aria-pressed", "true");
+});
+
+it.each([
+  [{available: false, reason: "请在设置中连接可用的出图环境。"}, "请在设置中连接可用的出图环境。"],
+  [undefined, "尚未获取放大配置，请刷新画廊。"],
+] as const)("shows the same upscale availability in image details and batch selection", async (processing, reason) => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+    new Response(JSON.stringify({...galleryResponse, processing})));
+  render(<GalleryPage enabled />);
+  fireEvent.click(await screen.findByAltText("one.png"));
+  fireEvent.click(screen.getByLabelText("更多图片操作"));
+  const single = screen.getByRole("button", {name: "1.5× 图像放大"});
+  expect(single).toBeDisabled();
+  expect(single).toHaveAccessibleDescription(reason);
+  expect(screen.getByText(reason)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", {name: "关闭图片详情"}));
+  fireEvent.click(screen.getByRole("button", {name: "多选模式"}));
+  fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
+  const batch = screen.getByRole("button", {name: "1.5× 图像放大"});
+  expect(batch).toBeDisabled();
+  expect(batch).toHaveAccessibleDescription(reason);
+  expect(screen.getByText(reason)).toBeVisible();
+  fireEvent.click(batch);
+  expect(screen.queryByRole("button", {name: "加入队列"})).not.toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+});
+
+it.each(["single", "batch"])("queues a %s upscale and identifies any rejected file", async entrance => {
+  const paths = entrance === "single" ? [assets[0].path] : assets.map(item => item.path);
+  const posts: RequestInit[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input).startsWith("/api/v3/gallery/assets?"))
+      return new Response(JSON.stringify({...galleryResponse, processing: {available: true, scale: 1.5}}));
+    if (String(input) === "/api/v3/gallery/process" && init?.method === "POST") {
+      posts.push(init);
+      return new Response(JSON.stringify({jobs: [{id: "up-1", state: "queued", operation: "gallery_upscale_1_5x", progress: 0, sourceName: assets[0].name}],
+        failed: entrance === "batch" ? [{path: assets[1].path, error: "源文件已移除。"}] : []}), {status: 202});
+    }
+    return new Response(JSON.stringify({jobs: []}));
+  });
+  render(<GalleryPage enabled />);
+  await screen.findByAltText("one.png");
+  if (entrance === "single") {
+    fireEvent.click(screen.getByAltText("one.png"));
+    fireEvent.click(screen.getByLabelText("更多图片操作"));
+  } else {
+    fireEvent.click(screen.getByRole("button", {name: "多选模式"}));
+    fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
+  }
+  fireEvent.click(screen.getByRole("button", {name: "1.5× 图像放大"}));
+  const dialog = screen.getByRole("dialog", {name: "加入 1.5× 图像放大队列"});
+  expect(dialog).toHaveTextContent("超分辨率模型");
+  fireEvent.click(screen.getByRole("button", {name: "加入队列"}));
+  expect(await screen.findByText("已加入 1 项 1.5× 放大任务。")).toBeInTheDocument();
+  expect(posts).toHaveLength(1);
+  const body = JSON.parse(String(posts[0].body));
+  expect(body).toMatchObject({operation: "upscale", count: 1});
+  expect(body.paths.sort()).toEqual([...paths].sort());
+  if (entrance === "batch") {
+    expect(screen.getByText(new RegExp(assets[1].path + ".*源文件已移除"))).toBeVisible();
+    expect(screen.getByLabelText("取消选择 two.jpg")).toHaveAttribute("aria-pressed", "true");
+  }
+});
+
+it("shows per-file server errors when the entire upscale batch is rejected", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input).startsWith("/api/v3/gallery/assets?"))
+      return new Response(JSON.stringify({...galleryResponse, processing: {available: true}}));
+    expect(init?.method).toBe("POST");
+    return new Response(JSON.stringify({error: {code: "gallery_process_rejected", message: "一项未能处理",
+      details: {failed: [{path: assets[0].path, error: "图片缺失"}, {path: assets[1].path, error: "已有放大任务"}]}}}), {status: 422});
+  });
+  render(<GalleryPage enabled />);
+  await screen.findByAltText("one.png");
+  fireEvent.click(screen.getByRole("button", {name: "多选模式"}));
+  fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
+  fireEvent.click(screen.getByRole("button", {name: "1.5× 图像放大"}));
+  fireEvent.click(screen.getByRole("button", {name: "加入队列"}));
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent(`${assets[0].path}（图片缺失）`);
+  expect(alert).toHaveTextContent(`${assets[1].path}（已有放大任务）`);
   expect(screen.getByLabelText("取消选择 two.jpg")).toHaveAttribute("aria-pressed", "true");
 });
 

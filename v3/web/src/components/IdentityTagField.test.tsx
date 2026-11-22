@@ -30,6 +30,18 @@ function Field() {
 }
 function searchRequests() {return vi.mocked(apiRequest).mock.calls.filter(call => call[0].includes("/search"));}
 
+it("consumes Escape only for its open suggestions so a second Escape can close the parent Sheet", async () => {
+  const consumed: boolean[]=[];
+  render(<div onKeyDown={event=>{if(event.key==="Escape")consumed.push(event.defaultPrevented);}}><Field/></div>);
+  const input=screen.getByRole("combobox");
+  fireEvent.change(input,{target:{value:"博丽"}});
+  await screen.findByRole("option");
+  fireEvent.keyDown(input,{key:"Escape"});
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  fireEvent.keyDown(input,{key:"Escape"});
+  expect(consumed).toEqual([true,false]);
+});
+
 it("debounces typed names, chooses with arrows/Enter, and removes a selected tag", async () => {
   render(<Field />);
   const input = screen.getByRole("combobox");
@@ -142,4 +154,27 @@ it("saves user aliases explicitly and reports failure without dropping free tags
   fireEvent.change(input, {target: {value: "free_hero"}});
   await screen.findByText(/词库暂时不可用/);
   expect(input).toHaveValue("free_hero");
+});
+
+it.each(["recent","favorites"] as const)("does not append a canonical identity from %s when its exact alias is already selected",async source=>{
+  const aliasItem={...suggestion,name:"yor_briar",render_name:"yor briar",cn_name:"约尔",aliases:["yor_forger"]};
+  vi.mocked(apiRequest).mockImplementation(async path=>path.includes("/preferences")?{...noPrefs,[source]:[aliasItem]}:{items:[]});
+  render(<Field/>);
+  const input=screen.getByRole("combobox");
+  fireEvent.change(input,{target:{value:"free_hero\nyor_forger"}});
+  fireEvent.focus(input);
+  fireEvent.click(await screen.findByRole("button",{name:"约尔"}));
+  expect(input).toHaveValue("free_hero\nyor_forger");
+  expect(screen.getByLabelText("已添加角色 tag").children).toHaveLength(2);
+  if(source==="favorites")expect(screen.getByLabelText("取消收藏角色 yor forger")).toBeInTheDocument();
+});
+
+it("uses an exact matched alias to avoid appending while preserving unrelated free tags",async()=>{
+  const aliasItem={...suggestion,name:"yor_briar",render_name:"yor briar",cn_name:"约尔",match_kind:"alias",match_text:"yor_forger"};
+  vi.mocked(apiRequest).mockImplementation(async path=>path.includes("/preferences")?{...noPrefs,recent:[aliasItem]}:{items:[]});
+  render(<Field/>);
+  const input=screen.getByRole("combobox");
+  fireEvent.change(input,{target:{value:"my_unlisted_name\nyor_forger"}});fireEvent.focus(input);
+  fireEvent.click(await screen.findByRole("button",{name:"约尔"}));
+  expect(input).toHaveValue("my_unlisted_name\nyor_forger");
 });

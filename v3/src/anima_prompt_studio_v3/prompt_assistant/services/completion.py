@@ -36,7 +36,7 @@ class CompletionError(RuntimeError):
 
 async def complete(config, service, *, messages, images=None, disable_thinking=True,
                    timeout_s=120.0, task="rewrite"):
-    if task not in {"rewrite", "ingest", "prompt_ingest", "probe"} or not 0 < timeout_s <= 120:
+    if task not in {"rewrite", "rewrite_review", "ingest", "prompt_ingest", "probe"} or not 0 < timeout_s <= 120:
         raise ValueError("无效的 LLM 任务或超时。")
     if not messages or any(message.get("role") not in {"system", "user", "assistant"}
                            or not isinstance(message.get("content"), str) for message in messages):
@@ -47,7 +47,7 @@ async def complete(config, service, *, messages, images=None, disable_thinking=T
     if images and (len(images) != 1 or not isinstance(images[0], bytes)
                    or len(images[0]) > 20 * 1024 * 1024 or not images[0].startswith(b"\xff\xd8")):
         raise ValueError("图像必须是预处理后的单张 JPEG。")
-    disabled = (not service.get("workbench_enable_thinking", False) if task == "rewrite"
+    disabled = (not service.get("workbench_enable_thinking", False) if task in {"rewrite", "rewrite_review"}
                 else not service.get("ingest_enable_thinking", False) if task == "ingest" else True)
     # Persisted task-specific settings own the mode, not a caller override.
     provider, model, base = config.get("provider", ""), config.get("model", ""), config.get("base_url", "").rstrip("/")
@@ -58,7 +58,7 @@ async def complete(config, service, *, messages, images=None, disable_thinking=T
     capability = get_thinking_capability(control_provider, model, base_url=base)
     if disabled and capability["mode"] == "required":
         raise WorkbenchError("thinking_disable_unsupported", capability["message"])
-    if task == "rewrite" or (opencode_go_base(base) and not disabled):
+    if task in {"rewrite", "rewrite_review"} or (opencode_go_base(base) and not disabled):
         controls = build_workbench_thinking_controls(control_provider, model, enabled=not disabled, base_url=base)
     else:
         controls = build_thinking_suppression(control_provider, model, disable_thinking=disabled, base_url=base) or {}

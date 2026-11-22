@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +22,9 @@ from anima_prompt_studio_v3.remote.comfy_client import ComfyAPIError, ComfyUICli
 from anima_prompt_studio_v3.remote.result_organizer import ResultOrganizer
 from anima_prompt_studio_v3.remote.ssh_tunnel import SshTunnel
 from anima_prompt_studio_v3.remote.local_connection import LocalComfyConnection
+from anima_prompt_studio_v3.remote.connections import connection_factory, client_for_connection, http_connection_snapshot, validate_http_session, verify_run_runtime_identity
 from anima_prompt_studio_v3.core.workflow_compiler import V3WorkflowCompiler
+from .preparation_budget import DirectPreparationBudget
 
 
 @dataclass
@@ -47,6 +49,7 @@ class RemoteExecutionCoordinator:
         client_factory: Callable[[str], ComfyUIClient] = ComfyUIClient,
         on_update: Callable[[GenerationRun], None] | None = None,
         poll_interval: float = 1.5,
+        identity_database: Path | None = None,
     ) -> None:
         self.organizer = organizer or ResultOrganizer()
         self.renderer = renderer or V3WorkflowCompiler()
@@ -54,6 +57,7 @@ class RemoteExecutionCoordinator:
         self.client_factory = client_factory
         self.on_update = on_update
         self.poll_interval = poll_interval
+        self.identity_database = identity_database
         self._cancel = threading.Event()
         self._active_client: ComfyUIClient | None = None
         self._active_prompt_id = ""
@@ -89,6 +93,12 @@ class RemoteExecutionCoordinator:
                 raise ValueError("预创建任务与本次生成快照不一致。")
             run.request_json = dict(run.request_json)
             run.request_json["prompt_job"] = job.model_dump(mode="json")
+        if remote_profile.connection_type == "http":
+            run.request_json.setdefault("http_connection", http_connection_snapshot(remote_profile))
+            try:
+                validate_http_session(run, remote_profile)
+            except ValueError as exc:
+                raise RemoteExecutionError(str(exc), run) from None
         return self._run(job, run, remote_profile, workflow_profile, checkpoint_logical_name, credentials, resume=False)
 
     def resume(
@@ -98,6 +108,10 @@ class RemoteExecutionCoordinator:
         workflow_profile: WorkflowProfile,
         credentials: RemoteCredentials | None = None,
     ) -> ExecutionResult:
+        try:
+            validate_http_session(run, remote_profile)
+        except ValueError as exc:
+            raise RemoteExecutionError(str(exc), run) from None
         if not run.remote_prompt_id:
             raise RemoteExecutionError("任务尚未提交到 ComfyUI，无法恢复。", run)
         raw_job = run.request_json.get("prompt_job")
@@ -122,13 +136,19 @@ class RemoteExecutionCoordinator:
         preparation_started = time.monotonic()
         timing = {}
         run.request_json.setdefault("execution_timings", []).append(timing)
+        preparation_scope = ExitStack()
         try:
+            budget = preparation_scope.enter_context(DirectPreparationBudget()) if (
+                not resume and run.request_json.get("preparation_policy") == "direct-fast-v1") else None
             self._update(run, GenerationRunState.CONNECTING, "正在连接 ComfyUI", 0.05)
-            tunnel = (LocalComfyConnection if remote_profile.connection_type == "local" else self.tunnel_factory)(remote_profile)
+            options = ({"connect_timeout": min(5.0, budget.check()), "deadline": budget.deadline, "max_attempts": 1}
+                       if budget else {})
+            tunnel = connection_factory(remote_profile, ssh_factory=self.tunnel_factory, **options)
             with tunnel:
                 with self._timed(timing, "local_open" if remote_profile.connection_type == "local" else "ssh_open"):
                     tunnel.open(credentials or RemoteCredentials())
-                client = self.client_factory(tunnel.base_url)
+                client = client_for_connection(tunnel, self.client_factory, identity_database=self.identity_database)
+                verify_run_runtime_identity(client, remote_profile, run)
                 self._active_client = client
                 self._update(run, GenerationRunState.CONNECTING, "正在检查 ComfyUI 环境", 0.09)
                 with self._timed(timing, "environment"):
@@ -167,11 +187,15 @@ class RemoteExecutionCoordinator:
                     run.request_json["checkpoint_name"] = rendered.checkpoint_name
                     run.request_json["render_metadata"] = rendered.metadata
                     requested_prompt_id = str(uuid4())
+                    if budget:
+                        budget.check()
                     if run.request_json.get("submission_id"):
                         run.request_json["submission_attempted"] = True
                         self._update(run, GenerationRunState.PREPARING, "正在提交远端，请勿重复生成", run.progress)
                     with self._timed(timing, "submit"):
                         run.remote_prompt_id = client.submit(rendered.workflow, run.client_id, requested_prompt_id)
+                    # Remote acceptance ends this budget; generation and downloads retain normal timeouts.
+                    preparation_scope.close()
                     timing["prepare_total_ms"] = round((time.monotonic() - preparation_started) * 1000, 3)
                     self._active_prompt_id = run.remote_prompt_id
                     self._update(run, GenerationRunState.QUEUED, "已提交到 ComfyUI 队列", 0.2)
@@ -234,6 +258,7 @@ class RemoteExecutionCoordinator:
             self._update(run, GenerationRunState.FAILED, str(exc), run.progress)
             raise RemoteExecutionError(str(exc), run) from exc
         finally:
+            preparation_scope.close()
             self._active_client = None
             self._active_prompt_id = ""
 

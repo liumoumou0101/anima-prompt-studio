@@ -10,7 +10,7 @@
       (() => {
         let saved = null;
         try { saved = JSON.parse(localStorage.getItem("anima-appearance-v1") || "null"); } catch {}
-        const layout = saved?.layout === "editorial" ? "editorial" : "studio";
+        const layout = "unified";
         let dark = saved?.theme === "dark";
         if (saved?.theme === "system") {
           try { dark = matchMedia("(prefers-color-scheme: dark)").matches; } catch {}
@@ -19,7 +19,7 @@
         root.dataset.layout = layout;
         root.dataset.theme = dark ? "dark" : "light";
         root.style.colorScheme = dark ? "dark" : "light";
-        root.style.backgroundColor = dark ? "#181a1b" : layout === "editorial" ? "#f8f7f4" : "#f5f6f2";
+        root.style.backgroundColor = dark ? "#181a1b" : "#f5f6f2";
         document.querySelector('meta[name="theme-color"]').content = root.style.backgroundColor;
       })();
     </script>

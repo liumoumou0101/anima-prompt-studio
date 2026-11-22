@@ -1,0 +1,1187 @@
+{
+  "purpose": "Synthetic adult scenes for independent review of production rewriting. Every accepted output still requires semantic review; forbidden changes are expectations, not keyword filters.",
+  "cases": [
+    {
+      "id": "a01_framing_pullback",
+      "kind": "anima",
+      "label": "半身拉远至头脚完整入画",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman with black hair, wearing a red coat, standing on the left, upper body, inside a quiet library, watercolor illustration",
+      "delta": "只改成全身像，镜头拉远，头顶和双脚完整入画，人物左右位置和其他内容不变。",
+      "expected_facts": [
+        "同一黑发成年女性、红外套、站立、画面左侧",
+        "全身，头顶和双脚完整入画，镜头拉远",
+        "安静图书馆、水彩"
+      ],
+      "forbidden_changes": [
+        "新增姿态、视线、服饰、光线或场景物件",
+        "恢复半身取景"
+      ]
+    },
+    {
+      "id": "a02_camera_side",
+      "kind": "anima",
+      "label": "改变机位不改变景别",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman in a green dress, standing, full body from head to feet, front view, empty white background, flat color anime illustration",
+      "delta": "只把机位改成侧面平视，仍然全身从头到脚完整入画，人物保持站立，其他不变。",
+      "expected_facts": [
+        "一位绿裙成年女性站立",
+        "侧面平视机位",
+        "全身含头和脚，白底，纯色平涂二次元"
+      ],
+      "forbidden_changes": [
+        "改成半身或特写",
+        "侧面机位变成人物新增动作",
+        "新增道具或光线"
+      ]
+    },
+    {
+      "id": "a03_color_only",
+      "kind": "anima",
+      "label": "仅外套红改蓝",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman with black hair, wearing a red coat, standing on the left, upper body, inside a quiet library, watercolor illustration",
+      "delta": "只把外套从红色改成蓝色，其他全部不变，不补充细节。",
+      "expected_facts": [
+        "外套蓝色",
+        "黑发成年女性站在画面左侧、半身",
+        "图书馆、水彩"
+      ],
+      "forbidden_changes": [
+        "改变背景色调、光线、手势、发长或视线",
+        "正向保留红外套"
+      ]
+    },
+    {
+      "id": "a04_exact_count",
+      "kind": "anima",
+      "label": "人数精确改为三位",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman with black hair, wearing a red coat, standing on the left, full body, inside a quiet library, watercolor illustration",
+      "delta": "改成恰好三位成年女性，都保留黑发和红色外套，均站在画面左侧、全身入画。不增加其他人物特征或额外人物，其他不变。",
+      "expected_facts": [
+        "恰好三位成年女性，黑发红外套",
+        "均站立于画面左侧，全身",
+        "图书馆、水彩"
+      ],
+      "forbidden_changes": [
+        "把黑发扩成黑色长发或新增不同身份",
+        "模糊人数或增加背景人物",
+        "新增姿态、道具、光线"
+      ]
+    },
+    {
+      "id": "a05_sit_preserve_left",
+      "kind": "anima",
+      "label": "站改坐而保留左侧",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman with black hair, wearing a red coat, standing on the left, upper body, inside a quiet library; a wooden bench is beside her; watercolor illustration",
+      "delta": "只让女性坐到旁边那张木长椅上，不再站立，仍在画面左侧，其他不变。",
+      "expected_facts": [
+        "同一女性坐在那张木长椅上",
+        "画面左侧、半身、红外套黑发",
+        "图书馆、水彩"
+      ],
+      "forbidden_changes": [
+        "丢掉画面左侧",
+        "仍说同一长椅在她身旁而非她坐其上",
+        "新增手势或表情"
+      ]
+    },
+    {
+      "id": "a06_swap_sides",
+      "kind": "anima",
+      "label": "两人交换位置保持服饰归属",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "two adult women in a garden: the long black-haired woman in a red coat stands on the left, and the short blonde-haired woman in a blue coat stands on the right; watercolor illustration",
+      "delta": "只交换两人的左右位置：黑色长发红外套女性到右侧，金色短发蓝外套女性到左侧。外貌、服装、动作和其他内容全部不变。",
+      "expected_facts": [
+        "左侧金色短发蓝外套成年女性",
+        "右侧黑色长发红外套成年女性",
+        "两人站立、花园、水彩"
+      ],
+      "forbidden_changes": [
+        "交换发色或服色归属",
+        "新增路径、花卉种类、光线或动作"
+      ]
+    },
+    {
+      "id": "a07_local_hat",
+      "kind": "anima",
+      "label": "仅摘左侧红帽保留右蓝帽",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "two adult women in a garden: a black-haired woman wearing a red hat on the left, and a blonde woman wearing a blue hat on the right; watercolor illustration",
+      "delta": "只摘掉左边黑发女性的红帽子；右边金发女性的蓝帽子必须保留。不要把帽子放入全局负面，其他不变。",
+      "expected_facts": [
+        "左黑发女性不戴帽子",
+        "右金发女性仍戴蓝帽",
+        "两人、花园、水彩"
+      ],
+      "forbidden_changes": [
+        "全局负面禁掉hat或blue hat",
+        "给左侧保留红帽",
+        "新增环境或光线"
+      ]
+    },
+    {
+      "id": "a08_local_glasses",
+      "kind": "anima",
+      "label": "只去一人的眼镜",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "two adult women seated at a plain table: the left woman has short brown hair and round glasses; the right woman has long silver hair and square glasses; anime illustration, full body",
+      "delta": "只去掉右边银色长发女性的方形眼镜，左边棕色短发女性的圆眼镜保留。其他不变，不增加全局眼镜排除词。",
+      "expected_facts": [
+        "左女性棕短发圆眼镜",
+        "右女性银长发无眼镜",
+        "两人坐普通桌边、全身、二次元"
+      ],
+      "forbidden_changes": [
+        "全局排除眼镜",
+        "把两人的发型或眼镜归属交换",
+        "新增服装或道具"
+      ]
+    },
+    {
+      "id": "a09_background_only",
+      "kind": "anima",
+      "label": "只替换室内为室外小巷",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman with black hair, wearing a red coat, standing on the left, upper body, inside a quiet library with bookshelves, watercolor illustration",
+      "delta": "只把背景换成日本现代都市的室外小巷，删除图书馆室内和书架；人物、站位、景别、光线和画风都不改。",
+      "expected_facts": [
+        "日本现代都市室外小巷",
+        "同一黑发红外套女性站在左侧、半身",
+        "水彩"
+      ],
+      "forbidden_changes": [
+        "恢复图书馆或书架",
+        "新增人物姿态或光线",
+        "把小巷变室内"
+      ]
+    },
+    {
+      "id": "a10_night_stays_night",
+      "kind": "anima",
+      "label": "夜景仅加强月光",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman in a black dress, standing in a dark garden at midnight, dim moonlight, full body, monochrome ink illustration, no lamps",
+      "delta": "只让现有月光稍微照到裙子的左侧，保持午夜昏暗夜景，不要太阳光、灯具或明亮白天，其他不变。",
+      "expected_facts": [
+        "午夜昏暗花园、月光照黑裙左侧",
+        "一位黑裙成年女性站立、全身",
+        "单色水墨、无灯"
+      ],
+      "forbidden_changes": [
+        "日光、白天、增加灯具",
+        "改成彩色或写实材质",
+        "给人物新增动作或表情"
+      ]
+    },
+    {
+      "id": "a11_flat_style",
+      "kind": "anima",
+      "label": "油画厚涂改无渐变平涂",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman in a red coat, standing, upper body, quiet library, oil painting with thick impasto brushstrokes",
+      "delta": "只把画风换成二次元纯色平涂，排除厚涂、油画笔触、渐变、写实材质；人物、场景、姿态和光线不改。",
+      "expected_facts": [
+        "二次元纯色平涂、离散纯色色块",
+        "一名红外套成年女性站立、半身、图书馆",
+        "明确排除厚涂油画渐变写实材质"
+      ],
+      "forbidden_changes": [
+        "用正向肯定厚涂或写实纹理",
+        "新增光线、姿态、服饰",
+        "将no impasto等否定表达误判成保留厚涂"
+      ]
+    },
+    {
+      "id": "a12_monochrome",
+      "kind": "anima",
+      "label": "仅改黑白单色",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman in a patterned coat, standing on a stone bridge at night, blue and amber colored pencil illustration, full body",
+      "delta": "只改成黑白单色铅笔画，去掉蓝色与琥珀色，保持夜晚、石桥、人物服饰花纹、站姿与全身，其他不变。",
+      "expected_facts": [
+        "黑白单色铅笔画",
+        "夜晚石桥、一位花纹外套成年女性站立、全身"
+      ],
+      "forbidden_changes": [
+        "新增彩色高光或暖色色调",
+        "删掉外套花纹",
+        "改为白天或改变媒介"
+      ]
+    },
+    {
+      "id": "a13_negative_remove",
+      "kind": "anima",
+      "label": "只删除负面一项",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman with black hair, wearing a red coat, standing on the left, upper body, inside a quiet library, watercolor illustration",
+      "negative": "watermark, blurry",
+      "delta": "只从负面提示词里删掉 blurry，保留 watermark。正面提示词必须原样不变。",
+      "expected_facts": [
+        "负面只剩watermark",
+        "正面逐字保持原样",
+        "要求层排除项与最终负面一致"
+      ],
+      "forbidden_changes": [
+        "把blurry继续保存在要求层",
+        "改正面任意字词或增加光线姿态"
+      ],
+      "exact": {
+        "positive_unchanged": true,
+        "negative": "watermark"
+      }
+    },
+    {
+      "id": "a14_negative_add",
+      "kind": "anima",
+      "label": "只添加负面一项",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman with short hair, seated at a desk, front view, watercolor illustration",
+      "negative": "watermark",
+      "delta": "只在负面提示词里新增 extra fingers，保留 watermark。正面提示词逐字不变。",
+      "expected_facts": [
+        "负面同时含watermark与extra fingers，均为排除",
+        "正面逐字不变"
+      ],
+      "forbidden_changes": [
+        "改正面任何内容",
+        "把排除内容写为正向事实"
+      ],
+      "exact": {
+        "positive_unchanged": true
+      }
+    },
+    {
+      "id": "a15_item_ownership",
+      "kind": "anima",
+      "label": "交换道具不交换人物",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "two adult women, left woman with black hair in a red coat holding a closed book, right woman with blonde hair in a blue coat holding a white cup, plain gray background, flat illustration",
+      "delta": "只交换她们手里的东西：左侧黑发红外套女性拿白杯，右侧金发蓝外套女性拿合上的书。位置、外貌和衣服都不换，其他不变。",
+      "expected_facts": [
+        "左侧黑发红外套拿白杯",
+        "右侧金发蓝外套拿合上的书",
+        "两位成年女性、灰底、平涂"
+      ],
+      "forbidden_changes": [
+        "换人物左右或服色发色",
+        "出现第三件道具或第三人"
+      ]
+    },
+    {
+      "id": "a16_species_only",
+      "kind": "anima",
+      "label": "仅猫替换成狗",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman in a yellow coat, standing on the right, a small white cat sitting on her left, full body, courtyard, flat color illustration",
+      "delta": "只把小白猫换成小白狗，仍坐在女性左边；人物、位置、颜色、数量、动作和其他内容都不变。",
+      "expected_facts": [
+        "一只小白狗坐在女性左边",
+        "一位黄外套成年女性站在画面右侧",
+        "全身、庭院、平涂"
+      ],
+      "forbidden_changes": [
+        "保留猫或新增猫狗",
+        "把白狗放画面右边或改成大狗",
+        "新增人物外观"
+      ]
+    },
+    {
+      "id": "a17_prop_replace",
+      "kind": "anima",
+      "label": "单件道具替换保持手的归属",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman with short black hair, holding a red umbrella in her right hand, left hand empty, standing, full body, rainy alley, anime flat illustration",
+      "delta": "只把她右手的红雨伞换成红色手提包，左手仍空着。其他不变，雨天小巷仍保留。",
+      "expected_facts": [
+        "右手红色手提包、左手空",
+        "短黑发成年女性站立全身",
+        "雨天小巷、二次元平涂"
+      ],
+      "forbidden_changes": [
+        "雨伞仍作为持物",
+        "红包左右手互换",
+        "因为去伞删除雨天"
+      ]
+    },
+    {
+      "id": "a18_no_extra_subject",
+      "kind": "anima",
+      "label": "只改表情且不新增主体",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "exactly one adult woman, brown bob haircut, green coat, neutral expression, standing alone on a white background, full body, flat color anime illustration",
+      "delta": "只把表情改成轻微微笑。画面仍恰好一人，不加动物、人物、道具或环境装饰，其他不变。",
+      "expected_facts": [
+        "恰好一位棕色波波头绿外套成年女性、轻微微笑",
+        "独自站立、全身、白底、二次元平涂"
+      ],
+      "forbidden_changes": [
+        "新增主体或道具环境装饰",
+        "把轻微微笑变大笑或闭眼",
+        "改变动作、衣服、镜头"
+      ]
+    },
+    {
+      "id": "a19_negative_expression",
+      "kind": "anima",
+      "label": "不要再闭眼转成睁眼",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman with closed eyes, black bob haircut, red dress, seated on a chair, upper body, plain white background, watercolor illustration",
+      "delta": "眼睛不要再闭着了，只改成睁眼，仍坐着，其他全部不变。",
+      "expected_facts": [
+        "同一女性眼睛睁开",
+        "黑色波波头红裙、坐椅、半身、白底、水彩"
+      ],
+      "forbidden_changes": [
+        "仍肯定闭眼",
+        "新增看镜头要求或改变表情",
+        "改成站姿"
+      ]
+    },
+    {
+      "id": "a20_double_negation",
+      "kind": "anima",
+      "label": "双重否定明确拿伞",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman in a blue coat, standing alone in rain, both hands empty, full body, flat illustration",
+      "delta": "不要让她不拿伞：改成右手握一把黑雨伞，左手仍空着。这次明确要有一把伞，其他不变。",
+      "expected_facts": [
+        "右手恰好一把黑雨伞、左手空",
+        "一位蓝外套成年女性独自站雨中、全身、平涂"
+      ],
+      "forbidden_changes": [
+        "双手仍都空着",
+        "把雨伞写入负面",
+        "多把伞或新增人"
+      ]
+    },
+    {
+      "id": "a21_background_region",
+      "kind": "anima",
+      "label": "只清空前景保留后景花",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman standing in the center of a garden, yellow flowers in the foreground and red flowers behind her, full body, watercolor illustration",
+      "delta": "只去掉前景的黄色花，让前景留空；人物身后的红色花必须保留。不要全局排除花朵，其他不变。",
+      "expected_facts": [
+        "前景留空，没有黄色花",
+        "人物后方保留红花",
+        "一位成年女性站中央、全身、水彩花园"
+      ],
+      "forbidden_changes": [
+        "全局禁花",
+        "删掉后方红花",
+        "新增替代前景道具"
+      ]
+    },
+    {
+      "id": "a22_named_identity",
+      "kind": "anima",
+      "label": "保留两人名字和属性只换背景",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "two adult women: Mira on the left with red braided hair wearing a white coat; Lena on the right with short black hair wearing a gray dress; both standing, full body, in a station, watercolor illustration",
+      "delta": "只将车站背景改成空的白色背景；Mira与Lena的名字、左右位置、发型发色、衣服和动作都保持原样。",
+      "expected_facts": [
+        "Mira左侧红色辫发白外套",
+        "Lena右侧黑短发灰裙",
+        "两位成年女性站立全身、空白白底、水彩"
+      ],
+      "forbidden_changes": [
+        "名字或属性归属互换",
+        "残留车站",
+        "新增人或道具"
+      ]
+    },
+    {
+      "id": "a23_image_text",
+      "kind": "anima",
+      "label": "仅替换海报确切文字",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman holding a plain white poster with the exact word OPEN, standing, full body, empty gray background, flat illustration",
+      "delta": "只把海报上的英文 OPEN 换成 CLOSED，文字必须准确，海报仍是白色，其他不变。",
+      "expected_facts": [
+        "海报文字准确CLOSED，取代OPEN",
+        "白海报由一位站立成年女性拿着、全身、灰底、平涂"
+      ],
+      "forbidden_changes": [
+        "同时保留OPEN",
+        "改变文字大小写或添加更多文字",
+        "改变姿势或海报颜色"
+      ]
+    },
+    {
+      "id": "a24_locked_subject",
+      "kind": "anima",
+      "label": "最新意见与锁定主体冲突",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman with black hair wearing a red coat, standing on the left, full body, white background, flat illustration",
+      "delta": "把锁定的红外套改成蓝外套，其他不变。",
+      "requirements_patch": {
+        "layers": {
+          "subject": {
+            "text": "一位黑发成年女性穿红外套，站在左侧，全身。",
+            "locked": true
+          }
+        }
+      },
+      "expected_outcome": "clear_conflict",
+      "expected_facts": [
+        "明确报告最新修改与锁定主体冲突",
+        "原工作台不被改成矛盾状态"
+      ],
+      "forbidden_changes": [
+        "修改锁定主体",
+        "保留红外套要求却生成蓝外套英文",
+        "模糊声称完成"
+      ]
+    },
+    {
+      "id": "a25_selected_shot",
+      "kind": "anima",
+      "label": "最新全身意见与半身控件冲突",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman in a red coat, standing, upper body, library, watercolor illustration",
+      "delta": "改成全身像，头顶双脚完整入画，其他不变。",
+      "requirements_patch": {
+        "layers": {
+          "composition": {
+            "design": {
+              "shot": {
+                "value": "半身",
+                "source": "user"
+              }
+            }
+          }
+        }
+      },
+      "expected_outcome": "clear_conflict",
+      "expected_facts": [
+        "明确报告固定半身控件与全身修改冲突，或在允许的流程中同时更新两者",
+        "不接受半身控件与全身英文互相矛盾"
+      ],
+      "forbidden_changes": [
+        "静默保留半身控件而声称完整更新",
+        "新增无关内容"
+      ]
+    },
+    {
+      "id": "a26_fixed_hat_tag",
+      "kind": "anima",
+      "label": "去帽与固定帽子tag冲突",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "hat, one adult woman with black hair in a red coat, standing, white background, flat illustration",
+      "delta": "去掉帽子，不戴帽子，其他不变。",
+      "requirements_patch": {
+        "layers": {
+          "subject": {
+            "general_tags": [
+              "hat"
+            ]
+          }
+        }
+      },
+      "expected_outcome": "clear_conflict",
+      "expected_facts": [
+        "明确指出仍选中的帽子tag与摘帽要求冲突",
+        "不接受正向hat和bareheaded并存"
+      ],
+      "forbidden_changes": [
+        "正负向帽子互相抵消而声称已完成",
+        "未经允许改变固定tag所有权",
+        "新增内容"
+      ]
+    },
+    {
+      "id": "s01_color_then_pose",
+      "kind": "anima",
+      "label": "先改颜色再改坐姿不恢复旧颜色",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman with black hair, wearing a red coat, standing on the left beside a wooden chair, full body, white background, watercolor illustration",
+      "steps": [
+        {
+          "delta": "只把红外套改成蓝外套，其他不变。",
+          "expected_facts": [
+            "蓝外套、黑发成年女性、站立左侧、木椅旁、全身、白底、水彩"
+          ]
+        },
+        {
+          "delta": "接着只坐到那张木椅上，仍在左侧，保留刚才的蓝外套，其他不变。",
+          "expected_facts": [
+            "蓝外套没有恢复红色",
+            "坐木椅、左侧、黑发成年女性、全身、白底、水彩"
+          ]
+        }
+      ],
+      "expected_facts": [
+        "两轮修改均生效，蓝外套不恢复红色，坐姿不丢左侧"
+      ],
+      "forbidden_changes": [
+        "后轮恢复旧红色或旧站姿",
+        "新增镜头、光线、表情、道具"
+      ]
+    },
+    {
+      "id": "s02_remove_then_lighting",
+      "kind": "anima",
+      "label": "删局部特征后改光不恢复已删项",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "two adult women, the left black-haired woman wearing a red hat and red coat, the right blonde woman wearing a blue hat and blue coat, both standing, full body, white background, flat illustration",
+      "steps": [
+        {
+          "delta": "只去掉左侧红帽，右侧蓝帽保留，不加全局帽子负面，其他不变。",
+          "expected_facts": [
+            "左侧无帽、右侧蓝帽",
+            "两人左右发色衣色不换、站立全身白底平涂"
+          ]
+        },
+        {
+          "delta": "在上一版基础上只增加从人物左侧照来的柔和侧光；左侧女性仍无帽、右侧蓝帽保留，其他不变。",
+          "expected_facts": [
+            "左侧仍无帽且右侧仍蓝帽",
+            "左侧柔和侧光",
+            "两人发色衣色归属、站立全身白底平涂"
+          ]
+        }
+      ],
+      "expected_facts": [
+        "已删左红帽不恢复，右蓝帽保留，第二轮只改光"
+      ],
+      "forbidden_changes": [
+        "恢复左红帽或删右蓝帽",
+        "把hat写为全局负面",
+        "改成三人或改变服装"
+      ]
+    },
+    {
+      "id": "m01_two_people",
+      "kind": "moss",
+      "label": "中文多人归属与动作完整保留",
+      "modes": [
+        "polish",
+        "expand"
+      ],
+      "before": "画面中恰好两位成年女性。左边女性穿红色及膝长外套和黑裤，站立并抬起右手；右边女性穿蓝色连衣裙和白鞋，坐在椅子上，双手放在膝盖上。两人都从头到脚完整入画。简洁平涂插画，纯白背景，没有环境装饰。不要增加帽子、道具或额外人物。",
+      "negative": "不要额外人物、帽子、道具、渐变、复杂背景、文字",
+      "expected_facts": [
+        "中文保留，两位成年女性左右服色和动作归属准确",
+        "全身含脚、平涂纯白、无新增人物道具"
+      ],
+      "forbidden_changes": [
+        "翻译英文或混入Anima质量词",
+        "改动原负面任意字符",
+        "润色新增可见内容"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "m02_quote_clothing",
+      "kind": "moss",
+      "label": "服装引号不是画面文字",
+      "modes": [
+        "polish",
+        "expand"
+      ],
+      "before": "画面仅有一位成年女性，穿“蓝色外套”、黑裤和白鞋；引号只是服装名称标注，不要求画上文字。她站立，双手下垂，全身头脚完整入画。简洁平涂、纯白背景，没有任何文字、标牌、建筑、家具、植物或装饰。",
+      "negative": "不要文字、标牌、额外人物、复杂背景",
+      "expected_facts": [
+        "蓝外套黑裤白鞋成年女性站立双手下垂、全身、平涂白底",
+        "画面无文字，服装名称引号可正确整理"
+      ],
+      "forbidden_changes": [
+        "因去掉服装名称引号误报失败",
+        "把服装名称写成画面文字",
+        "改原负面"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "m03_literal_sign",
+      "kind": "moss",
+      "label": "图片文字准确保留含重复",
+      "modes": [
+        "polish",
+        "expand"
+      ],
+      "before": "一位成年女性站在画面左侧，红色长裙，全身像。她右手举一块白牌，牌上准确写着“春天”，下方再写一次“春天”，两个词都保留。纯白背景，简洁平涂。",
+      "negative": "不要额外人物、英文翻译、复杂背景",
+      "expected_facts": [
+        "两次确切图片文字春天，不能改成一次或翻译",
+        "女性左侧红长裙站立全身、右手举白牌、平涂白底"
+      ],
+      "forbidden_changes": [
+        "改牌子文字标点、顺序、重复次数",
+        "改左右手或人物位置",
+        "改负面"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "m04_local_exclusion",
+      "kind": "moss",
+      "label": "局部排除不扩成全局",
+      "modes": [
+        "polish",
+        "expand"
+      ],
+      "before": "恰好两位成年女性站立，全身入画。左侧黑发红外套女性不戴帽子，右侧金发蓝外套女性戴蓝帽。不要把帽子全局禁掉。纯白背景，二次元平涂。",
+      "negative": "不要第三人、复杂背景",
+      "expected_facts": [
+        "左无帽、右蓝帽，左右发色服色准确",
+        "两成年女性站立全身、白底二次元平涂"
+      ],
+      "forbidden_changes": [
+        "增加全局帽子排除",
+        "润色新增可见内容",
+        "改负面"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "m05_exact_count",
+      "kind": "moss",
+      "label": "三个成年人精确人数无背景人",
+      "modes": [
+        "polish"
+      ],
+      "before": "画面恰好三位成年女性，并排站立，从头到脚完整入画，三人都穿灰色长外套，头发未指定。纯白背景，黑白线稿。画面没有第四人、动物或道具。",
+      "negative": "不要额外人物、动物、道具、彩色",
+      "expected_facts": [
+        "恰好三位成年女性并排站立全身、灰长外套",
+        "未指定发型保持未指定、黑白线稿白底"
+      ],
+      "forbidden_changes": [
+        "新增发型发色、光线、表情或彩色",
+        "用人群模糊精确人数",
+        "改负面"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "m06_gaze_locked",
+      "kind": "moss",
+      "label": "扩写不强行改成正面看镜头",
+      "modes": [
+        "expand"
+      ],
+      "before": "一位成年女性背对镜头站立，头稍向左转，目光看向画面左外侧，不能看镜头。全身像，深绿长裙，简洁平涂，背景只有一面灰墙。不要增加人物、动物或道具。",
+      "negative": "不要正面、直视镜头、额外人物",
+      "expected_facts": [
+        "背向站立、头稍左转、目光向左画外",
+        "深绿长裙成年女性全身、平涂、灰墙"
+      ],
+      "forbidden_changes": [
+        "为了扩写变正面或直视镜头",
+        "新增主体或道具",
+        "改负面"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "m07_midnight",
+      "kind": "moss",
+      "label": "夜景扩写保留黑暗与光源限制",
+      "modes": [
+        "expand"
+      ],
+      "before": "一位成年女性穿黑色长裙，站在午夜的空庭院里，全身像。环境很暗，只有微弱月光，画面保持黑白单色水墨。不要灯具、阳光、额外人物或明亮的脸部补光。",
+      "negative": "不要白天、日光、灯具、彩色、额外人物",
+      "expected_facts": [
+        "午夜暗庭院、微弱月光、无补光",
+        "黑裙成年女性站立全身、黑白水墨"
+      ],
+      "forbidden_changes": [
+        "扩写加日光、灯具、亮脸或彩色",
+        "改变黑暗氛围",
+        "改负面"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "m08_monochrome_rococo",
+      "kind": "moss",
+      "label": "洛可可二次元肖像保留单色媒介",
+      "modes": [
+        "expand"
+      ],
+      "before": "一位成年女性的洛可可宫廷肖像二次元版本。坐在现有的椅子上，银灰色礼服，全身完整入画。只用黑白灰三种色阶，纯色平涂，不要渐变、厚涂、珠宝、花束或新增装饰。背景是纯白。",
+      "negative": "不要彩色、渐变、厚涂、珠宝、花束、额外人物",
+      "expected_facts": [
+        "洛可可宫廷肖像二次元、银灰礼服成年女性坐椅全身",
+        "黑白灰三阶纯色平涂、白底"
+      ],
+      "forbidden_changes": [
+        "扩写加入珠宝花束宫殿装饰",
+        "增颜色渐变或厚涂",
+        "改负面"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "m09_english_polish",
+      "kind": "moss",
+      "label": "英文润色不翻译也不新增内容",
+      "modes": [
+        "polish"
+      ],
+      "before": "Exactly one adult woman, short brown hair, blue coat. She stands on the left and holds a white cup in her right hand; left hand empty. Full body, plain white background, flat illustration. No other people or props.",
+      "negative": "extra people, extra props, text",
+      "expected_facts": [
+        "保持英文，一位棕短发蓝外套成年女性左侧站立",
+        "右手白杯左手空，全身白底平涂"
+      ],
+      "forbidden_changes": [
+        "翻译中文或新增光线、表情、场景",
+        "改负面"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "m10_japanese",
+      "kind": "moss",
+      "label": "日文润色保留原语言",
+      "modes": [
+        "polish"
+      ],
+      "before": "成人女性が一人だけ。黒髪のショート、赤いコート。画面の左側に立ち、右手に白いカップを持つ。左手は何も持たない。頭から足先まで入る全身、白い背景、フラットなイラスト。ほかの人物や小道具は描かない。",
+      "negative": "追加の人物、文字、複雑な背景",
+      "expected_facts": [
+        "保持日文，不翻译中文或英文",
+        "一位黑短发红外套成年女性左站、右白杯左空、全身白底平涂"
+      ],
+      "forbidden_changes": [
+        "改语言",
+        "新增内容或改负面"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "m11_english_expand",
+      "kind": "moss",
+      "label": "英文扩写保留明确左右与材质",
+      "modes": [
+        "expand"
+      ],
+      "before": "Two adult women in a plain white studio: Mira on the left wears a matte red coat and holds a closed blue book; Lena on the right wears a matte black dress and has empty hands. Both are seated, full body. Flat colors only, no gradients, no extra people or props.",
+      "negative": "gradients, extra people, extra props, text",
+      "expected_facts": [
+        "英文，两成年女性坐姿全身白色摄影棚",
+        "Mira左红哑光外套蓝合书；Lena右黑哑光裙空手",
+        "平涂无渐变"
+      ],
+      "forbidden_changes": [
+        "左右、名字、服装或物件归属改变",
+        "新增主体道具或光泽渐变",
+        "改负面"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "m12_mixed_names",
+      "kind": "moss",
+      "label": "中文与专名混合不随意翻译专名",
+      "modes": [
+        "polish"
+      ],
+      "before": "成年女性 Mira 在左，黑色短发、红色外套；成年女性 Lena 在右，金色长发、蓝色裙子。两人站立，全身像，背景纯白，anime flat color。Mira右手拿白杯，Lena双手空着，不要交换。",
+      "negative": "不要额外人物、文字、复杂背景",
+      "expected_facts": [
+        "保持中文主体表达与Mira/Lena拼写",
+        "两人左右发色衣色与持物归属准确、站立全身白底平涂"
+      ],
+      "forbidden_changes": [
+        "专名改写、翻译或交换",
+        "润色增加细节",
+        "改负面"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "r01_raw_chinese",
+      "kind": "raw",
+      "label": "中文原文生产编译直达工作流",
+      "modes": [
+        "raw"
+      ],
+      "before": "成年女性的宫廷肖像二次元版本，全身，牌子写着“春天”。",
+      "negative": "不要额外人物、眼镜",
+      "expected_facts": [
+        "原中文逐字进入生产MOSS工作流正向节点",
+        "原负面逐字进入负向节点"
+      ],
+      "forbidden_changes": [
+        "调用提示词辅助或翻译",
+        "提交生成队列或GPU任务"
+      ],
+      "exact": {
+        "positive_unchanged": true,
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "r02_raw_mixed",
+      "kind": "raw",
+      "label": "混合语言原文不经过辅助",
+      "modes": [
+        "raw"
+      ],
+      "before": "Mira，成年女性，full body，纯白背景，牌子写着 OPEN。",
+      "negative": "extra people, 不要帽子",
+      "expected_facts": [
+        "中英混合原文逐字进入生产MOSS工作流正向节点",
+        "混合负面逐字保留"
+      ],
+      "forbidden_changes": [
+        "强制统一语言或自动加质量词",
+        "提交远程任务"
+      ],
+      "exact": {
+        "positive_unchanged": true,
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "a27_literal_weighted_positive",
+      "kind": "anima",
+      "label": "负面编辑保留正向权重顺序与首尾空白",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "  one adult woman in a red coat, standing on the left, full body, (blue eyes:1.2)\n",
+      "negative": "watermark, blurry",
+      "delta": "只从负面里删除 blurry，保留 watermark。正面连同词序、权重、首尾空白逐字保持不变。",
+      "requirements_patch": {
+        "layers": {
+          "subject": {
+            "general_tags": [
+              "blue eyes"
+            ]
+          }
+        }
+      },
+      "expected_facts": [
+        "负面仅watermark",
+        "已有选中blue eyes的权重顺序和空白全部保留"
+      ],
+      "forbidden_changes": [
+        "改正向任意字符",
+        "重复插入或移动blue eyes",
+        "新增光线姿态场景"
+      ],
+      "exact": {
+        "positive_unchanged": true,
+        "negative": "watermark"
+      }
+    },
+    {
+      "id": "a28_explicit_creative_permission",
+      "kind": "anima",
+      "label": "明确开放创意时扩写仍能发挥",
+      "modes": [
+        "expand"
+      ],
+      "before": "one adult woman in a matte blue coat, standing, full body, plain white background, flat color illustration",
+      "delta": "在保持一名成年女性、哑光蓝外套、站立全身、白色背景、纯色平涂不变的前提下，对整个画面适度创意扩写，可以补充表情和光线。不要增加人物、动物或道具，也不要渐变。",
+      "expected_facts": [
+        "保留一人成年女性蓝哑光外套站立全身白底平涂",
+        "允许的表情或光线得到具体扩写并说明"
+      ],
+      "forbidden_changes": [
+        "把编辑范围修复误做成完全禁止创意",
+        "新增人物动物道具",
+        "增加渐变写实材质或改服色"
+      ]
+    },
+    {
+      "id": "a29_exclusion_channel_equivalence",
+      "kind": "anima",
+      "label": "正向排除可等价移到负向",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman in a black dress, standing, full body, dark courtyard at midnight, no lamps",
+      "negative": "",
+      "delta": "只把正面的 no lamps 这项排除移到负面，负面写 lamps。正面其余词序和内容逐字不变，午夜黑暗不变，排除灯具的含义不变。",
+      "expected_facts": [
+        "正向只移除no lamps",
+        "负向lamps正确表达排除灯具，不能因为没写no lamps而误拦"
+      ],
+      "forbidden_changes": [
+        "误拦等价排除",
+        "改其他正向词",
+        "加入日光或额外光源"
+      ],
+      "exact": {
+        "positive": "one adult woman in a black dress, standing, full body, dark courtyard at midnight",
+        "negative": "lamps"
+      }
+    },
+    {
+      "id": "a30_first_scene",
+      "kind": "anima",
+      "label": "首次场景编译保留两种模式差异",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "",
+      "delta": "画一位成年女性，黑色短发，穿深绿色长裙，坐在一张已有木椅上，双手放在膝盖，全身头脚完整入画。黑白水墨，纯白背景。不要其他人物、动物、文字或新增道具。",
+      "expected_facts": [
+        "首次请求生成完整英文，中文要求完整保存",
+        "一名黑短发深绿裙成年女性坐椅、双手膝上、全身",
+        "黑白水墨白底和明确排除保留；深绿裙作为服饰色源不能擅自丢弃，可解释黑白呈现限制"
+      ],
+      "forbidden_changes": [
+        "faithful新增表情光线或场景",
+        "expand增加被禁止主体道具或改姿态",
+        "用白底墨色与深绿服装的歧义静默改掉明确颜色"
+      ]
+    },
+    {
+      "id": "a31_retire_old_relation",
+      "kind": "anima",
+      "label": "移动唯一物件后旧存放关系必须消失",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman with short black hair, standing on the left, full body, bare neck, empty hands; a single red scarf is folded inside a closed black bag on the floor beside her; plain white background, flat color illustration",
+      "delta": "把唯一的红围巾从黑包里拿出来戴到女性脖子上。黑包仍放在她身旁的地板上并合上，两手仍空着。不能再描述她裸颈或围巾还在包内，其他内容全部不变。",
+      "expected_facts": [
+        "唯一红围巾现在戴在女性脖子上，不再在包里",
+        "黑包仍在身旁地板上合着、两手空",
+        "黑短发一名成年女性左侧站立全身、白底平涂"
+      ],
+      "forbidden_changes": [
+        "保留围巾在包内或bare neck旧关系",
+        "凭空新增第二条围巾来解释矛盾",
+        "改变站位姿势或新增无关细节"
+      ]
+    },
+    {
+      "id": "m13_open_creative_dimensions",
+      "kind": "moss",
+      "label": "扩写真正发挥且润色不加画面",
+      "modes": [
+        "polish",
+        "expand"
+      ],
+      "before": "一位成年女性，黑色短发，穿蓝色外套，站在画面左侧，全身像，身处安静的图书馆，水彩插画。不增加人物、动物或道具。",
+      "negative": "不要额外人物、动物、道具、文字",
+      "expected_facts": [
+        "中文保留、一位黑短发蓝外套成年女性左站全身、图书馆水彩",
+        "polish只整理；expand在已有主体的开放表情、视线、光影或空间关系中实际补充少量兼容细节并逐项说明"
+      ],
+      "forbidden_changes": [
+        "人物衣色发型姿态景别背景画风被替换",
+        "润色增加可见事实",
+        "扩写只重排原文并要求用户再次授权所有开放细节",
+        "改动负面任意字符"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "m14_multiline_ownership",
+      "kind": "moss",
+      "label": "分行人物标题保留局部无帽与右侧蓝帽",
+      "modes": [
+        "polish",
+        "expand"
+      ],
+      "before": "Exactly two adult women, full body, flat illustration, plain white background.\nLeft woman:\nNo hat. Red coat. Standing.\nRight woman:\nWearing a blue hat. Blue coat. Standing.\nNo extra people or props.",
+      "negative": "extra people, extra props, text",
+      "expected_facts": [
+        "英文保持，两成年女性站立全身白底平涂",
+        "左侧红外套不戴任何帽子，右侧蓝外套戴蓝帽",
+        "分行标题的No hat不能丢掉Left woman归属"
+      ],
+      "forbidden_changes": [
+        "把No hat补成全局帽子排除",
+        "把右侧蓝帽去掉或左右服饰交换",
+        "polish新增发型材质动作表情",
+        "改原负面"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "a32_turbo_edit",
+      "kind": "anima",
+      "label": "Turbo配置下局部编辑与负面保留",
+      "model_profile": "anima_turbo_v1_1",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman in a red coat, standing on the left, full body, plain gray background, flat illustration",
+      "negative": "watermark",
+      "delta": "只把红外套改为蓝外套，人物数量、站位、姿态、景别、背景和画风不变，负面watermark逐字保留，不加其他词。",
+      "expected_facts": [
+        "一位蓝外套成年女性左站全身、灰底平涂",
+        "原负面watermark保留，模型负面支持限制可说明但不能默删用户意图"
+      ],
+      "forbidden_changes": [
+        "改其他明确内容或添加质量词",
+        "因Turbo负面默认关闭而删watermark"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    },
+    {
+      "id": "a33_weighted_artist_lock",
+      "kind": "anima",
+      "label": "实际编辑保留画师tag权重字面固定",
+      "modes": [
+        "faithful",
+        "expand"
+      ],
+      "before": "one adult woman in a red coat, standing on the left, full body, plain white background, ((@torino aqua:1.1)), watercolor illustration",
+      "negative": "watermark",
+      "requirements_patch": {
+        "layers": {
+          "style": {
+            "manual_artist_tags": [
+              "torino_aqua"
+            ]
+          }
+        },
+        "prompt_locks": [
+          {
+            "target": "positive",
+            "text": "((@torino aqua:1.1))"
+          }
+        ]
+      },
+      "delta": "只把背景从纯白改为浅灰。人物、衣服、姿态、站位、景别与水彩画风不变，画师tag和现有权重固定片段逐字保留，不增加其他内容。",
+      "expected_facts": [
+        "纯白背景变浅灰，其他原事实保留",
+        "画师权重固定片段((@torino aqua:1.1))逐字保留且不重复裸tag",
+        "watermark负面逐字保留"
+      ],
+      "forbidden_changes": [
+        "删除画师或改权重转义顺序",
+        "新增其他画师或画面细节",
+        "把固定画师当衣服/画面文字"
+      ],
+      "exact": {
+        "negative_unchanged": true
+      }
+    }
+  ]
+}

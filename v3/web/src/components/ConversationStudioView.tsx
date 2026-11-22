@@ -1,5 +1,5 @@
 import {useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode} from "react";
-import {ImageSquare, TextT, X} from "@phosphor-icons/react";
+import {ClockCounterClockwise, ImageSquare, SlidersHorizontal, TextT, X} from "@phosphor-icons/react";
 import "./conversationStudio.css";
 
 export interface ConversationStudioViewProps {
@@ -9,91 +9,84 @@ export interface ConversationStudioViewProps {
   composer: ReactNode;
   auxiliary?: ReactNode;
   history?: ReactNode;
+  context?: ReactNode;
+  generationBar?: ReactNode;
   historyOpen: boolean;
+  onOpenHistory?: () => void;
   onCloseHistory: () => void;
   busy?: boolean;
   activeView?: "prompt" | "images";
+  resultRequestKey?: string;
+  parameterRequestKey?: number;
 }
 
-/** Presentation only: slot contents retain their identity when compact views change. */
-export function ConversationStudioView({editor, results, settings, composer, auxiliary, history,
-  historyOpen, onCloseHistory, busy = false, activeView = "images"}: ConversationStudioViewProps) {
+/** Stable slots share one responsive shell; viewing parameters never replaces the editor. */
+export function ConversationStudioView({editor, results, settings, composer, auxiliary, history, context, generationBar,
+  historyOpen, onOpenHistory, onCloseHistory, busy = false, activeView = "images", resultRequestKey, parameterRequestKey}: ConversationStudioViewProps) {
   const [view, setView] = useState(activeView);
-  const root = useRef<HTMLDivElement>(null), dock = useRef<HTMLElement>(null);
-  const dialog = useRef<HTMLDialogElement>(null), closeButton = useRef<HTMLButtonElement>(null);
+  const [inspector, setInspector] = useState<"results" | "parameters">("results");
+  const root = useRef<HTMLDivElement>(null), closeButton = useRef<HTMLButtonElement>(null);
+  const settingsRegion = useRef<HTMLElement>(null), focusedParameterRequest = useRef<number|undefined>(undefined);
   const id = useId();
-
   useEffect(() => setView(activeView), [activeView]);
-
+  useEffect(() => {if(resultRequestKey){setInspector("results");setView("images");}},[resultRequestKey]);
+  useEffect(() => {if(parameterRequestKey){setInspector("parameters");setView("images");}},[parameterRequestKey]);
   useLayoutEffect(() => {
-    const element = root.current, footer = dock.current;
-    if (!element || !footer) return;
-    const measure = () => {
-      const bounds = element.getBoundingClientRect();
-      element.style.setProperty("--studio-dock-height", `${Math.ceil(footer.getBoundingClientRect().height)}px`);
-      // The workspace fills the viewport still visible above the fixed composer.
-      // Expanded page notices can scroll away without leaving a permanently tiny editor.
-      element.style.setProperty("--studio-top", `${Math.max(0, Math.ceil(bounds.top))}px`);
-      element.style.setProperty("--studio-dock-left", `${Math.max(0, Math.ceil(bounds.left))}px`);
-      element.style.setProperty("--studio-dock-right", `${Math.max(0, Math.ceil(window.innerWidth - bounds.right))}px`);
-    };
+    const element = root.current;
+    if (!element) return;
+    const measure = () => element.style.setProperty("--studio-top", `${Math.max(0, Math.ceil(element.getBoundingClientRect().top))}px`);
     measure();
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
-    observer?.observe(footer);
-    observer?.observe(element);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     const page = element.closest(".conversation-workbench");
     if (page) observer?.observe(page);
     window.addEventListener("resize", measure);
-    window.addEventListener("scroll", measure, {passive: true});
-    return () => {observer?.disconnect(); window.removeEventListener("resize", measure); window.removeEventListener("scroll", measure);};
+    return () => {observer?.disconnect(); window.removeEventListener("resize", measure);};
   }, []);
-
   useEffect(() => {
-    const element = dialog.current;
-    if (!historyOpen || !element) return;
+    if (!historyOpen) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    if (!element.open) {
-      if (typeof element.showModal === "function") element.showModal();
-      else element.setAttribute("open", "");
-    }
-    closeButton.current?.focus();
-    return () => {
-      if (element.open) {
-        if (typeof element.close === "function") element.close();
-        else element.removeAttribute("open");
-      }
-      document.body.style.overflow = previousOverflow;
-      if (previousFocus?.isConnected) previousFocus.focus();
-    };
+    setView("images"); closeButton.current?.focus();
+    return () => {if (previousFocus?.isConnected) previousFocus.focus();};
   }, [historyOpen]);
-
-  return <div ref={root} className="conversation-studio" data-view={view}>
+  useEffect(() => {
+    if (!parameterRequestKey || focusedParameterRequest.current === parameterRequestKey || historyOpen || view !== "images" || inspector !== "parameters") return;
+    // Wait for visibility and history focus restoration before handing keyboard navigation to the panel.
+    settingsRegion.current?.focus();
+    focusedParameterRequest.current = parameterRequestKey;
+  }, [parameterRequestKey, historyOpen, view, inspector]);
+  function selectInspector(next: "results" | "parameters") {
+    setInspector(next); setView("images"); if (historyOpen) onCloseHistory();
+  }
+  return <div ref={root} className="conversation-studio" data-view={view} data-inspector={historyOpen ? "history" : inspector}>
+    {context && <div className="conversation-studio__context">{context}</div>}
     <nav className="conversation-studio__compact-tabs" aria-label="工作区视图">
-      <button type="button" aria-pressed={view === "images"} aria-controls={`${id}-images`} onClick={() => setView("images")}><ImageSquare size={17} aria-hidden="true" />图片预览</button>
       <button type="button" aria-pressed={view === "prompt"} aria-controls={`${id}-prompt`} onClick={() => setView("prompt")}><TextT size={17} aria-hidden="true" />提示词</button>
+      <button type="button" aria-pressed={view === "images"} aria-controls={`${id}-images`} onClick={() => setView("images")}><ImageSquare size={17} aria-hidden="true" />图片预览</button>
     </nav>
     <div className="conversation-studio__workspace" aria-busy={busy}>
-      <div className="conversation-studio__editor" id={`${id}-prompt`}>
-        {editor}
-        {auxiliary && <details className="conversation-studio__auxiliary"><summary>更多创作工具</summary>{auxiliary}</details>}
-      </div>
-      <div className="conversation-studio__results" id={`${id}-images`}>{results}</div>
+      <section className="conversation-studio__editor" id={`${id}-prompt`} aria-label="编辑工作区">
+        <div className="conversation-studio__editor-main">{editor}
+          {auxiliary && <section className="conversation-studio__auxiliary" aria-label="创作工具">{auxiliary}</section>}
+        </div>
+        <footer className="conversation-studio__composer" aria-label="修改意见与生成操作">{composer}</footer>
+      </section>
+      <aside className="conversation-studio__inspector" id={`${id}-images`} aria-label="结果与创作条件">
+        <nav className="conversation-studio__inspector-tabs" aria-label="查看结果、参数或版本">
+          <button type="button" aria-pressed={!historyOpen && inspector === "results"} aria-controls={`${id}-results`} onClick={() => selectInspector("results")}><ImageSquare size={17} aria-hidden="true" />结果</button>
+          <button type="button" aria-label="生成参数" aria-pressed={!historyOpen && inspector === "parameters"} aria-controls={`${id}-parameters`} onClick={() => selectInspector("parameters")}><SlidersHorizontal size={17} aria-hidden="true" />参数</button>
+          <button type="button" aria-label="创作记录" title="创作记录：版本与历史图片" aria-pressed={historyOpen} aria-controls={`${id}-history`} onClick={onOpenHistory}><ClockCounterClockwise size={17} aria-hidden="true" />记录</button>
+        </nav>
+        <section className="conversation-studio__results" id={`${id}-results`} aria-label="生成结果" hidden={historyOpen || inspector !== "results"}>{results}</section>
+        <section ref={settingsRegion} tabIndex={-1} className="conversation-studio__settings" id={`${id}-parameters`} aria-label="生成参数" hidden={historyOpen || inspector !== "parameters"}>{settings}</section>
+        <dialog open={historyOpen} aria-modal="false" id={`${id}-history`} className="conversation-studio__history" aria-labelledby={`${id}-history-title`}
+          onCancel={event => {event.preventDefault(); onCloseHistory();}} onKeyDown={event => {if (event.key === "Escape") {event.preventDefault(); onCloseHistory();}}}>
+          <header className="conversation-studio__history-heading"><h2 id={`${id}-history-title`}>创作记录</h2>
+            <button ref={closeButton} type="button" aria-label="关闭创作记录" onClick={onCloseHistory}><X size={18} aria-hidden="true" />关闭</button>
+          </header>
+          {historyOpen && history}
+        </dialog>
+      </aside>
     </div>
-    <footer ref={dock} className="conversation-studio__dock" aria-label="修改意见与生成操作">
-      <div className="conversation-studio__settings">{settings}</div>
-      <div className="conversation-studio__composer">{composer}</div>
-    </footer>
-    <dialog ref={dialog} className="conversation-studio__history" aria-labelledby={`${id}-history-title`}
-      onCancel={event => {event.preventDefault(); onCloseHistory();}}
-      onKeyDown={event => {
-        if (event.key === "Escape") {event.preventDefault(); onCloseHistory();}
-      }}>
-      <header className="conversation-studio__history-heading"><div><p>按想法和图片找回</p><h2 id={`${id}-history-title`}>创作记录</h2></div>
-        <button ref={closeButton} type="button" aria-label="关闭创作记录" onClick={onCloseHistory}><X size={18} aria-hidden="true" />关闭</button>
-      </header>
-      {historyOpen && history}
-    </dialog>
+    {generationBar && <footer className="conversation-studio__generation">{generationBar}</footer>}
   </div>;
 }

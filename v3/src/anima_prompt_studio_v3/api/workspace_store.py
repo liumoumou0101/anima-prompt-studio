@@ -106,11 +106,126 @@ class WorkspaceStore:
                     result_revision INTEGER NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS workspace_editor_contexts (
+                    workspace_id TEXT NOT NULL, document_id TEXT NOT NULL, token TEXT NOT NULL,
+                    request_id TEXT NOT NULL, editor_epoch INTEGER NOT NULL,
+                    PRIMARY KEY (workspace_id, document_id)
+                );
+                CREATE TABLE IF NOT EXISTS workspace_checkpoints (
+                    id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, operation_id TEXT NOT NULL,
+                    version_number INTEGER NOT NULL, payload_hash TEXT NOT NULL, payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL, UNIQUE(workspace_id, operation_id), UNIQUE(workspace_id, version_number)
+                );
+                CREATE TABLE IF NOT EXISTS workspace_editor_restores (
+                    workspace_id TEXT NOT NULL, operation_id TEXT NOT NULL, payload_hash TEXT NOT NULL,
+                    result_json TEXT NOT NULL, PRIMARY KEY(workspace_id, operation_id)
+                );
                 """
             )
             columns = {row[1] for row in connection.execute("PRAGMA table_info(workspaces)")}
             if "candidate_snapshot_json" not in columns:
                 connection.execute("ALTER TABLE workspaces ADD COLUMN candidate_snapshot_json TEXT")
+
+    def editor_context(self, workspace_id: str, document_id: str, *, request_id: str,
+                       editor_epoch: int) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._require_row(connection, workspace_id)
+            token = uuid4().hex
+            previous = connection.execute("SELECT * FROM workspace_editor_contexts WHERE workspace_id=? AND document_id=?",
+                                          (workspace_id, document_id)).fetchone()
+            if previous is not None and editor_epoch < previous['editor_epoch']:
+                raise WorkbenchError('editor_context_stale','本窗口的改写基点已变化，旧请求已失效。')
+            if previous is not None and previous['request_id'] == request_id and previous['editor_epoch'] == editor_epoch:
+                token = previous['token']
+            else:
+                connection.execute("""INSERT INTO workspace_editor_contexts VALUES(?,?,?,?,?)
+                    ON CONFLICT(workspace_id,document_id) DO UPDATE SET token=excluded.token,
+                    request_id=excluded.request_id,editor_epoch=excluded.editor_epoch""",
+                    (workspace_id, document_id, token, request_id, editor_epoch))
+            return {'workspace_id':workspace_id, 'document_id':document_id, 'token':token,
+                    'request_id':request_id, 'editor_epoch':editor_epoch}
+
+    def invalidate_editor_context(self, workspace_id: str, document_id: str,
+                                  expected_token: str | None = None) -> bool:
+        with self._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            self._require_row(connection, workspace_id)
+            if expected_token is not None:
+                row=connection.execute('SELECT token FROM workspace_editor_contexts WHERE workspace_id=? AND document_id=?',
+                                       (workspace_id,document_id)).fetchone()
+                if row is None or row['token'] != expected_token:
+                    return False
+            self._invalidate_editor_context(connection,workspace_id,document_id)
+            return True
+
+    @staticmethod
+    def _invalidate_editor_context(connection:sqlite3.Connection,workspace_id:str,document_id:str)->None:
+        connection.execute("""UPDATE workspace_editor_contexts SET token=?,request_id='__invalidated__',
+            editor_epoch=editor_epoch+CASE WHEN request_id='__invalidated__' THEN 0 ELSE 1 END
+            WHERE workspace_id=? AND document_id=?""",(uuid4().hex,workspace_id,document_id))
+
+    @staticmethod
+    def _check_editor_context(connection: sqlite3.Connection, workspace_id: str,
+                              document_id: str, token: str) -> None:
+        row=connection.execute('SELECT token FROM workspace_editor_contexts WHERE workspace_id=? AND document_id=?',
+                               (workspace_id,document_id)).fetchone()
+        if row is None or row['token'] != token:
+            raise WorkbenchError('editor_context_stale', '本窗口的改写基点已变化，旧请求已失效。')
+
+    def check_editor_context(self, workspace_id: str, document_id: str, token: str) -> None:
+        with self._connect() as connection:
+            self._check_editor_context(connection,workspace_id,document_id,token)
+
+    def create_checkpoint(self, workspace_id: str, *, operation_id: str, base_revision: int,
+                          kind: str, label: str, snapshot: dict[str, Any],
+                          source: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload={'operation_id':operation_id,'base_revision':base_revision,'kind':kind,'label':label,
+                 'snapshot':snapshot,'source':source}
+        raw=_serialize_draft(payload); fingerprint=hashlib.sha256(raw.encode()).hexdigest()
+        with self._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE'); self._require_row(connection,workspace_id)
+            previous=connection.execute('SELECT * FROM workspace_checkpoints WHERE workspace_id=? AND operation_id=?',
+                                        (workspace_id,operation_id)).fetchone()
+            if previous is not None:
+                if previous['payload_hash'] != fingerprint:
+                    raise WorkbenchError('checkpoint_operation_conflict','同一操作标识不能保存不同版本。')
+                return self._checkpoint_record(previous)
+            number=connection.execute('SELECT COALESCE(MAX(version_number),0)+1 FROM workspace_checkpoints WHERE workspace_id=?',(workspace_id,)).fetchone()[0]
+            checkpoint_id='checkpoint_'+uuid4().hex
+            connection.execute('INSERT INTO workspace_checkpoints VALUES(?,?,?,?,?,?,?)',
+                               (checkpoint_id,workspace_id,operation_id,number,fingerprint,raw,_utc_now()))
+            return self._checkpoint_record(connection.execute('SELECT * FROM workspace_checkpoints WHERE id=?',(checkpoint_id,)).fetchone())
+
+    @staticmethod
+    def _checkpoint_record(row: sqlite3.Row) -> dict[str, Any]:
+        return {**json.loads(row['payload_json']),'id':row['id'],'workspace_id':row['workspace_id'],
+                'version_number':row['version_number'],'created_at':row['created_at']}
+
+    def list_checkpoints(self, workspace_id: str, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            self._require_row(connection,workspace_id)
+            rows=connection.execute('SELECT * FROM workspace_checkpoints WHERE workspace_id=? ORDER BY version_number DESC LIMIT ? OFFSET ?',
+                                    (workspace_id,limit,offset)).fetchall()
+            return [self._checkpoint_record(row) for row in rows]
+
+    def restore_editor(self, workspace_id: str, *, document_id: str, operation_id: str,
+                       expected_revision: int, title: str, draft: dict[str, Any]) -> dict[str, Any]:
+        raw=_serialize_draft({'document_id':document_id,'revision':expected_revision,'title':title,'draft':draft})
+        fingerprint=hashlib.sha256(raw.encode()).hexdigest()
+        with self._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            previous=connection.execute('SELECT * FROM workspace_editor_restores WHERE workspace_id=? AND operation_id=?',(workspace_id,operation_id)).fetchone()
+            if previous is not None:
+                if previous['payload_hash'] != fingerprint:
+                    raise WorkbenchError('restore_operation_conflict','同一恢复标识不能用于不同请求。')
+                return json.loads(previous['result_json'])
+            row=self._require_row(connection,workspace_id,expected_revision)
+            serialized=_serialize_draft(apply_workspace_edit(json.loads(row['draft_json']),draft))
+            self._invalidate_editor_context(connection,workspace_id,document_id)
+            result=self._save_revision(connection,row,title=title,draft_json=serialized,candidate_snapshot_json=row['candidate_snapshot_json'])
+            connection.execute('INSERT INTO workspace_editor_restores VALUES(?,?,?,?)',(workspace_id,operation_id,fingerprint,_serialize_draft(result)))
+            return result
 
     def list(self, *, limit: int = 50, offset: int = 0, q: str = "",
              archived: bool = False) -> list[dict[str, Any]]:
@@ -309,6 +424,7 @@ class WorkspaceStore:
     def transform(
         self, workspace_id: str, *, expected_revision: int,
         operation: Callable[[dict[str, Any]], dict[str, Any]],
+        editor_context: tuple[str, str] | None = None,
     ) -> dict[str, Any]:
         """Internal short CAS. The callback MUST NOT perform network or slow IO."""
         with self._connect() as connection:
@@ -320,6 +436,8 @@ class WorkspaceStore:
                 raise WorkspaceNotFoundError(workspace_id)
             if row["revision"] != expected_revision:
                 raise WorkspaceRevisionConflictError(row["revision"])
+            if editor_context is not None:
+                self._check_editor_context(connection, workspace_id, *editor_context)
             draft = operation(json.loads(row["draft_json"]))
             # Validate internal transitions as well as public input before commit.
             result = self._save_revision(connection, row, title=row["title"],
@@ -477,11 +595,14 @@ class WorkspaceStore:
         raise WorkspaceVersionNotFoundError(revision)
 
     def create_proposal(self, workspace_id: str, *, expected_revision: int,
-                        draft: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+                        draft: dict[str, Any], metadata: dict[str, Any],
+                        editor_context: tuple[str, str] | None = None) -> dict[str, Any]:
         serialized = _serialize_draft(_persistent_draft(draft))
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._require_row(connection, workspace_id, expected_revision)
+            if editor_context is not None:
+                self._check_editor_context(connection, workspace_id, *editor_context)
             proposal_id = f"proposal_{uuid4().hex}"
             connection.execute("""INSERT INTO workspace_proposals
                 (id,workspace_id,base_revision,draft_json,metadata_json,created_at) VALUES(?,?,?,?,?,?)
@@ -590,6 +711,8 @@ class WorkspaceStore:
         return {"id": row["id"], "workspace_id": row["workspace_id"], "base_revision": row["base_revision"],
                 "draft": project_conversation(json.loads(row["draft_json"])),
                 "changed_layers": metadata.get("changed_layers", []), "warnings": metadata.get("warnings", []),
+                **({"task": metadata["task"]} if "task" in metadata else {}),
+                **({"review_status": "needs_review"} if metadata.get("review_status") == "needs_review" else {}),
                 "created_at": row["created_at"]}
 
     def _connect(self) -> sqlite3.Connection:

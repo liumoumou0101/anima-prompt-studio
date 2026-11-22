@@ -20,6 +20,8 @@ BRIDGE_SCHEMA = "v3-v2-generation-bridge/1"
 
 class GenerationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    workflow_parameter_overrides: dict[str, int | float | str] = Field(default_factory=dict)
+    parameter_schema: dict | None = None
 
     preset_id: str = "stable_baseline"
     width: int | None = Field(default=None, ge=64, le=8192)
@@ -60,6 +62,8 @@ class CandidateToPromptJobAdapter:
     ) -> PreparedGeneration:
         settings = settings or GenerationSettings()
         model = self.config.get_model(candidate.versions.model_profile)
+        if model.id == "moss_image_sft_int8":
+            raise ValueError("MOSS 不支持 ANIMA 标签候选，请使用 MOSS 原文出图。")
         preset = self._fallback_preset(model.id, settings.preset_id)
         if not candidate.positive_prompt.strip():
             raise ValueError("V3 候选缺少正向提示词。")
@@ -90,6 +94,8 @@ class CandidateToPromptJobAdapter:
             for tag in candidate.tags
         ]
         bridge = {
+            "workflow_parameter_overrides": settings.workflow_parameter_overrides,
+            "parameter_schema": settings.parameter_schema,
             "schema": BRIDGE_SCHEMA,
             "candidate": candidate.model_dump(mode="json"),
             "intent": intent.model_dump(mode="json"),
@@ -127,15 +133,15 @@ class CandidateToPromptJobAdapter:
         project_name: str = "英文提示词直出",
         settings: GenerationSettings | None = None,
     ) -> PreparedGeneration:
-        """Pass pasted English prompts through unchanged. Never compiles tags."""
+        """Use the reviewed text directly, including MOSS Chinese layout and whitespace."""
 
         settings = settings or GenerationSettings()
         model = self.config.get_model(model_profile_id)
         preset = self._fallback_preset(model.id, settings.preset_id)
-        positive = positive_prompt.strip()
-        if not positive:
-            raise ValueError("英文直出缺少正向提示词。")
-        negative = negative_prompt.strip()
+        if model.id == "moss_image_sft_int8" and any(value % 16 for value in (settings.width or model.default_width, settings.height or model.default_height)):
+            raise ValueError("MOSS 宽高必须为 16 的倍数。")
+        if not positive_prompt.strip():
+            raise ValueError("直出缺少正向提示词。")
 
         generation_params = GenerationParams(
             width=settings.width or model.default_width,
@@ -150,17 +156,19 @@ class CandidateToPromptJobAdapter:
         job = PromptJob(
             project_name=project_name.strip() or "英文提示词直出",
             original_zh="",
-            translated_en=positive,
+            translated_en=positive_prompt,
             model_profile_id=model.id,
             generation_preset_id=settings.preset_id,
-            positive_prompt=positive,
-            negative_prompt=negative,
+            positive_prompt=positive_prompt,
+            negative_prompt=negative_prompt,
             compiled_prompt_state=ItemState.LOCKED,
             prompt_origin="user_edited",
             generation_params=generation_params,
             workflow_template_id=model.workflow_template_id,
             notes="外部正向/反向提示词直出；未经过本地翻译和提示词编译器。",
             integration_metadata={
+                "workflow_parameter_overrides": settings.workflow_parameter_overrides,
+                "parameter_schema": settings.parameter_schema,
                 "schema": BRIDGE_SCHEMA,
                 "origin": "direct_prompt",
                 "model_profile": model.id,

@@ -97,6 +97,9 @@ def test_local_save_and_ssh_hash_compatibility(tmp_path):
     old = ssh.model_dump(mode="json")
     old.pop("connection_type")
     old.pop("display_name")
+    for field in tuple(old):
+        if field.startswith("http_"):
+            old.pop(field)
     assert fingerprint(ssh) == hashlib.sha256(json.dumps(old, sort_keys=True).encode()).hexdigest()
     assert fingerprint(profile) != fingerprint(profile.model_copy(update={"comfy_port": 8388}))
 

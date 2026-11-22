@@ -1,4 +1,6 @@
 import type {LocalConversation, RequirementLayers, RequirementsEdit} from "./conversation";
+import {validJournal,type EditorJournal} from "./editorHistory";
+import {validArtistPresetPlacement, validArtistPresetSnapshot} from "./artistPresetApplication";
 
 export const CONVERSATION_DRAFT_SCHEMA_VERSION = 1 as const;
 const TAB_ID_KEY = "anima-conversation-tab-id";
@@ -47,6 +49,7 @@ interface DraftEnvelope {
   savedAt: number;
   local: LocalConversation;
   base: LocalConversation | null;
+  editorJournal?: EditorJournal;
 }
 
 interface RecoveryIndex {
@@ -61,6 +64,8 @@ export interface ConversationDraftReadResult {
   invalidRaw?: string;
   invalidBackupKey?: string;
   persistenceBlocked?: boolean;
+  editorJournal?: EditorJournal;
+  savedAt?:number;
 }
 
 export interface ConversationDraftSaveResult {ok: boolean; warning: string}
@@ -183,6 +188,8 @@ function recoveryTabIds(target: ConversationDraftStorage): string[] {
   const context = identity || readDocumentContext(target);
   return context ? [context.tabId, ...context.ancestors] : [getConversationTabId(target)];
 }
+/** Recover only this document's explicit reload/clone lineage, never another window's mutable slot. */
+export function getConversationRecoveryDocumentIds(storage?:ConversationDraftStorage):string[]{return [...recoveryTabIds(environment(storage))];}
 
 function pendingKey(workspaceId: string, tabId: string): string {
   return `${PENDING_PREFIX}${encodeURIComponent(workspaceId)}:${encodeURIComponent(tabId)}`;
@@ -195,7 +202,16 @@ function pendingDoneKey(workspaceId: string, request: ConversationPending): stri
 function validPending(value: unknown, workspaceId: string): value is ConversationPending {
   if (!object(value) || typeof value.key !== "string" || !value.key || typeof value.body !== "string") return false;
   const body = parse(value.body);
-  return object(body) && body.workspace_id === workspaceId && body.submission_kind === "conversational";
+  if(!object(body))return false;
+  if(body.workspace_id===workspaceId&&body.submission_kind==="conversational")return true;
+  // The frozen intent protocol nests its original conversational source. Never
+  // convert its bytes or key into a legacy request while recovering.
+  if(!object(body.source)||body.source.workspace_id!==workspaceId||body.source.submission_kind!=="conversational"
+    ||!object(body.creationConfiguration)||!object(body.creationConfiguration.workflow)
+    ||typeof body.creationConfiguration.workflow.id!=="string"||!body.creationConfiguration.workflow.id
+    ||typeof body.creationConfiguration.workflow.revision!=="string"||!object(body.executionPolicy))return false;
+  return body.executionPolicy.mode==="auto"&&strings(body.executionPolicy.preferredEnvironmentIds)
+    ||body.executionPolicy.mode==="pinned"&&typeof body.executionPolicy.environmentId==="string"&&Boolean(body.executionPolicy.environmentId);
 }
 
 function requestSlot(workspaceId: string, target: ConversationDraftStorage, source: ConversationBranchSource | null) {
@@ -330,12 +346,16 @@ function requirements(value: unknown): value is RequirementsEdit {
       || typeof layers.exclusions.locked !== "boolean") return false;
   if ([layers.subject.character_tags, layers.subject.series_tags, layers.subject.general_tags, layers.style.manual_artist_tags]
     .some(items => items !== undefined && !strings(items))) return false;
+  if (layers.style.artist_preset != null && !validArtistPresetSnapshot(layers.style.artist_preset)) return false;
   if (layers.exclusions.scoped.some(item => !object(item) || typeof item.target !== "string" || typeof item.concept !== "string")) return false;
   if (layers.composition.design != null && (!object(layers.composition.design)
       || Object.keys(layers.composition.design).some(key => !["shot", "layout", "camera", "gaze"].includes(key))
       || Object.values(layers.composition.design).some(item => !choice(item)))) return false;
   return value.loras.every(item => object(item) && typeof item.logical_id === "string" && typeof item.file_name === "string"
-    && typeof item.weight === "number" && strings(item.trigger_words) && typeof item.required === "boolean" && object(item.source) && typeof item.source.kind === "string");
+    && typeof item.weight === "number" && strings(item.trigger_words) && typeof item.required === "boolean" && object(item.source) && typeof item.source.kind === "string"
+    && (item.enabled === undefined || typeof item.enabled === "boolean")
+    && (item.sha256 == null || (typeof item.sha256 === "string" && /^[a-f0-9]{64}$/.test(item.sha256)))
+    && (item.clip_weight == null || (typeof item.clip_weight === "number" && Number.isFinite(item.clip_weight))));
 }
 
 function localConversation(value: unknown): value is LocalConversation {
@@ -344,6 +364,8 @@ function localConversation(value: unknown): value is LocalConversation {
       || !requirements(value.requirements) || typeof value.positive !== "string" || typeof value.negative !== "string"
       || typeof value.model !== "string" || !object(value.settings)
       || (value.workflowSnapshotRunId !== undefined && value.workflowSnapshotRunId !== null && typeof value.workflowSnapshotRunId !== "string")
+      || (value.artistPresetCustomized !== undefined && (typeof value.artistPresetCustomized !== "string" || value.artistPresetCustomized.length > 200))
+      || (value.artistPresetPlacement !== undefined && !validArtistPresetPlacement(value.artistPresetPlacement))
       || (value.restoredFrom !== undefined && typeof value.restoredFrom !== "string")) return false;
   const settings = value.settings;
   return typeof settings.preset_id === "string" && typeof settings.aspect === "string"
@@ -364,7 +386,8 @@ function envelope(value: unknown, workspaceId?: string): value is DraftEnvelope 
     && typeof value.workspaceId === "string" && (!workspaceId || value.workspaceId === workspaceId)
     && typeof value.tabId === "string" && Boolean(value.tabId) && typeof value.savedAt === "number"
     && Number.isFinite(value.savedAt) && value.savedAt >= 0
-    && localConversation(value.local) && (value.base === null || localConversation(value.base));
+    && localConversation(value.local) && (value.base === null || localConversation(value.base))
+    && (value.editorJournal===undefined||validJournal(value.editorJournal,String(value.workspaceId)));
 }
 
 function recovery(value: unknown): value is RecoveryIndex {
@@ -532,7 +555,8 @@ export function readConversationDraft(workspaceId: string, storage?: Conversatio
     for (const tabId of recoveryTabIds(target)) {
       const ownRaw = target.localStorage.getItem(conversationDraftKey(workspaceId, tabId));
       const own = parse(ownRaw);
-      if (envelope(own, workspaceId)) return {local: own.local, base: own.base,
+      if (envelope(own, workspaceId)) return {local: own.local, base: own.base,savedAt:own.savedAt,
+        ...(validJournal(own.editorJournal,workspaceId)?{editorJournal:own.editorJournal}:{}),
         warning: own.base ? "" : "缺少可靠的合并基准；保存到服务端前请逐项核对版本。"};
       if (ownRaw !== null) {
         try {
@@ -550,7 +574,7 @@ export function readConversationDraft(workspaceId: string, storage?: Conversatio
       const slots = Object.values(index.slots).sort((left, right) => right.savedAt - left.savedAt);
       for (const slot of slots) {
         const candidate = parse(target.localStorage.getItem(slot.key));
-        if (envelope(candidate, workspaceId)) return {local: candidate.local, base: candidate.base,
+        if (envelope(candidate, workspaceId)) return {local: candidate.local, base: candidate.base,savedAt:candidate.savedAt,
           warning: candidate.base ? "已从其他标签页的最近草稿恢复，请核对后再保存。"
             : "已从其他标签页恢复草稿，但缺少可靠的合并基准；保存到服务端前请逐项核对版本。"};
       }
@@ -567,7 +591,7 @@ export function readConversationDraft(workspaceId: string, storage?: Conversatio
 }
 
 export function saveConversationDraft(workspaceId: string, local: LocalConversation, base: LocalConversation | null,
-  storage?: ConversationDraftStorage): ConversationDraftSaveResult {
+  storage?: ConversationDraftStorage, editorJournal?: EditorJournal): ConversationDraftSaveResult {
   const target = environment(storage);
   const identity = documentIdentities.get(target);
   if (identity?.recoveryError) return {ok: false, warning: identity.recoveryError};
@@ -575,7 +599,7 @@ export function saveConversationDraft(workspaceId: string, local: LocalConversat
   const savedAt = target.now?.() ?? Date.now();
   const key = conversationDraftKey(workspaceId, tabId);
   const value: DraftEnvelope = {version: CONVERSATION_DRAFT_SCHEMA_VERSION, workspaceId, tabId, savedAt,
-    local: structuredClone(local), base: structuredClone(base)};
+    local: structuredClone(local), base: structuredClone(base),...(editorJournal?{editorJournal:structuredClone(editorJournal)}:{})};
   try {
     const previousRaw = target.localStorage.getItem(key);
     const previous = parse(previousRaw);

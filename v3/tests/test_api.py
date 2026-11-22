@@ -129,11 +129,14 @@ def test_health_session_exchange_is_one_time_and_bootstrap_is_protected(referenc
         "animayume_v1_0_final",
         "animayume_v1_5_base",
         "miaomiao_harem_anima_v1_6",
+        "moss_image_sft_int8",
+        "wai_anima_v1_0",
     ]
     assert bootstrap.json()["model_profile_options"][-1] == {
-        "id": "miaomiao_harem_anima_v1_6",
-        "display_name": "MiaoMiao Harem ANIMA v1.6",
+        "id": "wai_anima_v1_0",
+        "display_name": "WAI ANIMA v1.0",
         "variant": "community",
+        "family": "anima",
     }
     assert "access-control-allow-origin" not in bootstrap.headers
 
@@ -691,7 +694,7 @@ def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
     assert inspected.status_code == 200
     report = inspected.json()["workflow_inspection"]
     assert report["remote_profile_id"] == "v3-ready"
-    assert len(report["items"]) == 11
+    assert len(report["items"]) == 13
     assert all(item["state"] == "missing_nodes" for item in report["items"])
     assert events[-1] == "close"
 
@@ -713,19 +716,19 @@ def test_workflow_management_requires_session_and_imports_copies(reference_db, t
     headers = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
     report = client.get(path, headers=headers)
     assert report.status_code == 200
-    assert len(report.json()["items"]) == 11
+    assert len(report.json()["items"]) == 13
     assert all(i["state"] == "unchecked" for i in report.json()["items"])
     exported = client.get("/api/v3/workflows/export/23_Turbo_v1.1", headers=headers)
     library = client.get("/api/v3/workflows/catalog", headers=headers)
     assert library.status_code == 200
-    assert len(library.json()["items"]) == 11
+    assert len(library.json()["items"]) == 13
     preview = client.post("/api/v3/workflows/preview", json=exported.json(), headers=headers)
     assert preview.status_code == 200
-    assert len(catalog(database)) == 11
+    assert len(catalog(database)) == 13
     imported = client.post("/api/v3/workflows/import", json=exported.json(), headers=headers)
     assert imported.status_code == 200
     assert imported.json()["id"].startswith("user:")
-    assert len(catalog(database)) == 12
+    assert len(catalog(database)) == 14
     disabled = client.put("/api/v3/workflows/23_Turbo_v1.1/enabled", json={"enabled": False}, headers=headers)
     assert disabled.status_code == 200
     diagnostics = client.get(path + "/diagnostics", headers=headers).text
@@ -1979,6 +1982,10 @@ def test_workspace_crud_persists_separately_and_rejects_stale_revision(
         "batch_size": 1,
         "remote_profile_id": None,
         "workflow_profile_id": None,
+        "creation_configuration": None,
+        "execution_policy": None,
+        "parameter_schema": None,
+        "workflow_parameter_overrides": {},
     }
     assert workspace["candidate_snapshot"]["candidates"][0]["positive_prompt"] == "score_7, maid, twintails"
     assert workspace["candidate_snapshot"]["artist_suggestions"][0]["name"] == "sample_artist_a"

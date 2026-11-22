@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import secrets
 import threading
 from dataclasses import dataclass, field
@@ -323,6 +324,9 @@ class GalleryUpscaleCoordinator:
         self.on_update = on_update
         self.poll_interval = poll_interval
 
+    def resolve_workflow(self, profile: WorkflowProfile, client: ComfyUIClient) -> WorkflowProfile:
+        return profile
+
     def execute(
         self,
         *,
@@ -353,6 +357,7 @@ class GalleryUpscaleCoordinator:
                 tunnel.open(credentials)
                 client = self.client_factory(tunnel.base_url)
                 client.validate_environment()
+                workflow_profile = self.resolve_workflow(workflow_profile, client)
                 self._update(run, GenerationRunState.PREPARING, "正在上传原图", 0.12)
                 suffix = source_path.suffix.casefold() or ".png"
                 uploaded = client.upload_image(
@@ -454,6 +459,8 @@ class GalleryProcessJob:
     model: str = "anima_base_v1"
     prompt: str = ""
     parameters: dict[str, Any] = field(default_factory=dict)
+    http_connection: dict[str, Any] | None = None
+    connection_fingerprint: str | None = None
     queue_position: int = 0
     generation_run_id: str = ""
     remote_prompt_id: str = ""
@@ -494,6 +501,9 @@ class GalleryProcessJob:
             model=str(payload.get("model") or "anima_base_v1"),
             prompt=str(payload.get("prompt") or ""),
             parameters=dict(payload.get("parameters") or {}) if isinstance(payload.get("parameters"), dict) else {},
+            http_connection=(dict(payload["httpConnection"]) if isinstance(payload.get("httpConnection"), dict)
+                             else {}) if "httpConnection" in payload else None,
+            connection_fingerprint=payload.get("connectionFingerprint"),
             queue_position=int(payload.get("queuePosition") or 0),
             generation_run_id=str(payload.get("generationRunId") or ""),
             remote_prompt_id=str(payload.get("remotePromptId") or ""),
@@ -523,6 +533,8 @@ class GalleryProcessJob:
             "model": self.model,
             "prompt": self.prompt,
             "parameters": dict(self.parameters),
+            **({"httpConnection": dict(self.http_connection)} if self.http_connection is not None else {}),
+            **({"connectionFingerprint": self.connection_fingerprint} if self.connection_fingerprint is not None else {}),
             "queuePosition": self.queue_position,
             "generationRunId": self.generation_run_id,
             "remotePromptId": self.remote_prompt_id,
@@ -549,6 +561,7 @@ class GalleryUpscaleManager:
         regen_coordinator_factory: Callable[..., RemoteExecutionCoordinator] = RemoteExecutionCoordinator,
         workflow_provider: Callable[[RemoteProfile], list[WorkflowProfile]] | None = None,
         allow_legacy_regeneration: bool = True,
+        connection_resolver: Callable[[], tuple[RemoteProfile | None, RemoteCredentials]] | None = None,
     ) -> None:
         self.repository_path = repository_path
         self.output_root = output_root.expanduser()
@@ -556,11 +569,15 @@ class GalleryUpscaleManager:
         self.regen_coordinator_factory = regen_coordinator_factory
         self.workflow_provider = workflow_provider
         self.allow_legacy_regeneration = allow_legacy_regeneration
+        self.connection_resolver = connection_resolver
         self._remote_profile: RemoteProfile | None = None
         self._workflow_profile: WorkflowProfile | None = None
         self._txt2img_workflows: list[WorkflowProfile] = []
         self._credentials = RemoteCredentials()
+        self._configured = False
         self._jobs: dict[str, GalleryProcessJob] = {}
+        # A queued job keeps the selected connection and credentials in memory only.
+        self._job_connections: dict[str, tuple[RemoteProfile, RemoteCredentials]] = {}
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._stopping = False
@@ -595,6 +612,7 @@ class GalleryUpscaleManager:
                 raise GalleryUpscaleError(reason)
             self.output_root = resolved
             self._jobs.clear()
+            self._job_connections.clear()
             self._load_jobs_locked()
             self._condition.notify_all()
 
@@ -612,10 +630,60 @@ class GalleryUpscaleManager:
                 item.model_copy(deep=True) for item in (txt2img_workflows or [])
             ]
             self._credentials = (credentials or RemoteCredentials()).model_copy(deep=True)
+            self._configured = True
             self._condition.notify_all()
+
+    def _refresh_connection_locked(self) -> None:
+        if self.connection_resolver:
+            profile, credentials = self.connection_resolver()
+            self._remote_profile = profile.model_copy(deep=True) if profile else None
+            self._credentials = credentials.model_copy(deep=True)
+
+    def _capture_connection_locked(self, job: GalleryProcessJob) -> None:
+        profile = self._remote_profile
+        assert profile is not None  # Submit and retry have validated the selection.
+        job.http_connection = self._http_connection_metadata(profile) if profile.connection_type == "http" else None
+        job.connection_fingerprint = self._connection_fingerprint(profile) if profile.connection_type != "http" else None
+        self._job_connections[job.id] = (profile.model_copy(deep=True), self._credentials.model_copy(deep=True))
+
+    @staticmethod
+    def _connection_fingerprint(profile: RemoteProfile) -> str:
+        fields = {"id", "connection_type", "comfy_host", "comfy_port"}
+        if profile.connection_type == "ssh":
+            fields.update(("ssh_host", "ssh_port", "ssh_user", "known_host_fingerprint"))
+        return hashlib.sha256(profile.model_dump_json(include=fields).encode()).hexdigest()
+
+    @staticmethod
+    def _http_connection_metadata(profile: RemoteProfile) -> dict[str, Any]:
+        return {"profile_id": profile.id, "session_id": profile.http_session_id,
+                "base_url": profile.http_base_url, "runtime_id": profile.http_runtime_id}
+
+    def _restored_connection_matches_locked(self, job: GalleryProcessJob) -> bool:
+        if not self._configured:
+            return False
+        self._refresh_connection_locked()
+        profile = self._remote_profile
+        if job.http_connection is None and (profile is None or profile.connection_type != "http"):
+            if job.connection_fingerprint is None:  # Historical SSH/local jobs had no connection snapshot.
+                return True
+            if profile is None:
+                return False
+            if self._connection_fingerprint(profile) == job.connection_fingerprint:
+                return True
+        if (profile is not None and profile.connection_type == "http" and profile.http_session_id
+                and job.http_connection == self._http_connection_metadata(profile)):
+            return True
+        job.state = "failed"
+        job.message = job.error = "执行连接已更换或任务缺少匹配的连接快照，不能自动恢复排队任务。请确认当前连接后重试。"
+        job.queue_position = 0
+        job.updated_at = utc_now()
+        self._persist_locked(job)
+        self._renumber_queue_locked()
+        return False
 
     def configuration_payload(self) -> dict[str, Any]:
         with self._lock:
+            self._refresh_connection_locked()
             reason = self._unavailable_reason()
             active_job = next((job for job in self._jobs.values() if self._is_active(job)), None)
             queued = [job for job in self._jobs.values() if job.state == "queued"]
@@ -639,6 +707,7 @@ class GalleryUpscaleManager:
 
     def submit(self, source: Path, relative_path: str, asset: dict[str, Any]) -> dict[str, Any]:
         with self._condition:
+            self._refresh_connection_locked()
             reason = self._unavailable_reason()
             if reason:
                 raise GalleryUpscaleError(reason)
@@ -676,6 +745,7 @@ class GalleryUpscaleManager:
                 message=f"等待处理 · 队列第 {queue_position} 位",
             )
             self._jobs[process_job.id] = process_job
+            self._capture_connection_locked(process_job)
             self._persist_locked(process_job)
             self._condition.notify_all()
             return process_job.payload()
@@ -733,6 +803,7 @@ class GalleryUpscaleManager:
             self._jobs[process_job.id] = process_job
             if self.workflow_provider:
                 process_job.parameters["workflow_snapshot"] = workflow.model_dump(mode="json")
+            self._capture_connection_locked(process_job)
             self._persist_locked(process_job)
             self._condition.notify_all()
             return process_job.payload()
@@ -766,6 +837,7 @@ class GalleryUpscaleManager:
             job.queue_position = 0
             job.updated_at = utc_now()
             self._persist_locked(job)
+            self._job_connections.pop(job.id, None)
             self._renumber_queue_locked()
             self._condition.notify_all()
             return job.payload()
@@ -775,6 +847,7 @@ class GalleryUpscaleManager:
             job = self._jobs.get(job_id)
             if job is None:
                 raise GalleryUpscaleError("任务不存在或已经被清理。")
+            self._refresh_connection_locked()
             reason = (
                 self._regen_reason(job.model)
                 if job.operation == GALLERY_REGEN_OPERATION
@@ -804,6 +877,7 @@ class GalleryUpscaleManager:
             job.generation_run_id = ""
             job.remote_prompt_id = ""
             job.updated_at = utc_now()
+            self._capture_connection_locked(job)
             self._persist_locked(job)
             self._condition.notify_all()
             return job.payload()
@@ -821,6 +895,7 @@ class GalleryUpscaleManager:
                 for job in finished:
                     repository.delete_gallery_process_job(self.output_root, job.id)
                     self._jobs.pop(job.id, None)
+                    self._job_connections.pop(job.id, None)
             finally:
                 repository.close()
             return len(finished)
@@ -840,6 +915,7 @@ class GalleryUpscaleManager:
                         job.queue_position = 0
                         job.updated_at = utc_now()
                         self._persist_locked(job)
+                        self._job_connections.pop(job.id, None)
             self._stopping = True
             self._condition.notify_all()
         self._worker.join(timeout)
@@ -950,6 +1026,10 @@ class GalleryUpscaleManager:
                 self._persist_locked(job)
 
     def _job_ready_locked(self, job: GalleryProcessJob) -> bool:
+        if job.id in self._job_connections and job.operation != GALLERY_REGEN_OPERATION:
+            return self._workflow_profile is not None and GalleryUpscaleRenderer.supports(self._workflow_profile)
+        if job.id not in self._job_connections and not self._restored_connection_matches_locked(job):
+            return False
         if job.operation == GALLERY_REGEN_OPERATION:
             if job.parameters.get("workflow_snapshot"):
                 return not self._connection_reason()
@@ -979,7 +1059,10 @@ class GalleryUpscaleManager:
                         process_job.updated_at = utc_now()
                         self._persist_locked(process_job)
                         self._renumber_queue_locked()
-                        remote = self._remote_profile.model_copy(deep=True)
+                        captured_remote, captured_credentials = self._job_connections.pop(
+                            process_job.id, (self._remote_profile, self._credentials),
+                        )
+                        remote = captured_remote.model_copy(deep=True)
                         workflow = (
                             choose_txt2img_workflow(self._txt2img_workflows, process_job.model)
                             if process_job.operation == GALLERY_REGEN_OPERATION
@@ -989,7 +1072,7 @@ class GalleryUpscaleManager:
                         frozen = process_job.parameters.get("workflow_snapshot")
                         if frozen and process_job.operation == GALLERY_REGEN_OPERATION:
                             workflow = WorkflowProfile.model_validate(frozen)
-                        credentials = self._credentials.model_copy(deep=True)
+                        credentials = captured_credentials.model_copy(deep=True)
                         output_root = self.output_root
                         txt2img_workflows = [item.model_copy(deep=True) for item in self._txt2img_workflows]
                         break

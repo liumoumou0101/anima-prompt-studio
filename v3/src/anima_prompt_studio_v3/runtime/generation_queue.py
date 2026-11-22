@@ -27,6 +27,7 @@ from anima_prompt_studio_v3.remote.execution_coordinator import (
 from anima_prompt_studio_v3.remote.result_organizer import ResultOrganizer
 from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 from anima_prompt_studio_v3.remote.credential_store import CredentialStore
+from anima_prompt_studio_v3.remote.connections import http_connection_snapshot, validate_http_session
 from anima_prompt_studio_v3.runtime.workflow_compatibility import infer_workflow_model_profiles
 from anima_prompt_studio.domain.models import PromptJob, LoRASelection
 
@@ -138,6 +139,7 @@ class GenerationQueueService:
         passphrase_vault: EphemeralPassphraseVault | None = None,
         recovery_resolver: Callable[[GenerationRun], GenerationTarget] | None = None,
         plan_resolver=None,
+        cached_plan_resolver=None,
         durable_run_loader=None,
     ) -> None:
         if max_pending < 1:
@@ -147,6 +149,7 @@ class GenerationQueueService:
         self._passphrase_vault = passphrase_vault
         self._recovery_resolver = recovery_resolver
         self._plan_resolver = plan_resolver
+        self._cached_plan_resolver = cached_plan_resolver
         self._durable_run_loader = durable_run_loader
         self._reserved: set[str] = set()
         self.on_durable_cancel = None
@@ -234,6 +237,8 @@ class GenerationQueueService:
                 "workflow_revision": workflow_revision(target_snapshot.workflow_profile),
             },
         )
+        if target_snapshot.remote_profile.connection_type == "http":
+            run.request_json["http_connection"] = http_connection_snapshot(target_snapshot.remote_profile)
         request = _QueuedGeneration(
             prepared=PreparedGeneration(job=job, checkpoint_logical_name=prepared.checkpoint_logical_name),
             target=target_snapshot,
@@ -274,6 +279,13 @@ class GenerationQueueService:
         if self._plan_resolver is None:
             raise GenerationQueueError("当前队列尚未配置资源快照解析器。")
         return self._plan_resolver(deepcopy(prepared), remote_id, workflow_id, deepcopy(resources), deepcopy(frozen))
+
+    def plan_cached(self, prepared, remote_id, workflow_id, resources, frozen=None):
+        """Validate freshly probed evidence locally; routing must never start a second network inspection."""
+        resolver = self._cached_plan_resolver or self._plan_resolver
+        if resolver is None:
+            raise GenerationQueueError('当前队列尚未配置资源快照解析器。')
+        return resolver(deepcopy(prepared), remote_id, workflow_id, deepcopy(resources), deepcopy(frozen))
 
     def existing_request(self, key, payload_hash=None):
         with self._condition:
@@ -429,6 +441,10 @@ class GenerationQueueService:
             profile_delete_version = self._profile_delete_versions.get(remote_profile_id, 0)
 
         target = self._recovery_resolver(run) if self._recovery_resolver else self._target_resolver(remote_profile_id, workflow_profile_id)
+        try:
+            validate_http_session(run, target.remote_profile)
+        except ValueError as exc:
+            raise GenerationRunActionError(str(exc)) from None
         self._validate_remote_target(target)
         target_snapshot = GenerationTarget(
             remote_profile=target.remote_profile.model_copy(deep=True),
@@ -545,7 +561,8 @@ class GenerationQueueService:
                 target = request.target
                 if request.prepared is not None and run.request_json.get("submission_id"):
                     frozen = run.request_json["resource_snapshot"]
-                    _, target, resolution = self.plan(request.prepared, run.remote_profile_id,
+                    plan = self.plan_cached if run.request_json.get("preparation_policy") == "direct-fast-v1" else self.plan
+                    _, target, resolution = plan(request.prepared, run.remote_profile_id,
                         run.workflow_profile_id, [RequirementLora.model_validate(r) for r in frozen["resources"]],
                         frozen["workflow"])
                     if (resolution["remote_fingerprint"] != frozen["remote_fingerprint"]
@@ -669,6 +686,8 @@ def build_generation_queue(
         repository = SQLiteRepository(database)
         try:
             profile = repository.get_remote_profile(remote_profile_id)
+            from .cloud_model_catalog import assert_runtime_confirmed
+            assert_runtime_confirmed(repository, profile)
             output_root = Path(repository.get_setting(
                 "generation_output_root",
                 str(Path.home() / "Pictures" / "AnimaPromptStudio"),
@@ -679,7 +698,8 @@ def build_generation_queue(
         if profile.connection_type == "ssh" and profile.auth_type == RemoteAuthType.PASSWORD and not password:
             raise ValueError("当前云主机没有可用的安全存储密码。")
         passphrase = passphrases.get(profile.id) if profile.auth_type == RemoteAuthType.PRIVATE_KEY else ""
-        credentials = RemoteCredentials(password=password, passphrase=passphrase)
+        credentials = RemoteCredentials(password=password, passphrase=passphrase,
+            comfy_api_key=secrets.read_comfy_api_key(profile.http_session_id) if profile.connection_type == "http" else None)
         workflow = WorkflowProfile.model_validate(frozen) if frozen else workflows_manager.resolve_for_submission(remote_profile_id, workflow_profile_id, credentials)
         if workflows_manager.remote(remote_profile_id) != profile:
             raise ValueError("检测期间连接配置已更改，请重新提交。")
@@ -703,6 +723,7 @@ def build_generation_queue(
                 "remote_profile_id": profile.id,
                 "remote_display_name": profile.display_name,
                 "connection_type": profile.connection_type,
+                "remote_http_base_url": profile.http_base_url if profile.connection_type == "http" else None,
                 "remote_ssh_host": profile.ssh_host,
                 "remote_ssh_port": profile.ssh_port,
                 "remote_comfy_host": profile.comfy_host,
@@ -711,6 +732,9 @@ def build_generation_queue(
                 "workflow_display_name": workflow.display_name,
                 "workflow_origin": reports[profile.id][workflow.id]["origin"],
                 "workflow_kind": workflow.workflow_kind,
+                "lora_extension_supported": workflow._lora_extension is not None,
+                "lora_loader": workflow._lora_extension.loader if workflow._lora_extension else None,
+                "lora_slot_order": [f"{slot.node_id}.{slot.name_input}" for slot in workflow.lora_slots],
                 "workflow_notes": workflow.notes,
                 "compatible_model_profiles": reports[profile.id][workflow.id]["model_profiles"],
                 "host_fingerprint_ready": profile.connection_ready,
@@ -742,14 +766,15 @@ def build_generation_queue(
         if run.error_code in {"missing_nodes", "invalid_workflow_inputs"}:
             workflows_manager.invalidate(run.remote_profile_id)
 
-    def plan_resolver(prepared, remote_id, workflow_id, resources, frozen):
+    def plan_resolver(prepared, remote_id, workflow_id, resources, frozen, *, refresh=True):
         # Obtain credentials without resolving a different graph first.
         base = frozen if frozen is not None else LoraCatalog(workflows_manager).profile(workflow_id).model_dump(mode="json")
         target = target_resolver(remote_id, workflow_id, base)
         graph, resolution = LoraCatalog(workflows_manager).resolve(remote_id, workflow_id,
-            prepared.job.model_profile_id, resources, frozen=frozen, credentials=target.credentials, refresh=True)
+            prepared.job.model_profile_id, resources, frozen=frozen, credentials=target.credentials, refresh=refresh)
         job = prepared.job.model_copy(deep=True)
-        job.lora_selection = [LoRASelection(logical_id=b["logical_id"], file_name=b["remote_file_name"], weight=b["weight"], trigger_words=b["trigger_words"])
+        job.lora_selection = [LoRASelection(logical_id=b["logical_id"], file_name=b["remote_file_name"], weight=b["weight"],
+                                           trigger_words=b["trigger_words"], sha256=b.get("sha256"), clip_weight=b.get("clip_weight"))
                               for b in resolution["bindings"]]
         job.integration_metadata["resolved_lora_bindings"] = resolution["bindings"]
         planned = PreparedGeneration(job=job, checkpoint_logical_name=prepared.checkpoint_logical_name)
@@ -766,6 +791,21 @@ def build_generation_queue(
         finally:
             repository.close()
 
+    def recovery_resolver(run):
+        repository = SQLiteRepository(database)
+        try:
+            validate_http_session(run, repository.get_remote_profile(run.remote_profile_id))
+        except ValueError as exc:
+            raise GenerationRunActionError(str(exc)) from None
+        finally:
+            repository.close()
+        return target_resolver(run.remote_profile_id, run.workflow_profile_id, run.request_json.get("workflow_snapshot"))
+
+    def production_coordinator(output_root, on_update):
+        coordinator = GenerationQueueService._default_coordinator(output_root, on_update)
+        coordinator.identity_database = database
+        return coordinator
+
     return GenerationQueueService(
         target_resolver,
         on_job_saved=with_repository(lambda repository, job: repository.save_job(job)),
@@ -773,14 +813,15 @@ def build_generation_queue(
         on_artifact_saved=with_repository(
             lambda repository, artifact: repository.save_generation_artifact(artifact)
         ),
-        coordinator_factory=coordinator_factory,
+        coordinator_factory=coordinator_factory or production_coordinator,
         max_pending=max_pending,
         existing_runs=existing_runs,
         existing_artifacts=existing_artifacts,
         target_lister=target_lister,
         passphrase_vault=passphrases,
-        recovery_resolver=lambda run: target_resolver(run.remote_profile_id, run.workflow_profile_id, run.request_json.get("workflow_snapshot")),
+        recovery_resolver=recovery_resolver,
         plan_resolver=plan_resolver,
+        cached_plan_resolver=lambda *args: plan_resolver(*args, refresh=False),
         durable_run_loader=load_durable_run,
     )
 

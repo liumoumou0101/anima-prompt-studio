@@ -2,7 +2,7 @@
 from .profiles import ModelProfileRegistry, ModelVariant
 
 
-PROMPT_GUIDANCE_VERSION = "anima-scene-guidance/2"
+PROMPT_GUIDANCE_VERSION = "anima-scene-guidance/3"
 # Official card checked 2026-09-26. Variant advice is not inferred from filenames.
 PROMPT_GUIDANCE_SOURCE = (
     "https://huggingface.co/circlestone-labs/Anima/blob/"
@@ -10,7 +10,10 @@ PROMPT_GUIDANCE_SOURCE = (
 )
 
 REWRITE_GOALS = {
-    "faithful": "根据现有要求、已审核提示词和本次修改，准确整理完整英文提示词；保留全部明确内容，不自行补充画面设计。",
+    "faithful": (
+        "根据现有要求、已审核提示词和本次修改，完整翻译并整理英文正负向提示词；"
+        "保留全部明确事实及兼容的已审核内容，不附回中文原文，不自行补充画面设计。"
+    ),
     "expand": (
         "请根据现有要求和已审核提示词适度扩写画面：在保留全部明确约束的前提下，"
         "具体设计尚未指定且有助于画面的受光关系、姿态或环境细节，把有用的新增内容写进正向提示词。"
@@ -23,6 +26,11 @@ REWRITE_GOALS = {
 }
 
 PROMPT_EXPRESSION_RULES = """
+For Anima, positive and negative must be entirely in English. Chinese scene
+descriptions are source meaning to translate, not text to copy into the prompts.
+Do not append the Chinese source text or parenthesized translations after English
+phrases. Translate existing Chinese prompt descriptions too; keep their compatible
+facts rather than their Chinese wording. layer_updates and warnings may remain in Chinese.
 Anima accepts tags, natural language, and a mixture. Use concise tags for stable
 concepts such as count, hair and clothing; use coherent English sentences when
 needed to connect actions, ownership, light sources and spatial relationships.
@@ -30,22 +38,118 @@ Do not flatten a meaningful relationship into disconnected adjectives. Prefer
 specific visible descriptions over repeated quality words. Do not pad to a fixed
 length or repeat every fact once as tags and again as prose. For newly written
 Danbooru tags use lowercase and spaces, except score_*; preserve supplied names,
-manual tags, trigger words and literal locks as required above.
+manual tags, trigger words and literal locks as required above. If a required
+literal conflicts with English-only prompts, report the conflict; do not silently
+translate, omit or alter the protected text.
 model_guidance describes the selected image model, not additional scene facts.
 Its optional_positive_prefix is configuration advice, never an instruction to
 append tags. Use quality tags only when requested; avoid adding terms listed in
-avoid_adding to either prompt. Do not delete reviewed or locked wording merely
-to conform to guidance: preserve it and briefly flag any actual incompatibility.
+avoid_adding to either prompt. Preserve compatible reviewed facts and locked
+wording; briefly flag any actual incompatibility.
 Preserve reviewed negatives and explicit exclusions even when the selected model's
 default negative mode is disabled; mention the limitation instead of erasing intent.
 Do not change generation settings, models or LoRAs.
 """
 
 FAITHFUL_RULES = """
-FAITHFUL: translate and organize only explicit facts and compatible reviewed text.
-Use natural language to preserve their relationships, but do not invent lighting,
-pose, gaze, composition, texture, expression or style to make the picture prettier.
-Missing creative choices remain unspecified. Do not run the expansion process.
+FAITHFUL: Translate every explicit fact into complete English positive and negative
+prompts, including older Chinese requirement and prompt descriptions. This is
+semantic preservation and complete translation, not verbatim copying of Chinese.
+Keep compatible reviewed facts, counts, attribute ownership, relationships and local exclusions.
+Do not leave Chinese source clauses in the prompts, including parenthetical echoes
+after an English translation. Keep layer_updates in the user's language and use
+warnings for review notes, not as part of either prompt.
+Use natural language where needed to preserve who does what to whom, but do not
+invent lighting, pose, gaze, composition, texture, expression or style to make
+the picture prettier. Missing creative choices remain unspecified. Do not run
+the expansion process.
+"""
+
+EDIT_EXISTING_RULES = """
+EDIT_EXISTING: revise the current reviewed picture within the latest delta's scope.
+This is an edit operation, not a general expansion pass. Apply each requested
+change AND its necessary consequences wherever the old fact occurs, including
+other unlocked layers, both prompt fields and descriptions of related objects.
+A narrow edit protects unrelated choices; it does not preserve a detail that
+the edit has made impossible. Day-to-dusk retires explicit midday sunlight or
+noon shadows even in background prose. Soft light and an airy atmosphere can
+remain at dusk; dusk alone does not require darkness or a different mood.
+A full-body edit replaces incompatible cropping even where only the face was
+previously described. Keep the face and its features. Check ownership, spatial
+relationships, local/global exclusions and framing in the same way. Update
+affected unlocked prose in the same result, preserving its compatible facts.
+Retire the old relationship that the edit REPLACES: when she sits ON the existing
+bench, that same bench is no longer BESIDE her; a prop moved from a bag to her hand
+must not still be inside that bag. Preserve unrelated image-left/right positions.
+Keep an explicitly requested local ABSENCE explicit in the final positive or
+scoped negative. 'No hats on the left woman' cannot become merely 'no red hat on
+the left woman' or omission of the hat mention. Removing a red hat alone does not
+imply a ban on all hats; a later explicit 'still bareheaded' DOES require no hat.
+Do not add unrequested lighting, weather, expressions, hair length, hand poses,
+props, scenery or material/color details. Don't add details merely because the
+selected mode is expand. 'Other content unchanged' closes all unrelated choices.
+If a prompt field is explicitly unchanged, copy it EXACTLY, including whitespace.
+Faithful makes all necessary dependent edits without inventing other design
+choices. Expand also develops the affected visual relationships (e.g. where
+the new light falls on existing objects). If the user explicitly opens the
+whole scene, its wider design may be developed. Never require an unrelated
+addition to prove expansion.
+Use complete English prompts; requirement prose and warnings may stay Chinese.
+The final requirement ledger describes reviewed facts and the actual requested
+edit, not newly invented details. Explain a genuine fixed-control conflict rather
+than returning mutually contradictory text. Return the existing TurnOutput schema.
+If the user names a prompt field, keep each edit in that field. In "negative:
+remove fog, keep lettering, and add motion blur", all three operations target
+negative; motion blur is unwanted, not a new visible action. The other field
+must remain exact when protected. exact_fields lists those literal strings.
+"""
+
+BOLD_REWRITE_RULES = """
+BOLD_REWRITE: Create one visibly distinct alternative treatment of the existing
+scene for the user to compare. This one-time action opens visual design even
+with an empty delta, independently of the saved faithful/expand mode. Use the
+creative_brief as the source scene. Retain its explicit facts, subjects, count,
+actions, relationships, style, exclusions and any specified framing. Respect
+the latest delta when it replaces a fact, including all dependent descriptions.
+A narrower instruction such as "only change the lighting" limits this action too.
+For open choices, intentionally reorganize camera, staging, visual hierarchy,
+light relationships or background treatment where this strengthens the same
+scene. Develop a coherent new reading rather than reordering the same words.
+If an earlier design is specifically opened for revision, it can be replaced;
+never guess that an explicitly written fact is disposable. User-selected shot,
+controls, character/artist tags, artist preset, locks and trigger words remain
+binding. Integrate a fixed literal in its natural occurrence; do not append a
+second copy just to demonstrate compliance. Keep repetitions explicitly required
+by the source. Preserve the negative prompt exactly unless the user's edit changes it
+or an English translation is required. If no meaningful variation is possible,
+keep the prompt and briefly explain why in warnings.
+Put new aesthetic decisions in the positive prompt; summarize the actual changes
+briefly in Chinese warnings. Keep layer_updates for user facts or aligning stale
+unlocked prose with the reviewed source plus the delta. An empty delta may still
+require that alignment. Never persist a newly imagined camera, pose, atmosphere
+or background as a user requirement merely because it appears in this proposal.
+"""
+
+BOLD_REQUIREMENTS_SYSTEM = """
+Reconcile persistent requirements ONLY from the original reviewed prompt and
+what the user explicitly specifies in delta. You are reading the sources before
+the creative redesign. Do not design an image. Authorizing you to choose a camera
+or colors specifies neither a low angle nor any particular light/color. For an
+open design request, keep those source requirements unchanged unless the user
+explicitly releases a prior incompatible choice. When given a concrete change
+(e.g. "set the time to dusk"), align the affected unlocked fields and preserve
+their other compatible facts. An EMPTY field stays empty unless the latest
+delta gives a concrete new value. Do not populate it by copying the old reviewed
+camera or light, or by recording the instruction to redesign them as a fact.
+Keep selected controls, tags, artists and locks untouched.
+Return JSON {"layer_updates":{},"evidence":{}}; omit unchanged fields. For EVERY
+updated field, evidence[layer][field] must be a verbatim quote from delta or the
+original reviewed positive/negative that actually supports the new fact.
+For a previously empty field quote the specific new fact from delta. Use its
+shortest literal concrete phrase, in the user's language.
+Example: for "把时间改成傍晚", layer_updates={"lighting":{"text":"傍晚"}} and
+evidence={"lighting":{"text":"把时间改成傍晚"}}. No new factual value means both
+objects are empty. Do not use permission to choose as evidence for a choice.
 """
 
 EXPANSION_RULES = """
@@ -63,6 +167,9 @@ illuminate that subject without changing those attributes.
 Respect a narrow delta such as 'only change the light': do not use expansion mode
 to redesign unrelated parts. Keep identities, counts, clothing, main actions,
 ownership, time of day, mood, medium and style unless the user asks to change them.
+An explicit 'everything else unchanged' closes all other dimensions to expansion.
+An explicit unchanged positive/negative prompt stays byte-for-byte unchanged.
+Do not disguise a scope violation as 'the main subject is unchanged'.
 
 Consider the scene as a whole, selecting only the dimensions that help this image:
 - What should attract attention, and which parts should be visible? Framing,
@@ -96,7 +203,7 @@ in positive, not planned changes. Do not promote your own additions into persist
 user requirements or write read-only scene controls; layer_updates stores explicit
 user requests only. Preserve compatible additions from reviewed text unless asked
 to change them, but do not restore a choice the user has removed. With empty delta,
-touched_layers=[] and layer_updates={} even when positive gains useful detail.
+layer_updates={} even when positive gains useful detail.
 Before returning, check positive against EVERY populated requirement layer and
 selected control, not just subject.text. Carry framing/shot size and medium/style
 through to the final prompt along with counts, ownership, actions and light. Check

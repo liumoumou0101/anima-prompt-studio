@@ -104,6 +104,81 @@ def test_sampling_settings_save_preserves_compiled_prompt_and_token(conversation
     assert len(captured) == 1
 
 
+def test_moss_workspace_import_uses_its_own_defaults_when_settings_are_omitted(conversation_client):
+    client, calls=conversation_client
+    text="  保留原文\n第二段。  "
+    draft={"model_profile":"moss_image_sft_int8","prompt_edit":{"positive":text,"negative":" 裁切 "}}
+    response=client.post("/api/v3/workspaces",json={"draft":draft})
+    assert response.status_code==201, response.text
+    saved=response.json()["draft"]
+    assert (saved["compiled"]["positive"],saved["compiled"]["negative"])==(text," 裁切 ")
+    settings=saved["generation_settings"]
+    assert (settings["width"],settings["height"],settings["steps"],settings["cfg"])==(1024,1024,25,2.5)
+    explicit=client.post("/api/v3/workspaces",json={"draft":{**draft,"generation_settings":{"steps":19,"cfg":1.75}}})
+    assert explicit.status_code==201, explicit.text
+    assert explicit.json()["draft"]["generation_settings"]["steps"]==19
+    seed_only=client.post("/api/v3/workspaces",json={"draft":{**draft,"generation_settings":{"seed":"9223372036854775807"}}})
+    assert seed_only.status_code==201,seed_only.text
+    settings=seed_only.json()["draft"]["generation_settings"]
+    assert (settings["steps"],settings["width"],settings["seed"])==(25,1024,"9223372036854775807")
+    assert settings["creation_configuration"]["parameterOverrides"]=={"seed":"9223372036854775807"}
+    assert calls==[]
+
+
+def test_independent_model_settings_survive_workspace_saves_and_reopen(conversation_client):
+    client, _ = conversation_client
+    seed = "9223372036854775807"
+
+    def configuration(model, workflow, default_steps, **overrides):
+        return {"modelProfile": model, "workflow": {"id": workflow, "revision": "v1"},
+                "baseRecipeId": "default", "recipeValues": {"steps": default_steps},
+                "parameterOverrides": overrides, "resourceRequirements": [], "seedMode": "random"}
+
+    aesthetic = configuration("anima_aesthetic_v1_1", "v3_aesthetic_v1_1", 35, seed=seed)
+    aesthetic.update(seedMode="fixed", resourceRequirements=[{"logical_id": "aesthetic-lora", "weight": 0.7}])
+    turbo = configuration("anima_turbo_v1_1", "23_Turbo_v1.1", 10, steps=12)
+    base = configuration("anima_base_v1", "v3_base_v1", 27)
+    created = client.post("/api/v3/workspaces", json={"draft": {"model_profile": aesthetic["modelProfile"],
+        "generation_settings": {"creation_configuration": aesthetic, "seed": seed}}})
+    assert created.status_code == 201, created.text
+    first = created.json()
+    path = f"/api/v3/workspaces/{first['id']}"
+    assert "model_configurations" not in first["draft"]["generation_settings"]
+
+    def save(record, active, **settings):
+        response = client.put(path, json={"revision": record["revision"], "title": record["title"], "draft": {
+            "model_profile": active["modelProfile"], "generation_settings": {"creation_configuration": active, **settings}}})
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    saved = save(first, turbo, model_configurations={aesthetic["modelProfile"]: aesthetic})
+    assert saved["draft"]["generation_settings"]["model_configurations"] == {aesthetic["modelProfile"]: aesthetic}
+    archive = {item["modelProfile"]: item for item in (aesthetic, turbo)}
+    schema = {"workflowId": base["workflow"]["id"], "templateRevision": "v1"}
+    saved = save(saved, base, parameter_schema=schema, model_configurations={
+        **archive, base["modelProfile"]: {**base, "parameterOverrides": {"steps": 99}}})
+    reopened = WorkspaceStore(client.app.state.workspace_store.path).get(first["id"])
+    settings = client.get(path).json()["draft"]["generation_settings"]
+    assert settings == reopened["draft"]["generation_settings"] == saved["draft"]["generation_settings"]
+    assert settings["creation_configuration"] == base
+    assert settings["parameter_schema"] == schema
+    assert settings["model_configurations"] == archive
+
+    # Older clients may save just the active settings. Explicit empty clears the archive.
+    legacy_save = save(saved, base, parameter_schema=schema)
+    assert legacy_save["draft"]["generation_settings"]["model_configurations"] == archive
+    cleared = save(legacy_save, base, model_configurations={})
+    assert "model_configurations" not in cleared["draft"]["generation_settings"]
+
+
+def test_workspace_rejects_model_configuration_indexed_under_another_model(conversation_client):
+    client, _ = conversation_client
+    response = client.post("/api/v3/workspaces", json={"draft": {"model_profile": "anima_base_v1", "generation_settings": {
+        "model_configurations": {"anima_turbo_v1_1": {"modelProfile": "anima_aesthetic_v1_1",
+            "workflow": {"id": "v3_aesthetic_v1_1"}, "baseRecipeId": "default"}}}}})
+    assert response.status_code == 422
+
+
 def test_mode_recompile_changes_token_even_when_text_identical(conversation_client):
     client, _ = conversation_client
     first = turn(client, create(client)).json()
@@ -191,6 +266,25 @@ def test_manual_prompt_edit_uses_new_token_then_is_context_for_turn(conversation
     assert changed["draft"]["compiled"]["compiled_token"] != first["draft"]["compiled"]["compiled_token"]
     assert turn(client, changed, delta={"text": "光线变冷"}).status_code == 200
     assert json.loads(captured[-1]["messages"][-1]["content"])["compiled"] == prompt
+
+
+def test_negative_only_rewrite_keeps_the_visible_positive_value_verbatim(conversation_client, monkeypatch):
+    from anima_prompt_studio_v3.prompt_assistant.services.llm import LLMService
+    client,_=conversation_client
+    positive,negative=" \t moonlit river,\n\n   (stone bridge:1.2)  \n"," \n haze  "
+    next_negative=" \n dark fog\t "
+    created=client.post('/api/v3/workspaces',json={"draft":{"model_profile":"anima_base_v1","requirements_edit":edit(),
+        "prompt_edit":{"positive":positive,"negative":negative}}})
+    assert created.status_code==201,created.text
+    async def assistant(**kwargs):
+        context=json.loads(kwargs["messages"][1]["content"])
+        assert context["compiled"]=={"positive":positive,"negative":negative}
+        return llm_output(positive=positive,negative=next_negative)
+    monkeypatch.setattr(LLMService,"complete",assistant)
+    changed=turn(client,created.json(),compiled={"positive":positive,"negative":negative},delta={"text":"只修改负向提示词。"})
+    assert changed.status_code==200,changed.text
+    prompt=client.get(f"/api/v3/workspaces/{created.json()['id']}").json()["draft"]["compiled"]
+    assert (prompt["positive"],prompt["negative"])==(positive,next_negative)
 
 
 @pytest.mark.parametrize("bad", ["not JSON", '{"positive":"","negative":""}', '{"positive":"only"}'])
@@ -288,18 +382,17 @@ def test_cancellation_releases_turn_slot_without_write(tmp_path, monkeypatch):
     assert store.get(before["id"]) == before
 
 
-@pytest.mark.parametrize("updates,touched", [
-    ({"subject": {"text": "two people"}}, []),
-    ({"lighting": {"text": "cold", "locked": False}}, ["lighting"]),
-    ({"composition": {"text": "close", "shot": None}}, ["composition"]),
-    ({"lighting": {"text": "cold"}}, ["lighting", "lighting"]),
-    ({"unknown": {"text": "cold"}}, ["unknown"]),
+@pytest.mark.parametrize("updates", [
+    {"subject":{"text":"two people"}, "lighting":{"locked":False}},
+    {"composition":{"text":"close", "shot":None}},
+    {"lighting":"cold"},
+    {"unknown":{"text":"cold"}},
 ])
-def test_invalid_layer_updates_are_not_partially_applied(updates, touched):
+def test_invalid_layer_updates_are_not_partially_applied(updates):
     canonical = Requirements.model_validate(requirements())
     before = dump(canonical)
     with pytest.raises(WorkbenchError):
-        apply_layer_updates(canonical, touched, updates)
+        apply_layer_updates(canonical, updates)
     assert dump(canonical) == before
 
 
@@ -320,7 +413,7 @@ def test_pins_copy_content_preserve_locks_and_replace_resources():
     whole = apply_pin(base, source, "whole_scene")
     assert whole.layers.subject == base.layers.subject
     with pytest.raises(WorkbenchError):
-        apply_layer_updates(base, ["subject"], {"subject": {"text": "someone else"}})
+        apply_layer_updates(base, {"subject": {"text": "someone else"}})
 
 
 def test_generation_inputs_participate_in_stale_digest_but_locks_do_not():

@@ -6,6 +6,8 @@
 
 ## 目录
 
+工作台使用说明见 [添加、叠加和复用 LoRA](../docs/lora-library.md)。
+
 ```text
 v3/
 ├── pyproject.toml
