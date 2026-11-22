@@ -1,0 +1,153 @@
+{
+  "schema": "anima-workflow-catalog/1",
+  "version": "1.3.0",
+  "source": "ANIMA Prompt Studio maintained ComfyUI integration templates",
+  "license": "GPL-3.0-only",
+  "scope": "Graph definitions only. Model weights and custom nodes are installed separately under their own licenses.",
+  "templates": {
+    "23_Turbo_v1.1": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "anima_turbo_v1_1",
+      "lora_extension": "anima_before_shift"
+    },
+    "24_AnimaYume_v1.0_Final": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "animayume_v1_0_final",
+      "lora_extension": "anima_before_shift"
+    },
+    "25_MiaoMiao_Harem_ANIMA_v1.6": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "miaomiao_harem_anima_v1_6",
+      "lora_extension": "anima_before_shift"
+    },
+    "26_Turbo_v1.1": {
+      "version": "1.0.0",
+      "tier": "experimental",
+      "model": "anima_turbo_v1_1"
+    },
+    "27_AnimaYume": {
+      "version": "1.0.0",
+      "tier": "experimental",
+      "model": "animayume_v1_0_final"
+    },
+    "28_MiaoMiao": {
+      "version": "1.0.0",
+      "tier": "experimental",
+      "model": "miaomiao_harem_anima_v1_6"
+    },
+    "v3_base_v1": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "anima_base_v1",
+      "lora_extension": "anima_before_shift"
+    },
+    "v3_aesthetic_v1_1": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "anima_aesthetic_v1_1",
+      "lora_extension": "anima_before_shift"
+    },
+    "v3_aesthetic_v1_0": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "anima_aesthetic_v1_0",
+      "lora_extension": "anima_before_shift"
+    },
+    "v3_anima_2_9b_preview_v1": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "anima_2_9b_preview_v1",
+      "lora_extension": "anima_before_sampler"
+    },
+    "v3_animayume_v1_5_base": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "animayume_v1_5_base",
+      "lora_extension": "anima_before_sampler"
+    },
+    "v3_wai_anima_v1_0": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "wai_anima_v1_0",
+      "lora_extension": "anima_before_sampler"
+    },
+    "v3_moss_image_sft_int8": {
+      "version": "1.0.0",
+      "tier": "baseline",
+      "model": "moss_image_sft_int8",
+      "lora_extension": "moss_model_only"
+    }
+  },
+  "lora_extensions": {
+    "anima_before_shift": {
+      "loader": "LoraLoader",
+      "model_source": [
+        "1",
+        0
+      ],
+      "model_targets": [
+        {
+          "node_id": "2",
+          "input": "model"
+        }
+      ],
+      "clip_source": [
+        "3",
+        0
+      ],
+      "clip_targets": [
+        {
+          "node_id": "4",
+          "input": "clip"
+        },
+        {
+          "node_id": "5",
+          "input": "clip"
+        }
+      ]
+    },
+    "anima_before_sampler": {
+      "loader": "LoraLoader",
+      "model_source": [
+        "1",
+        0
+      ],
+      "model_targets": [
+        {
+          "node_id": "7",
+          "input": "model"
+        }
+      ],
+      "clip_source": [
+        "3",
+        0
+      ],
+      "clip_targets": [
+        {
+          "node_id": "4",
+          "input": "clip"
+        },
+        {
+          "node_id": "5",
+          "input": "clip"
+        }
+      ]
+    },
+    "moss_model_only": {
+      "loader": "LoraLoaderModelOnly",
+      "model_source": [
+        "1",
+        0
+      ],
+      "model_targets": [
+        {
+          "node_id": "7",
+          "input": "model"
+        }
+      ]
+    }
+  }
+}

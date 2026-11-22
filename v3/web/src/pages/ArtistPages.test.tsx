@@ -24,7 +24,7 @@ it("searches artist tags and opens their context profile", async () => {
   expect(screen.getByRole("link", {name: /查看适用场景/})).toHaveAttribute("href", "/artists/sample_artist");
   fireEvent.change(screen.getByRole("textbox", {name: "搜索画师标签"}), {target: {value: "@sample artist"}});
   fireEvent.click(screen.getByRole("button", {name: "分析"}));
-  await waitFor(() => expect(fetchSpy).toHaveBeenLastCalledWith(expect.stringContaining("q=%40sample+artist"), expect.anything()));
+  await waitFor(() => expect(fetchSpy.mock.calls.some(([input]) => String(input).startsWith("/api/v3/artists/search?") && String(input).includes("q=%40sample+artist"))).toBe(true));
 });
 
 it("filters an artist's context clues and adds them to the scene basket", async () => {

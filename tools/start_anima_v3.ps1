@@ -24,6 +24,9 @@ $sourcePaths = @($v3Source, $v2Source)
 if ($env:PYTHONPATH) { $sourcePaths += $env:PYTHONPATH }
 $env:PYTHONPATH = $sourcePaths -join [IO.Path]::PathSeparator
 $env:PYTHONUNBUFFERED = "1"
+if (-not $env:ANIMA_PROMPT_ASSISTANT_DIR) {
+    $env:ANIMA_PROMPT_ASSISTANT_DIR = Join-Path $projectRoot "v3\.local\prompt-assistant"
+}
 
 $arguments = @(
     "-m", "anima_prompt_studio_v3.tools.run_desktop",

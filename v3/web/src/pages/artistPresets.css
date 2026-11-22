@@ -1,0 +1,87 @@
+.artist-library-tabs { display: flex; gap: 6px; flex-wrap: wrap; padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+.artist-library-tabs a { color: var(--muted); text-decoration: none; padding: 8px 16px; border: 1px solid transparent; border-radius: 6px; font-size: 14px; }
+.artist-library-tabs a[aria-current=page] { color: var(--accent); background: var(--accent-soft); border-color: var(--line-bright); font-weight: 600; }
+.artist-presets-page { max-width: 1920px; margin-inline: auto; }
+.artist-presets-page :is(button, input, select, textarea, a, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.artist-presets-page :is(button, input, select, textarea) { font: inherit; }
+.artist-presets-page button { display: inline-flex; justify-content: center; align-items: center; gap: 7px; min-height: 38px; padding: 8px 12px; border: 1px solid var(--line-bright); border-radius: 6px; color: var(--text); background: var(--panel); cursor: pointer; }
+.artist-presets-page button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+.artist-presets-page button:disabled { opacity: .5; cursor: default; }
+.artist-presets-page button.is-primary { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+.artist-presets-page button.is-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.artist-presets-page button svg { width: 18px; height: 18px; flex: 0 0 auto; }
+.artist-presets-page label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; min-width: 0; }
+.artist-presets-page :is(input:not([type=checkbox]), select, textarea) { min-width: 0; width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line-bright); color: var(--text); background: var(--input-bg); border-radius: 5px; }
+.artist-presets-page textarea { resize: vertical; line-height: 1.65; }
+.artist-presets-page :is(pre, code) { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.artist-presets-page pre { margin: 0; padding: 10px; background: var(--input-bg); border: 1px solid var(--line); border-radius: 4px; max-height: 260px; overflow: auto; }
+.artist-presets-page fieldset { display: grid; gap: 14px; padding: 0; margin: 0; border: 0; min-width: 0; }
+.artist-presets-page summary { cursor: pointer; font-size: 14px; font-weight: 600; padding-block: 8px; }
+.artist-presets-page .artist-presets-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 18px; }
+.artist-presets-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.artist-presets-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; margin-block: 18px; }
+.artist-presets-toolbar > label:first-child { flex: 1 1 280px; max-width: 620px; }
+.artist-presets-toolbar > label:nth-child(2) { flex: 0 1 220px; }
+.artist-presets-toolbar > span { margin: 10px 0 10px auto; color: var(--muted); font-size: 13px; }
+.artist-presets-page .artist-presets-check { display: flex; flex-direction: row; gap: 7px; align-items: center; min-height: 40px; color: var(--text); }
+.artist-presets-check input { accent-color: var(--accent); }
+.artist-presets-layout { display: grid; align-items: start; gap: 28px; }
+.artist-presets-layout.has-editor { grid-template-columns: minmax(0, 1fr) minmax(390px, 480px); }
+.artist-presets-results { min-width: 0; }
+.artist-presets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 18px; align-items: start; }
+.artist-preset-card { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--panel); }
+.artist-preset-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.artist-presets-page .artist-preset-card-main { display: grid; width: 100%; padding: 0; border: 0; border-radius: 0; text-align: left; justify-content: stretch; gap: 0; background: transparent; }
+.artist-preset-card-main img, .artist-preset-no-image { display: flex; width: 100%; height: clamp(200px, 19vh, 300px); object-fit: contain; background: var(--input-bg); }
+.artist-preset-no-image { align-items: center; justify-content: center; flex-direction: column; gap: 12px; color: var(--muted); }
+.artist-preset-card-copy { display: grid; gap: 7px; padding: 14px; min-width: 0; }
+.artist-preset-card-copy strong { font-size: 15px; font-weight: 600; padding-right: 26px; overflow-wrap: anywhere; }
+.artist-preset-card-copy small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.artist-preset-card-copy code { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 38px; color: var(--muted); }
+.artist-presets-page .artist-preset-favorite { position: absolute; top: 10px; right: 10px; width: 34px; min-height: 34px; padding: 6px; background: var(--panel); }
+.artist-preset-favorite[aria-pressed=true] { color: var(--accent); }
+.artist-preset-badge { display: inline-block; justify-self: start; padding: 2px 7px; border: 1px solid var(--line-bright); border-radius: 4px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.artist-preset-badge.has-sample { color: var(--accent); background: var(--accent-soft); }
+.artist-presets-empty { display: grid; justify-items: center; text-align: center; padding: 52px 18px; gap: 10px; border: 1px dashed var(--line-bright); border-radius: 6px; }
+.artist-presets-empty h2 { font-size: 18px; margin: 0; }
+.artist-presets-empty p { margin: 0; color: var(--muted); max-width: 420px; }
+.artist-preset-editor { min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); scroll-margin-top: 20px; }
+.artist-preset-editor-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.artist-preset-editor-heading h2 { font-size: 19px; margin: 0 0 4px; }
+.artist-preset-editor-heading small { color: var(--muted); font-size: 12px; }
+.artist-preset-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
+.artist-preset-metadata > label, .artist-preset-upload label { margin-bottom: 12px; }
+.artist-presets-subtle { color: var(--muted); font-size: 12px; line-height: 1.7; margin: 0; }
+.artist-preset-workbench-link { display: block; padding: 12px 0; margin-top: 16px; color: var(--accent); text-decoration: none; border-block: 1px solid var(--line); font-size: 14px; }
+.artist-preset-workbench-link.is-disabled { color: var(--muted); }
+.artist-preset-samples h3 { font-size: 15px; margin: 20px 0 8px; }
+.artist-preset-sample-needed { padding: 10px; border: 1px dashed var(--line-bright); border-radius: 4px; font-size: 13px; color: var(--muted); }
+.artist-preset-sample { margin-top: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.artist-preset-sample > a:first-child { display: block; }
+.artist-preset-sample img { display: block; width: 100%; height: 240px; object-fit: contain; background: var(--input-bg); border-radius: 5px; }
+.artist-preset-sample-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.artist-preset-sample-heading button { min-height: 30px; padding: 4px 8px; font-size: 12px; }
+.artist-preset-sample p { margin: 8px 0; font-size: 13px; }
+.artist-preset-sample small, .artist-preset-sample details { color: var(--muted); font-size: 12px; }
+.artist-preset-sample dt { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.artist-preset-sample dd { margin: 0 0 12px; }
+.artist-preset-sample details a { color: var(--accent); }
+.artist-preset-upload { margin-top: 16px; }
+.artist-preset-upload summary { color: var(--accent); }
+.artist-preset-suggestions { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--line); }
+.artist-preset-suggestions > p { font-size: 13px; color: var(--muted); margin: 0 0 16px; }
+.artist-preset-suggestion { overflow: hidden; min-width: 0; border: 1px solid var(--line); border-radius: 6px; }
+.artist-preset-suggestion > img { display: block; width: 100%; height: 210px; object-fit: contain; background: var(--input-bg); }
+.artist-preset-suggestion > div { display: grid; gap: 8px; padding: 12px; }
+.artist-preset-suggestion h3 { font-size: 14px; margin: 0; }
+.artist-preset-suggestion :is(small, p) { color: var(--muted); font-size: 12px; margin: 0; }
+.artist-preset-suggestion button { font-size: 13px; }
+.artist-presets-notice, .artist-presets-error { padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); font-size: 14px; overflow-wrap: anywhere; }
+.artist-presets-error { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; border-color: var(--danger, #b75454); }
+.artist-preset-import { padding: 20px; border: 1px solid var(--line-bright); border-radius: 6px; margin-block: 18px; background: var(--panel); }
+.artist-preset-import p, .artist-preset-import li { color: var(--muted); font-size: 13px; }
+.artist-preset-import ul { max-height: 240px; overflow: auto; padding-left: 22px; }
+.artist-preset-import > label { max-width: 540px; }
+@media (min-width: 2200px) { .artist-presets-layout.has-editor { grid-template-columns: minmax(0, 1fr) 540px; gap: 32px; } .artist-presets-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 22px; } }
+@media (max-width: 1100px) { .artist-presets-layout.has-editor { grid-template-columns: minmax(0, 1fr); } .artist-preset-editor { grid-row: 1; } .artist-preset-card-main img, .artist-preset-no-image { height: 220px; } }
+@media (max-width: 600px) { .artist-presets-heading .artist-presets-actions { width: 100%; } .artist-presets-toolbar > label:first-child { flex-basis: 100%; } .artist-presets-toolbar > label:nth-child(2) { flex: 1 1 150px; } .artist-presets-toolbar > span { margin-left: 0; } .artist-presets-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .artist-preset-card-copy { padding: 10px; } .artist-preset-card-copy strong { padding-right: 0; font-size: 14px; } .artist-preset-card-main img, .artist-preset-no-image { height: 170px; } .artist-preset-editor { padding: 14px; } .artist-preset-form-row { grid-template-columns: minmax(0, 1fr); } }

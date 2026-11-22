@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -84,18 +85,15 @@ def test_gallery_upscale_renderer_repairs_discovered_template_and_sets_exact_tar
     )
 
     workflow = result.workflow
-    assert not {"4", "5", "23", "25", "26", "28"}.intersection(workflow)
+    assert {node["class_type"] for node in workflow.values()} == {
+        "LoadImage", "UpscaleModelLoader", "ImageUpscaleWithModel", "ImageScale", "SaveImage"}
+    assert len(workflow) == 5
     assert workflow["18"]["inputs"]["image"] == "anima_gallery/run/source.png"
     assert workflow["22"]["inputs"]["image"] == ["18", 0]
-    assert workflow["27"]["inputs"]["megapixels"] == 0.884736
-    assert workflow["6"]["inputs"]["image"] == ["27", 0]
-    assert workflow["20"]["inputs"]["clip"] == ["19", 0]
-    assert workflow["20"]["inputs"]["text"] == ["12", 0]
-    assert workflow["24"]["inputs"]["model"] == ["15", 0]
-    assert workflow["24"]["inputs"]["seed"] == 42
-    assert workflow["24"]["inputs"]["sampler_mode"] == "standard"
-    assert workflow["24"]["inputs"]["bongmath"] is True
-    assert workflow["900001"]["inputs"]["image"] == ["8", 0]
+    assert workflow["16"]["inputs"]["model_name"] == "RealESRGAN.pth"
+    assert workflow["900001"]["inputs"]["image"] == ["22", 0]
+    assert result.metadata["diffusion_redraw"] is False
+    assert result.metadata["upscale_model"] == "RealESRGAN.pth"
     assert workflow["900001"]["inputs"]["width"] == 1152
     assert workflow["900001"]["inputs"]["height"] == 768
     assert workflow["14"]["inputs"]["images"] == ["900001", 0]
@@ -148,6 +146,26 @@ def test_comfy_client_uploads_gallery_image_as_input(tmp_path):
     assert session.upload["url"] == "http://comfy/upload/image"
     assert session.upload["content"] == b"png-data"
     assert session.upload["data"]["type"] == "input"
+
+
+@pytest.mark.parametrize("client_type", ["v2", "v3"])
+def test_uploaded_image_receipt_passes_stale_enum_without_skipping_other_validation(tmp_path, client_type):
+    source = tmp_path / "source.png"
+    source.write_bytes(b"png-data")
+    client_class = ComfyUIClient if client_type == "v2" else pytest.importorskip("anima_prompt_studio_v3.remote.comfy_client").ComfyUIClient
+    client = client_class("http://comfy", session=_UploadSession())
+    client._object_info_cache = {
+        "LoadImage": {"input": {"required": {"image": [["old.png"]]}}},
+        "UpscaleModelLoader": {"input": {"required": {"model_name": [["upscaler.pth"]]}}},
+    }
+    uploaded = client.upload_image(source)
+    graph = {"image": {"class_type": "LoadImage", "inputs": {"image": uploaded}}}
+    assert client.validate_workflow_inputs(graph) == []
+    graph["image"]["inputs"]["image"] = "never-uploaded.png"
+    assert len(client.validate_workflow_inputs(graph)) == 1
+    graph["image"]["inputs"]["image"] = uploaded
+    graph["model"] = {"class_type": "UpscaleModelLoader", "inputs": {"model_name": "missing.pth"}}
+    assert len(client.validate_workflow_inputs(graph)) == 1
 
 
 class _QueueCoordinator:
@@ -604,3 +622,22 @@ def test_gallery_manager_queues_same_prompt_regen(tmp_path):
     completed = manager.get(submitted["id"])
     assert completed["resultPath"]
     assert "再出图完成" in completed["message"]
+
+
+def test_v3_disables_legacy_regeneration_after_restart(tmp_path):
+    from anima_prompt_studio.repositories import SQLiteRepository
+    database, output = tmp_path / "runtime.db", tmp_path / "images"
+    repo = SQLiteRepository(database)
+    repo.save_gallery_process_job(output, "old-job", "queued", 1, datetime.now(timezone.utc), {
+        "id": "old-job", "sourcePath": "source.png", "sourceName": "source.png",
+        "state": "queued", "operation": GALLERY_REGEN_OPERATION})
+    repo.close()
+    manager = GalleryUpscaleManager(database, output, allow_legacy_regeneration=False)
+    try:
+        job = manager.list_jobs()[0]
+        assert job["state"] == "failed"
+        assert "旧再生成管线已停用" in job["error"]
+        with pytest.raises(GalleryUpscaleError, match="旧再生成管线已停用"):
+            manager.retry("old-job")
+    finally:
+        manager.shutdown(timeout=2)

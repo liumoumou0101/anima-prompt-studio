@@ -1,36 +1,60 @@
-# Workbench UI design QA
+# 单一工作台设计 QA — 2026-10-25
 
-## Visual truth and captured state
+本页替代 2026-09-12 的四外观 QA 作为当前实现记录。旧版 studio/editorial、fixed dock 与旧测试总数不代表当前状态；历史材料仍可从 Git 历史及当时交接文档查阅。
 
-- Original long-page reference: `C:\Users\10937\AppData\Local\Temp\codex-clipboard-9778ecf2-98b5-4830-833a-e60be2d39a51.png`
-- Pre-refinement 2K captures: `C:\Users\10937\AppData\Local\Temp\anima-workbench-ui-audit-2026-09-03\01-editor-2k.png`, `02-understanding-2k.png`, and `03-candidates-2k.png`.
-- Pre-refinement laptop capture: `C:\Users\10937\AppData\Local\Temp\anima-workbench-ui-audit-2026-09-03\04-candidates-laptop.png`.
-- Final captures: `C:\Users\10937\AppData\Local\Temp\anima-workbench-ui-qa-2026-09-03\`.
-- Side-by-side comparisons: `compare-01-editor-2k.png` through `compare-04-candidates-laptop.png` in the final capture directory.
-- Captured state: natural-language input compiled locally with two validated candidate lanes; no remote generation was submitted.
+当前范围是统一工作台、导航、编辑/结果/参数/版本区域、意见区和生成条。业务与迁移边界见[迁移说明](../../docs/v3/SINGLE_WORKBENCH_MIGRATION.md)。本轮截图来自本地浏览器的界面验证状态，不能用于证明真实 LLM/GPU 生成效果。
 
-## Refinement findings and fixes
+## 屏幕、视口与证据
 
-- P1 — 2K underused the available desktop width. The workbench-only page now grows to 1840 px; its usable flow increased from about 1086 px to 1502 px while keeping the global navigation and local outline visually separate.
-- P1 — picture understanding was a single deeply nested stack. At 2K it now uses a balanced 55/45 plan-and-evidence split, with confirmed facts grouped under the editable plan. The checked section height dropped from about 1792 px to 1278 px.
-- P1 — validation and remote-generation summaries consumed two full rows before candidates. They now share one compact summary row on FHD and 2K, and stack safely on the laptop viewport.
-- P2 — candidate cards were narrow and tall at 2K. They changed from about 537 × 738 px to 744 × 663 px, with tighter prompt spacing and aligned footers while preserving the two-column comparison.
-- P2 — the page-local outline used 7–9 px metadata. Its labels, metadata, badges, and guidance now use clearer 8–11 px sizing and higher secondary-text contrast.
-- P2 — generation controls did not use 2K width efficiently. They use five columns at 2560 px, remain three columns at 1920 px and 1280 px, and preserve all existing controls and values.
-- The existing dark palette, typography, focus treatment, disclosure behavior, and candidate-lane colors are preserved. No generation, API, workflow, preset, or state logic was changed.
+系统查询确认本机主屏为 **2560×1440**。2048×1152、1707×960、1280×720 是分别近似 125%、150%、200% 的等效 CSS 视口检查；没有把这些视口截图声称为真实操作系统缩放或浏览器缩放实测。
 
-## Desktop resolution checks
+文件名表示请求的宽度，PNG 像素可能受截图区域、滚动条或整页捕获影响。下表列出实际文件尺寸，不按文件名推定像素：
 
-- Standard 2K, 2560 × 1440: 1840 px workbench page, 1704 px local layout, 1502 px content flow, five-column generation controls, two-column picture understanding, 744 px candidate cards, and no horizontal overflow.
-- Standard FHD, 1920 × 1080: 1673 px workbench page, 1335 px content flow, 184 px local outline, three-column generation controls, stacked picture understanding, 660 px candidate cards, and no horizontal overflow.
-- Current laptop effective viewport, 1280 × 800: 1033 px workbench page, 738 px content flow, 176 px local outline, three-column generation controls, stacked picture understanding, two 362 px candidate cards, and no horizontal overflow.
-- Tablet and mobile layouts remain outside this acceptance scope and were not used as release criteria.
+| 请求 CSS 视口 | 用途 | 证据 PNG 像素 | 截图 |
+| --- | --- | --- | --- |
+| 2560×1440 | 2K 主屏基准，浅色 | 2560×1440 | [2560](../../reports/single-workbench-implementation/workbench-2560.png) |
+| 2048×1152 | 约 125% 等效可用面积 | 2048×1152 | [2048](../../reports/single-workbench-implementation/workbench-2048.png) |
+| 1707×960 | 约 150% 等效可用面积 | 1707×960 | [1707](../../reports/single-workbench-implementation/workbench-1707.png) |
+| 1366×768 | 常见桌面短窗口 | 1366×768 | [1366](../../reports/single-workbench-implementation/workbench-1366.png) |
+| 1280×720 | 约 200% 等效可用面积、低屏高 | 1280×720 | [1280](../../reports/single-workbench-implementation/workbench-1280.png) |
+| 900×768 | 单栏切换 | 885×498，当前捕获区域 | [900](../../reports/single-workbench-implementation/workbench-900.png) |
+| 390×844 | 窄屏导航与参数 | 375×812，当前捕获区域 | [390](../../reports/single-workbench-implementation/workbench-390.png) |
+| 2560×1440 | 夜间主题 | 2560×1440 | [2560 夜间](../../reports/single-workbench-implementation/workbench-2560-dark.png) |
+| 390×844 | 夜间提示词模式、整页滚动 | 375×2045，整页 | [390 夜间整页](../../reports/single-workbench-implementation/workbench-390-dark-prompt.png) |
 
-## Interaction and code checks
+这些是本机开发证据，`reports/` 不保证包含在安装包内。900 的局部截图只证明已捕获区域，不单独证明完整页面的所有内容均在首屏。
 
-- Local outline navigation updates the active item and moves between editor, understanding, candidates, and artist regions.
-- Candidate disclosure closes and reopens without losing the compiled result.
-- Browser console reported zero warnings and zero errors in the checked flow.
-- `npm test -- --run`: 45 tests passed.
-- `npm run build`: passed; the existing Vite advisory for a JavaScript chunk larger than 500 kB remains unchanged.
-- Final result: passed.
+## 当前浏览器检查结果
+
+- 浅色各请求尺寸未发现文档横向溢出。桌面生成条可见，参数/版本区域与编辑区可同时使用；短窗口允许编辑区内部滚动，不用固定浮层覆盖正文。
+- 2560 夜间视口实测 `scrollWidth=2560`，生成条底部为 1414 px；编辑区和参数区可用。
+- 创作记录打开后，实际 Escape 操作可关闭记录，并把焦点返回版本按钮。
+- 390 请求视口实际 `innerWidth=390`，文档宽 375 px，15 px 差值为滚动条占位。窄屏提示词模式可用，内容高度使用页面滚动；不要求所有参数和操作在一屏内出现。
+- 1024 px 以下提示词/图片为单栏；860 px 以下导航改为顶部布局。截图中的 900 仍保留侧栏，但工作区已单栏，这与两个断点的职责一致。
+
+检查仅覆盖上述状态。没有据此宣称所有弹窗、所有页面、屏幕阅读器、全键盘顺序、真实 IME 输入和硬件缩放场景均已完成验收。
+
+## 实现与回归关注点
+
+| 表面 | 当前实现与检查范围 |
+| --- | --- |
+| 布局 | 同一 `ConversationStudioView` 保留编辑与控制器生命周期；结果、参数、版本共享右侧区域，窄屏使用单栏切换 |
+| 密度 | 76/196 px 导航、中文操作标签、同层创作工具；意见区与生成条属于布局流，短窗口给正文滚动空间 |
+| 参数 | 常用、采样和声明的工作流字段分组；配方先预览再应用；空数字保留错误，精确 Seed 不转成不安全 Number |
+| 历史 | 可搜索、按有图/全部操作筛选；V 编号与旧修订分开；提示词继续和图片继续具有不同恢复范围 |
+| 状态 | 未应用意见、存储错误、待同步、环境待检测/待确认、未知 Seed 均有明确状态；在线不等于已可执行 |
+| 图像 | 使用实际返回的缩略图/内容地址，保持比例；不复制假结果，也不从界面截图推定模型画质 |
+| 可达性 | 现有 aria 标签在收起导航时保留；可见焦点样式、标签关联、错误提示、Esc/返回焦点有组件及所述浏览器检查 |
+
+主题测试按当前浅/深色 token 校验正文、次级字、提示、语义色与主按钮文本至少 4.5:1，控件边界与焦点至少 3:1。这是限定 token 组合的自动检查，不是对所有渲染文本/图片叠层的完整 WCAG 审计。
+
+专项功能回归包括：多步 AI 撤销/重做、草稿与日志重载、恢复迟到响应、原文导入稳定键重试、当前草稿备份失败、空 legacy 原文元数据、字段级配方保留、冻结两阶段参数、意图并发/取消/重启和来源恢复。jsdom 通过不被当作像素几何证据。
+
+## 最终验证记录
+
+- 最终前端全量：**582 项通过，无失败或跳过**；包含最后的恢复冲突退出回归。
+- 最终后端全量：**1142 项通过**，1 条既有 Starlette/AnyIO 弃用警告。
+- 最终 TypeScript / 生产构建：**通过**，采用已有 Node 24.19.0；Vite 单包体积提示保留。系统 Node 24.12.0 的原生异常构建未作为交付产物。
+- 实际截图与浏览器结论采用本页上方限定范围；专项时间点的测试数见本机实现报告，不汇总成新的总数。
+
+仍未完成：真实浏览器/OS 125%/150%/200% 缩放组合、所有工具弹窗与页面的全键盘/IME/读屏检查、新安装包安装/卸载回合，以及真实改词语义质量、远端身份行为、大资源清单耗时、GPU 出图和高清第二阶段画质。当前 CSS 视口检查与受控测试不替代这些验收。

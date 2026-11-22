@@ -1,0 +1,572 @@
+from io import BytesIO
+import json
+
+from PIL import Image
+import pytest
+
+from test_conversation import conversation_client, reference_db, edit
+from anima_prompt_studio_v3.storage.reference_examples import ExampleStore, ExampleMetadata
+
+
+def picture(fmt="PNG"):
+    output = BytesIO()
+    Image.new("RGB", (40, 30), "navy").save(output, fmt)
+    return output.getvalue()
+
+
+def test_case_images_load_with_browser_gallery_cookie(conversation_client):
+    client, _ = conversation_client
+    example = client.app.state.example_store.create(picture(), "浏览器图片", ExampleMetadata())
+    client.headers.pop("x-anima-session", None)
+    prefix = f"/api/v3/gallery/reference-examples/{example['id']}"
+    assert client.get(prefix + "/content").content == picture()
+    response = client.get(prefix + "/thumbnail")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert Image.open(BytesIO(response.content)).format == "JPEG"
+    assert client.get("/api/v3/bootstrap").status_code == 401
+    client.cookies.clear()
+    assert client.get(prefix + "/content").status_code == 401
+
+
+def test_library_start_creates_new_workspace_and_leaves_existing_untouched(conversation_client):
+    client, calls = conversation_client
+    store = client.app.state.example_store
+    example = store.create(picture(), "要求案例", ExampleMetadata(requirements_edit=edit()))
+    existing = client.app.state.workspace_store.create("已有草稿", {"natural_text": "保留这个想法"})
+    response = client.post(f"/api/v3/reference-examples/{example['id']}/workspace",
+        json={"source_version": example["source_version"], "mode": "requirements", "role": "style"})
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert created["id"] != existing["id"]
+    assert created["draft"]["reference_pin"]["example_id"] == example["id"]
+    assert created["draft"]["compiled"] is None
+    assert created["draft"]["generation_source"] is None
+    assert client.app.state.workspace_store.get(existing["id"]) == existing
+    assert calls == []
+    assert client.post(f"/api/v3/reference-examples/{example['id']}/workspace",
+        json={"source_version": "999", "mode": "requirements"}).status_code == 409
+
+
+@pytest.mark.parametrize("mode", ["requirements", "prompt"])
+@pytest.mark.parametrize("model,sampling,size", [
+    ("anima_base_v1", (35, 4.5, "er_sde", "normal"), (896, 1152)),
+    ("anima_aesthetic_v1", (35, 4.5, "euler", "normal"), (896, 1152)),
+    ("anima_aesthetic_v1_0", (35, 4.5, "euler", "normal"), (896, 1152)),
+    ("anima_aesthetic_v1_1", (35, 4.5, "euler", "normal"), (896, 1152)),
+    ("anima_turbo_v1", (10, 1.0, "er_sde", "simple"), (896, 1152)),
+    ("anima_turbo_v1_1", (10, 1.0, "er_sde", "simple"), (896, 1152)),
+    ("anima_2_9b_preview_v1", (30, 4.0, "euler", "sgm_uniform"), (896, 1152)),
+    ("animayume_v1_0_final", (30, 5.5, "euler_ancestral", "normal"), (896, 1152)),
+    ("animayume_v1_5_base", (30, 5.5, "euler_ancestral", "normal"), (896, 1152)),
+    ("miaomiao_harem_anima_v1_6", (30, 4.5, "euler", "normal"), (896, 1152)),
+    ("wai_anima_v1_0", (25, 4.5, "euler_ancestral", "normal"), (896, 1152)),
+    ("moss_image_sft_int8", (25, 2.5, "er_sde", "simple"), (1024, 1024)),
+])
+def test_reference_fresh_workspace_uses_selected_model_defaults(conversation_client, mode, model, sampling, size):
+    client, calls = conversation_client
+    example = client.app.state.example_store.create(picture(), "model defaults",
+        ExampleMetadata(requirements_edit=edit(), compat={"model_profiles": [model]}),
+        provenance={"positive": "original garden", "negative": "text", "model_profile": model,
+                    "settings": {"steps": 99, "cfg": 9, "width": 768, "height": 640, "seed": 123}})
+    response = client.post(f"/api/v3/reference-examples/{example['id']}/workspace",
+        json={"source_version": example["source_version"], "mode": mode})
+    assert response.status_code == 201, response.text
+    draft = response.json()["draft"]
+    assert draft["model_profile"] == model
+    settings = draft["generation_settings"]
+    assert tuple(settings[key] for key in ("steps", "cfg", "sampler", "scheduler")) == sampling
+    assert (settings["width"], settings["height"]) == size
+    # A fixed portrait aspect would replace MOSS's square dimensions on submission.
+    assert settings["aspect"] == "custom"
+    assert settings["seed"] == -1 and settings["batch_size"] == 1
+    configuration = settings["creation_configuration"]
+    assert configuration is not None
+    assert configuration["modelProfile"] == model
+    assert configuration["workflow"] == {"id": "", "revision": ""}
+    assert configuration["baseRecipeId"] == settings["preset_id"]
+    assert configuration["recipeValues"] == {
+        **dict(zip(("steps", "cfg", "sampler", "scheduler"), sampling)),
+        "width": size[0], "height": size[1], "seed": "-1", "batch_size": 1,
+    }
+    assert configuration["parameterOverrides"] == {}
+    assert configuration["resourceRequirements"] == []
+    assert configuration["seedMode"] == "random"
+    assert draft["generation_source"] is None
+    assert calls == []
+
+
+def test_reference_requirements_preserves_unknown_model_declaration(conversation_client):
+    client, _ = conversation_client
+    example = client.app.state.example_store.create(picture(), "external model",
+        ExampleMetadata(requirements_edit=edit(), compat={"model_profiles": ["external-model"]}))
+    response = client.post(f"/api/v3/reference-examples/{example['id']}/workspace",
+        json={"source_version": example["source_version"], "mode": "requirements"})
+    assert response.status_code == 201, response.text
+    assert response.json()["draft"]["model_profile"] == "external-model"
+    assert response.json()["draft"]["generation_settings"]["creation_configuration"] is None
+
+
+@pytest.mark.parametrize("model", [None,"external-model"])
+def test_borrow_original_prompt_with_unknown_model_does_not_create_a_workspace(conversation_client, model):
+    client,_=conversation_client
+    example=client.app.state.example_store.create(picture(),"source model",ExampleMetadata(),
+        provenance={"positive":"original prompt", "model_profile":model})
+    before=client.get("/api/v3/workspaces").json()
+    response=client.post(f"/api/v3/reference-examples/{example['id']}/workspace",json={"source_version":example["source_version"],"mode":"prompt"})
+    assert response.status_code==422,response.text
+    assert response.json()["error"]["code"]=="model_profile_unknown"
+    assert client.get("/api/v3/workspaces").json()==before
+
+
+def test_fresh_generation_configuration_has_no_shared_mutable_values():
+    from anima_prompt_studio_v3.api.reference_examples import _fresh_generation_settings
+    first = _fresh_generation_settings("moss_image_sft_int8")
+    assert first.creation_configuration is not None
+    first.creation_configuration.recipeValues["width"] = 768
+    first.creation_configuration.parameterOverrides["steps"] = 99
+    second = _fresh_generation_settings("moss_image_sft_int8")
+    assert second.creation_configuration is not None
+    assert second.creation_configuration.recipeValues["width"] == 1024
+    assert second.creation_configuration.parameterOverrides == {}
+
+
+def test_gallery_case_keeps_metadata_and_owns_its_image_copy(conversation_client, tmp_path):
+    from types import SimpleNamespace
+    client, _ = conversation_client
+    image = tmp_path / "gallery.png"
+    image.write_bytes(picture())
+    client.app.state.gallery_service = SimpleNamespace(resolve_content=lambda path: image,
+        list_assets=lambda **kwargs: {"items": [{"path": "gallery.png", "positive_prompt": "rainy garden", "negative_prompt": "text",
+            "model_profile": "anima_base_v1", "generation_params": {"seed": "8798399215689017476"}}]})
+    result = client.post("/api/v3/reference-examples/from-gallery", json={"path": "gallery.png"})
+    assert result.status_code == 201, result.text
+    example = result.json()
+    assert "rainy garden" in example["notes"]["external_prompt"]
+    assert example["provenance"]["settings"]["seed"] == "8798399215689017476"
+    image.unlink()
+    assert client.get(f"/api/v3/reference-examples/{example['id']}/content").content == picture()
+    assert client.get("/api/v3/reference-examples?q=garden").json()["items"][0]["id"] == example["id"]
+    response = client.post(f"/api/v3/reference-examples/{example['id']}/workspace", json={"source_version": "1", "mode": "generation"})
+    assert response.status_code == 422
+
+
+def test_generation_case_copies_exact_seed_prompt_and_locks_workflow(conversation_client):
+    from types import SimpleNamespace
+    client, calls = conversation_client
+    example = client.app.state.example_store.create(picture(), "生成案例", ExampleMetadata(), provenance={"run_id": "run1"})
+    client.app.state.submission_service = SimpleNamespace(store=SimpleNamespace(for_runs=lambda ids: [{"snapshot": {
+        "provenance": {"positive": "original prompt", "negative": "text", "model_profile": "anima_base_v1", "requirements": None,
+            "settings": {"seed": 8798399215689017476, "width": 896, "height": 1152}},
+        "run": {"remote_profile_id": "remote1", "workflow_profile_id": "wf1"}, "workflow": {"id": "wf1"},
+        "resources": [{"logical_id": "watercolor", "file_name": "watercolor.safetensors", "weight": 0.7}]}}]))
+    response = client.post(f"/api/v3/reference-examples/{example['id']}/workspace", json={"source_version": "1", "mode": "generation"})
+    assert response.status_code == 201, response.text
+    record = response.json()
+    assert record["draft"]["generation_settings"]["seed"] == "8798399215689017476"
+    assert record["draft"]["compiled"]["positive"] == "original prompt"
+    assert record["draft"]["compile_state"] == "fresh"
+    assert record["draft"]["generation_source"]["run_id"] == "run1"
+    assert record["draft"]["requirements"]["loras"][0]["weight"] == 0.7
+    assert record["draft"]["requirements"]["loras"][0]["logical_id"] == "watercolor"
+    detached = client.request("DELETE", "/api/v3/workbench/generation-source", json={"workspace_id": record["id"], "revision": record["revision"]})
+    assert detached.status_code == 200
+    assert detached.json()["draft"]["generation_source"] is None
+    assert detached.json()["draft"]["compiled"]["positive"] == "original prompt"
+    count = len(client.app.state.example_store.list()["items"])
+    continued = client.post("/api/v3/generation-runs/run1/workspace", json={})
+    assert continued.status_code == 201, continued.text
+    assert continued.json()["id"] != record["id"]
+    assert continued.json()["draft"]["generation_source"]["run_id"] == "run1"
+    assert continued.json()["draft"]["generation_settings"]["seed"] == "8798399215689017476"
+    assert continued.json()["draft"]["requirements"]["loras"][0]["weight"] == 0.7
+    assert client.app.state.workspace_store.get(record["id"]) == detached.json()
+    assert len(client.app.state.example_store.list()["items"]) == count
+    assert calls == []
+
+
+def test_continue_missing_generation_does_not_create_workspace(conversation_client):
+    client, calls = conversation_client
+    before = client.get("/api/v3/workspaces").json()
+    response = client.post("/api/v3/generation-runs/missing/workspace", json={})
+    assert response.status_code == 422
+    assert client.get("/api/v3/workspaces").json() == before
+    assert calls == []
+
+
+def test_continue_generation_restores_all_frozen_workflow_values_without_ai(conversation_client):
+    from types import SimpleNamespace
+    from test_generation_run_source import frozen_parameter_snapshot
+    client,calls=conversation_client
+    snapshot=frozen_parameter_snapshot()
+    client.app.state.submission_service=SimpleNamespace(store=SimpleNamespace(for_runs=lambda _: [{"snapshot":snapshot}]))
+    first=client.post("/api/v3/generation-runs/source-run/workspace",json={},headers={"Idempotency-Key":"continue-frozen"})
+    assert first.status_code==201,first.text
+    settings=first.json()["draft"]["generation_settings"]
+    frozen=snapshot["job"]["integration_metadata"]["workflow_parameters"]
+    assert settings["parameter_schema"]==frozen["schema"]
+    assert settings["workflow_parameter_overrides"]==frozen["values"]
+    assert settings["creation_configuration"]["workflow"]["revision"]=="old-template-revision"
+    assert settings["creation_configuration"]["parameterOverrides"]["refiner_steps"]==24
+    assert settings["creation_configuration"]["parameterOverrides"]["seed"]=="8798399215689017476"
+    assert settings["seed"]=="8798399215689017476"
+    assert first.json()["draft"]["generation_source"]["run_id"]=="source-run"
+    replay=client.post("/api/v3/generation-runs/source-run/workspace",json={},headers={"Idempotency-Key":"continue-frozen"})
+    assert replay.json()==first.json()
+    assert calls==[]
+
+
+@pytest.mark.parametrize("origin_kind", ["verified", "missing_version", "wrong_prompt", "absent"])
+def test_generation_continuation_records_only_verified_parent_and_replays_idempotently(conversation_client, origin_kind):
+    from types import SimpleNamespace
+    from anima_prompt_studio_v3.core.requirements import PromptEdit, Requirements, compile_prompt, dump
+    client, calls = conversation_client
+    workspace_store = client.app.state.workspace_store
+    parent = workspace_store.create("父会话", {"model_profile": "anima_base_v1"})
+    def populate(draft):
+        draft["requirements"] = dump(Requirements.empty())
+        draft["compiled"] = compile_prompt(draft, PromptEdit(positive="original prompt", negative="text"), source="user")
+        return draft
+    parent = workspace_store.transform(parent["id"], expected_revision=1, operation=populate)
+    snapshot = {"provenance": {"positive": "original prompt", "negative": "text", "model_profile": "anima_base_v1",
+        "requirements": parent["draft"]["requirements"], "settings": {"seed": 42}},
+        "run": {"remote_profile_id": "remote1", "workflow_profile_id": "wf1"}, "workflow": {"id": "wf1"}}
+    if origin_kind != "absent":
+        snapshot.update(workspace_id=parent["id"], workspace_revision=999 if origin_kind == "missing_version" else 2)
+    if origin_kind == "wrong_prompt":
+        snapshot["provenance"]["positive"] = "unrelated prompt"
+    client.app.state.submission_service = SimpleNamespace(store=SimpleNamespace(for_runs=lambda ids: [{"snapshot": snapshot}]))
+    headers = {"Idempotency-Key": "continue-one-request"}
+    response = client.post("/api/v3/generation-runs/run_verified/workspace", json={}, headers=headers)
+    assert response.status_code == 201, response.text
+    child = response.json()
+    assert child["draft"].get("workspace_origin") == (
+        {"workspace_id": parent["id"], "revision": 2, "run_id": "run_verified"} if origin_kind == "verified" else None)
+    assert child["draft"]["compiled"]["compiled_token"] != parent["draft"]["compiled"]["compiled_token"]
+    assert client.post("/api/v3/generation-runs/run_verified/workspace", json={}, headers=headers).json() == child
+    assert len(workspace_store.list()) == 2
+    assert workspace_store.get(parent["id"]) == parent
+    assert calls == []
+
+
+def test_bundled_install_is_explicit_and_preserves_notes(conversation_client, monkeypatch):
+    client, calls = conversation_client
+    endpoint = "/api/v3/reference-examples/install-bundled"
+    assert not client.get("/api/v3/reference-examples").json()["official_pack"]["ready"]
+    assert client.post(endpoint, json={"source": "C:/arbitrary"}).status_code == 422
+    response = client.post(endpoint, json={})
+    assert response.status_code == 200, response.text
+    assert response.json()["count"] == 3
+    page = client.get("/api/v3/reference-examples").json()
+    assert len(page["items"]) == 3
+    item = page["items"][0]
+    path = "/api/v3/reference-examples/" + item["id"]
+    assert client.get(path + "/thumbnail").status_code == 200
+    assert client.patch(path + "/notes", json={"override_revision": 0,
+        "notes": {"user_notes": "我的配方"}}).status_code == 200
+    # An already active pack is left intact, even if shipped files are unavailable.
+    from anima_prompt_studio_v3.storage import bundled_examples
+    def unavailable():
+        raise FileNotFoundError("private path")
+    monkeypatch.setattr(bundled_examples, "bundled_example_source", unavailable)
+    assert client.post(endpoint, json={}).json() == response.json()
+    assert client.get(path).json()["notes"]["user_notes"] == "我的配方"
+    assert calls == []
+
+
+def test_bundled_install_errors_are_safe_and_require_session(conversation_client, monkeypatch):
+    client, _ = conversation_client
+    from anima_prompt_studio_v3.storage import bundled_examples
+    endpoint = "/api/v3/reference-examples/install-bundled"
+    def unavailable():
+        raise FileNotFoundError("private path")
+    monkeypatch.setattr(bundled_examples, "bundled_example_source", unavailable)
+    response = client.post(endpoint, json={})
+    assert response.status_code == 422
+    assert "bundled_examples_missing" in response.text
+    assert "private path" not in response.text
+    assert not client.get("/api/v3/reference-examples").json()["official_pack"]["ready"]
+    client.headers.pop("X-Anima-Session")
+    client.cookies.clear()
+    assert client.post(endpoint, json={}).status_code in (401, 403)
+
+
+def upload(client, metadata=None, data=None, mime="image/png"):
+    return client.post("/api/v3/reference-examples", files={"file": ("../../outside.png", data or picture(), mime)},
+                       data={"title": "雨后街道", "metadata": json.dumps(metadata or {})})
+
+
+def test_media_copy_edit_cas_and_delete(conversation_client):
+    client, _ = conversation_client
+    response = upload(client)
+    assert response.status_code == 201, response.text
+    record = response.json()
+    path = "/api/v3/reference-examples/" + record["id"]
+    assert not record["requirements_valid"]
+    assert client.get(path + "/content").content == picture()
+    thumbnail = client.get(path + "/thumbnail")
+    assert thumbnail.status_code == 200
+    with Image.open(BytesIO(thumbnail.content)) as img:
+        assert img.size == (40, 30)
+    changed = client.patch(path, json={"revision": 1, "notes": {"user_notes": "保留人物"}})
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["revision"] == 2
+    assert changed.json()["title"] == record["title"]
+    assert client.patch(path, json={"revision": 1, "title": "过期写入"}).status_code == 409
+    assert client.request("DELETE", path, json={"revision": 1}).status_code == 409
+    assert client.request("DELETE", path, json={"revision": 2}).status_code == 204
+    assert client.get(path).status_code == 404
+    assert client.get(path + "/content").status_code == 404
+
+
+@pytest.mark.parametrize("metadata", [{"provenance": {"run_id": "fake"}}, {"origin": "session_pin"},
+    {"compat": {"workflow_snapshot_ref": "fake"}}, {"requirements_edit": {"layers": {}}}])
+def test_upload_cannot_forge_authority(conversation_client, metadata):
+    client, _ = conversation_client
+    assert upload(client, metadata).status_code == 422
+    assert client.get("/api/v3/reference-examples").json()["items"] == []
+
+
+def test_bad_image_and_mime_leave_no_record(conversation_client):
+    client, _ = conversation_client
+    assert upload(client, data=b"not an image").status_code == 422
+    assert upload(client, mime="image/jpeg").status_code == 422
+    assert upload(client, data=picture("GIF"), mime="image/gif").status_code == 422
+    assert client.get("/api/v3/reference-examples").json()["items"] == []
+
+
+def test_list_cursor_rejects_mixed_revision_and_query(conversation_client):
+    client, _ = conversation_client
+    upload(client)
+    upload(client)
+    first = client.get("/api/v3/reference-examples?limit=1").json()
+    cursor = first["next_cursor"]
+    second = client.get("/api/v3/reference-examples", params={"limit": 1, "cursor": cursor})
+    assert second.status_code == 200
+    assert second.json()["items"][0]["id"] != first["items"][0]["id"]
+    assert client.get("/api/v3/reference-examples", params={"cursor": cursor, "q": "雨"}).status_code == 409
+    upload(client)
+    assert client.get("/api/v3/reference-examples", params={"cursor": cursor}).status_code == 409
+
+
+def test_pin_freezes_source_preserves_locks_and_unpin_keeps_content(conversation_client):
+    client, _ = conversation_client
+    source = edit()
+    source["layers"]["style"].update(text="水彩", medium="watercolor", locked=True)
+    source["layers"]["lighting"].update(text="晨光", include_with_style_pin=True)
+    example = upload(client, {"requirements_edit": source}).json()
+    target = edit()
+    target["layers"]["lighting"].update(text="侧光", locked=True)
+    workspace = client.post("/api/v3/workspaces", json={"draft": {"requirements_edit": target}}).json()
+    command = {"workspace_id": workspace["id"], "revision": 1, "example_id": example["id"], "source_version": "1", "role": "style"}
+    response = client.post("/api/v3/workbench/pins", json=command)
+    assert response.status_code == 200, response.text
+    pinned = response.json()
+    layers = pinned["draft"]["requirements"]["layers"]
+    assert layers["style"]["text"] == "水彩" and not layers["style"]["locked"]
+    assert layers["lighting"]["text"] == "侧光"
+    assert client.patch("/api/v3/reference-examples/" + example["id"], json={"revision": 1, "title": "新标题"}).status_code == 200
+    assert client.post("/api/v3/workbench/pins", json={**command, "revision": 2}).status_code == 409
+    assert client.request("DELETE", "/api/v3/reference-examples/" + example["id"], json={"revision": 2}).status_code == 204
+    retained = client.get("/api/v3/workspaces/" + workspace["id"]).json()
+    assert retained["draft"]["reference_pin"]["source_snapshot"]["requirements"] == example["requirements"]
+    unpinned = client.request("DELETE", "/api/v3/workbench/pins", json={"workspace_id": workspace["id"], "revision": 2}).json()
+    assert unpinned["draft"]["reference_pin"] is None
+    assert unpinned["draft"]["requirements"] == pinned["draft"]["requirements"]
+
+
+def test_pin_into_empty_workspace(conversation_client):
+    client, _ = conversation_client
+    example = upload(client, {"requirements_edit": edit()}).json()
+    workspace = client.post("/api/v3/workspaces", json={"draft": {}}).json()
+    response = client.post("/api/v3/workbench/pins", json={"workspace_id": workspace["id"], "revision": 1,
+        "example_id": example["id"], "source_version": "1", "role": "whole_scene"})
+    assert response.status_code == 200, response.text
+
+
+def test_registered_path_cannot_escape_media_root(tmp_path):
+    store = ExampleStore(tmp_path / "examples.db")
+    record = store.create(picture(), "test", ExampleMetadata())
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(picture())
+    with store.connect() as db:
+        db.execute("UPDATE example_files SET image_relpath=?", (str(outside),))
+    with pytest.raises(ValueError):
+        store.content(record["id"])
+
+
+def test_upload_requires_session_and_origin(conversation_client):
+    client, _ = conversation_client
+    client.headers.pop("Origin")
+    assert upload(client).status_code == 403
+    client.headers["Origin"] = "http://127.0.0.1"
+    client.headers.pop("X-Anima-Session")
+    client.cookies.clear()
+    assert upload(client).status_code == 401
+
+
+def ingest_setup(client, monkeypatch, *, vision=True, response=None):
+    from anima_prompt_studio_v3.prompt_assistant.config_manager import config_manager
+    from anima_prompt_studio_v3.prompt_assistant.services.llm import LLMService
+    from anima_prompt_studio_v3.core.requirements import dump, CONTENT_MODELS
+
+    monkeypatch.setattr(LLMService, "_get_config", lambda: {"provider": "test"})
+    monkeypatch.setattr(config_manager, "get_service", lambda _: {"supports_vision": vision})
+    calls = []
+    layers = edit()["layers"]
+    layers["style"].update(text="铅笔", medium="pencil")
+    updates = {name: {key: value for key, value in content.items() if key in CONTENT_MODELS[name].model_fields or key == "global"}
+               for name, content in layers.items()}
+    async def complete(**kwargs):
+        calls.append(kwargs)
+        return {"text": json.dumps(response or {"layer_updates": updates, "include_with_style_pin": {"lighting": True}, "warnings": []})}
+    monkeypatch.setattr(LLMService, "complete", complete)
+    return calls
+
+
+def test_ingest_vision_gate_and_success(conversation_client, monkeypatch):
+    client, _ = conversation_client
+    example = upload(client, {"notes": {"external_prompt": "private external prompt"}}).json()
+    path = "/api/v3/reference-examples/" + example["id"]
+    calls = ingest_setup(client, monkeypatch, vision=False)
+    assert client.post(path + "/ingest", json={"revision": 1}).status_code == 422
+    assert not calls and client.get(path).json()["revision"] == 1
+    calls = ingest_setup(client, monkeypatch)
+    response = client.post(path + "/ingest", json={"revision": 1})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["revision"] == 3 and result["ingest_state"] == "ready"
+    assert result["requirements"]["revision"] == 1
+    assert result["requirements"]["layers"]["lighting"]["include_with_style_pin"]
+    assert "private external prompt" not in json.dumps(calls[0]["messages"])
+    assert calls[0]["images"][0].startswith(b"\xff\xd8")
+
+
+def test_ingest_failure_retains_valid_requirements(conversation_client, monkeypatch):
+    client, _ = conversation_client
+    example = upload(client, {"requirements_edit": edit()}).json()
+    path = "/api/v3/reference-examples/" + example["id"]
+    ingest_setup(client, monkeypatch, response={"layer_updates": {"style": {"artists": ["invented"]}}})
+    assert client.post(path + "/ingest", json={"revision": 1}).status_code == 502
+    failed = client.get(path).json()
+    assert failed["ingest_state"] == "failed" and failed["requirements_valid"]
+    assert failed["requirements"] == example["requirements"]
+
+
+def test_prompt_ingest_without_vision_never_reads_image(conversation_client, monkeypatch):
+    from anima_prompt_studio_v3.storage.reference_examples import ExampleStore
+    client, _ = conversation_client
+    example = upload(client, {"notes": {"external_prompt": "positive: charcoal portrait; negative: text"}}).json()
+    calls = ingest_setup(client, monkeypatch, vision=False)
+    monkeypatch.setattr(ExampleStore, "thumbnail", lambda *_: pytest.fail("text extraction must not read images"))
+    path = "/api/v3/reference-examples/" + example["id"]
+    response = client.post(path + "/ingest", json={"revision": 1, "source": "prompt"})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["analysis_source"] == "prompt"
+    assert client.get(path).json()["analysis_source"] == "prompt"
+    assert calls[0]["images"] is None and calls[0]["task"] == "prompt_ingest"
+    context = json.loads(calls[0]["messages"][-1]["content"])
+    assert context["external_prompt_notes"] == example["notes"]["external_prompt"]
+    assert not result["requirements"]["layers"]["lighting"]["include_with_style_pin"]
+    assert any("未核对图片" in warning for warning in result["warnings"])
+
+
+def test_prompt_ingest_empty_or_stale_does_not_call_model(conversation_client, monkeypatch):
+    client, _ = conversation_client
+    example = upload(client).json()
+    calls = ingest_setup(client, monkeypatch, vision=False)
+    path = "/api/v3/reference-examples/" + example["id"]
+    assert client.post(path + "/ingest", json={"revision": 1, "source": "prompt"}).status_code == 422
+    assert client.get(path).json()["revision"] == 1
+    other = upload(client, {"notes": {"external_prompt": "watercolor"}}).json()
+    assert client.post("/api/v3/reference-examples/" + other["id"] + "/ingest",
+                       json={"revision": 2, "source": "prompt"}).status_code == 409
+    assert not calls
+
+
+def test_ingest_cannot_remove_confirmed_artists(conversation_client, monkeypatch):
+    client, _ = conversation_client
+    requirements = edit()
+    requirements["layers"]["style"]["artists"] = ["confirmed artist"]
+    example = upload(client, {"requirements_edit": requirements}).json()
+    ingest_setup(client, monkeypatch)  # Vision returns an empty artists list.
+    result = client.post("/api/v3/reference-examples/" + example["id"] + "/ingest", json={"revision": 1})
+    assert result.status_code == 200, result.text
+    assert result.json()["requirements"]["layers"]["style"]["artists"] == ["confirmed artist"]
+
+
+def test_ingest_edit_supersedes_and_restart_recovers(tmp_path):
+    from anima_prompt_studio_v3.storage.reference_examples import ExamplePatch
+    from anima_prompt_studio_v3.api.reference_ingest import IngestService
+
+    store = ExampleStore(tmp_path / "examples.db")
+    example = store.create(picture(), "test", ExampleMetadata())
+    pending = store.start_ingest(example["id"], 1)
+    store.patch(example["id"], ExamplePatch(revision=2, title="edited"))
+    with pytest.raises(ValueError, match="修改"):
+        store.finish_ingest(pending, error="failed")
+    assert store.get(example["id"])["ingest_state"] == "none"
+    store.start_ingest(example["id"], 3)
+    IngestService(ExampleStore(tmp_path / "examples.db"))
+    recovered = store.get(example["id"])
+    assert recovered["ingest_state"] == "failed" and recovered["ingest_error_code"] == "ingest_interrupted"
+
+
+def test_from_run_uses_frozen_provenance_and_checks_artifact(conversation_client, tmp_path):
+    from types import SimpleNamespace
+    from anima_prompt_studio_v3.core.requirements import Requirements
+
+    client, _ = conversation_client
+    image = tmp_path / "run.png"
+    image.write_bytes(picture())
+    frozen = Requirements(**edit()).model_dump(mode="json", by_alias=True)
+    provenance = {"requirements": frozen, "positive": "original prompt", "negative": "", "model_profile": "anima_base_v1",
+                  "settings": {"seed": 12}, "workflow_snapshot_ref": "run1", "secret_should_not_cross": "internal"}
+    client.app.state.gallery_service = SimpleNamespace(resolve_content=lambda path: image if path == "run.png" else None)
+    client.app.state.submission_service = SimpleNamespace(
+        store=SimpleNamespace(for_runs=lambda ids: [{"snapshot": {"provenance": provenance}}]),
+        queue=SimpleNamespace(artifacts=lambda run_id: [SimpleNamespace(local_path=image)] if run_id == "run1" else []))
+    response = client.post("/api/v3/reference-examples/from-run", json={"run_id": "run1", "path": "run.png"})
+    assert response.status_code == 201, response.text
+    example = response.json()
+    assert example["requirements"] == frozen
+    assert example["provenance"]["positive"] == "original prompt"
+    assert "secret_should_not_cross" not in example["provenance"]
+    assert client.post("/api/v3/reference-examples/from-run", json={"run_id": "other", "path": "run.png"}).status_code == 404
+    assert client.post("/api/v3/reference-examples/from-gallery", json={"path": "../run.png"}).status_code == 404
+    image.unlink()
+    assert client.get("/api/v3/reference-examples/" + example["id"] + "/content").content == picture()
+
+
+def test_presets_hide_notes_and_bind_pagination_filters(conversation_client):
+    client, _ = conversation_client
+    source = upload(client, {"requirements_edit": edit(), "notes": {"external_prompt": "must stay private"}}).json()
+    upload(client, {"requirements_edit": edit()})
+    first = client.get("/api/v3/reference-presets?limit=1").json()
+    assert first["catalog_version"] == "anima-ref-1"
+    assert "must stay private" not in json.dumps(first)
+    assert client.get("/api/v3/reference-presets", params={"cursor": first["next_cursor"], "model_profile": "other"}).status_code == 409
+    path = "/api/v3/reference-presets/" + source["id"]
+    assert client.get(path + "/availability", params={"source_version": "1"}).json()["availability"] == "unknown"
+    client.patch("/api/v3/reference-examples/" + source["id"], json={"revision": 1, "title": "changed"})
+    assert client.get(path, params={"source_version": "1"}).status_code == 409
+
+
+def test_official_routes_notes_copy_and_pin(conversation_client, tmp_path):
+    from test_official_examples import pack
+    client, _ = conversation_client
+    client.app.state.example_store.official.install(pack(tmp_path / "official-source"))
+    path = "/api/v3/reference-examples/off_one"
+    official = client.get(path).json()
+    assert "media_path" not in official
+    assert client.get(path + "/content").status_code == 200
+    assert client.patch(path + "/notes", json={"override_revision": 0, "notes": {"user_notes": "mine"}}).status_code == 200
+    assert client.patch(path + "/notes", json={"override_revision": 0, "notes": {}}).status_code == 409
+    copied = client.post(path + "/copy", json={"source_version": official["source_version"]})
+    assert copied.status_code == 201, copied.text
+    assert copied.json()["id"].startswith("ex_") and copied.json()["notes"]["user_notes"] == "mine"
+    workspace = client.post("/api/v3/workspaces", json={"draft": {}}).json()
+    pinned = client.post("/api/v3/workbench/pins", json={"workspace_id": workspace["id"], "revision": 1,
+        "example_id": "off_one", "source_version": official["source_version"], "role": "style"})
+    assert pinned.status_code == 200, pinned.text

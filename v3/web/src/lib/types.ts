@@ -17,6 +17,7 @@ export interface BootstrapResponse {
 }
 
 export interface ModelProfileOption {
+  family?: string;
   id: string;
   display_name: string;
   variant: string;
@@ -262,7 +263,7 @@ export interface ArtistComparisonInfo {
   rendered_artist: string;
   position?: number;
   total?: number;
-  seed?: number;
+  seed?: number | string;
   derived_from?: "gallery_regenerate";
   source_comparison_id?: string;
 }
@@ -270,7 +271,7 @@ export interface ArtistComparisonInfo {
 export interface ArtistComparisonSubmission {
   comparison_id: string;
   project_name: string;
-  seed: number;
+  seed: number | string;
   requested_count: number;
   submitted: Array<{artist: string; run: GenerationRunRecord}>;
   failed: Array<{artist: string; error: string}>;
@@ -368,6 +369,12 @@ export interface CompositionPreset {
 }
 
 export interface SceneDraft {
+  translation_segments?: Array<{source: string; english: string; start: number; end: number; status: string}>;
+  translation_review?: {
+    missing_anchors: Array<{source: string; expected: string; type: string}>;
+    requires_review: boolean;
+    note: string;
+  };
   source_text: string;
   translated_text: string;
   scene_plan_enabled?: boolean;
@@ -466,10 +473,37 @@ export interface WorkbenchGenerationSettings {
   cfg: number;
   sampler: string;
   scheduler: string;
-  seed: number;
+  seed: number | string;
   batch_size: number;
   remote_profile_id?: string | null;
   workflow_profile_id?: string | null;
+  creation_configuration?: CreationConfiguration;
+  model_configurations?: Record<string, CreationConfiguration>;
+  execution_policy?: ExecutionPolicy;
+  workflow_parameter_overrides?: Record<string, number | string>;
+  parameter_schema?: WorkflowParameterSchema;
+}
+
+export type ExecutionPolicy = {mode: "auto"; preferredEnvironmentIds: string[]} | {mode: "pinned"; environmentId: string};
+export interface WorkflowParameterField {
+  key: string; label: string; type: "integer" | "number" | "string" | "seed";
+  default: number | string; min?: number | string; max?: number | string; step?: number;
+  enum?: string[]; group: "common" | "sampling" | "workflow";
+  binding?: {node_id: string; input_name: string}; readOnlyReason?: string;
+}
+export interface WorkflowParameterSchema {
+  version: number; workflowId: string; templateRevision: string; fields: WorkflowParameterField[];
+  seedDerivation?: string;
+}
+export interface RequirementLora {
+  logical_id: string; file_name: string; weight: number; trigger_words: string[]; required: boolean;
+  sha256?: string | null; enabled?: boolean; clip_weight?: number | null;
+  source: {kind: "user" | "civitai" | "huggingface" | "official" | "run"; model_version_id?: string | null};
+}
+export interface CreationConfiguration {
+  modelProfile: string; workflow: {id: string; revision: string}; baseRecipeId: string;
+  recipeValues: Record<string, number | string>; parameterOverrides: Record<string, number | string>;
+  resourceRequirements: RequirementLora[]; seedMode: "random" | "fixed";
 }
 
 export interface GenerationRecipeParameters {
@@ -551,6 +585,8 @@ export interface GenerationRunRecord {
   available_actions: GenerationRunAction[];
   error: {code: string; message: string} | null;
   artist_comparison?: ArtistComparisonInfo | null;
+  source?: {workspace_revision: number | null; positive_prompt: string; negative_prompt: string;
+    model_profile: string | null; settings: Partial<WorkbenchGenerationSettings>} | null;
 }
 
 export interface GenerationRunListResponse {
@@ -558,12 +594,25 @@ export interface GenerationRunListResponse {
 }
 
 export interface GenerationTarget {
+  lora_extension_supported?: boolean;
+  lora_slot_order?: string[];
+  lora_loader?: "LoraLoaderModelOnly" | "LoraLoader" | null;
+  parameter_schema?: WorkflowParameterSchema;
+  availability?: string;
+  availability_errors?: string[];
+  experimental?: boolean;
+  template_revision?: string;
   remote_profile_id: string;
   remote_display_name: string;
+  connection_type?: "ssh" | "local" | "http";
+  remote_http_base_url?: string | null;
   remote_ssh_host?: string;
   remote_ssh_port?: number;
+  remote_comfy_host?: string;
+  remote_comfy_port?: number;
   workflow_profile_id: string;
   workflow_display_name: string;
+  workflow_origin?: "official" | "user";
   workflow_kind: string;
   workflow_notes?: string;
   compatible_model_profiles: string[];

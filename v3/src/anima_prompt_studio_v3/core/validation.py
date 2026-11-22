@@ -9,6 +9,7 @@ from ..domain import CandidateLane, CandidateSet, IntentState, PromptCandidate, 
 from .hybrid import HYBRID_ALGORITHM_VERSION
 from .literal import LITERAL_ALGORITHM_VERSION, LiteralMapper, render_canonical_tag
 from .profiles import ModelProfile, NegativePromptMode
+from .fidelity import has_local_scene, negative_defaults, render_scene
 from .recommendation import ARTIST_ALGORITHM_VERSION, CONSERVATIVE_ALGORITHM_VERSION
 
 
@@ -180,10 +181,14 @@ class CandidateValidator:
         tag_prompt = _render_tag_prompt(candidate, profile)
         local_prose_baseline = (
             candidate.lane == CandidateLane.LITERAL
-            and bool(candidate.score_breakdown.get("prose_baseline"))
-            and not candidate.tags
+            and has_local_scene(bundle.intent)
         )
-        if candidate.lane == CandidateLane.HYBRID:
+        if local_prose_baseline:
+            if candidate.positive_prompt != render_scene(bundle.intent, profile, candidate.tags):
+                issues.append(_error(candidate, "scene_fidelity_mismatch", "候选丢失或改写了画面计划/明确选择项。"))
+        elif candidate.lane == CandidateLane.HYBRID:
+            if has_local_scene(bundle.intent):
+                tag_prompt = render_scene(bundle.intent, profile, candidate.tags)
             if not candidate.positive_prompt.startswith(tag_prompt + ". "):
                 issues.append(
                     _error(
@@ -201,7 +206,12 @@ class CandidateValidator:
                 _error(candidate, "negative_prompt_mismatch", "负向提示词与模型配置或排除项不一致。")
             )
         if profile.variant.value == "aesthetic" and "score_" in candidate.positive_prompt:
-            issues.append(_error(candidate, "aesthetic_score_token", "Aesthetic 候选不能包含 score_* token。"))
+            issues.append(ValidationIssue(candidate_id=candidate.id, code="aesthetic_score_token",
+                severity=ValidationSeverity.WARNING, message="Aesthetic 通常无需 score_*；已保留明确输入，请核对模型适配。"))
+        clashes = {tag.rendered for tag in candidate.tags} & set(candidate.negative_prompt.split(profile.tag_separator))
+        if clashes:
+            issues.append(ValidationIssue(candidate_id=candidate.id, code="positive_negative_conflict",
+                severity=ValidationSeverity.WARNING, message=f"正负提示词存在重叠，请核对：{sorted(clashes)}"))
         if profile.negative_prompt_mode == NegativePromptMode.DISABLED and candidate.negative_prompt:
             issues.append(_error(candidate, "negative_prompt_disabled", "当前模型配置已禁用 negative prompt。"))
 
@@ -230,7 +240,7 @@ class CandidateValidator:
                 rendered.append(mapping.rendered)
         if profile.negative_prompt_mode == NegativePromptMode.DISABLED:
             return excluded_names, ""
-        values = list(dict.fromkeys([*profile.negative_prompt, *rendered]))
+        values = list(dict.fromkeys([*negative_defaults(bundle.intent, profile), *rendered]))
         return excluded_names, profile.tag_separator.join(values)
 
     @staticmethod

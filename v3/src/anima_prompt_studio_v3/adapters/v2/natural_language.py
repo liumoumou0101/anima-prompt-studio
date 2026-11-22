@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from anima_prompt_studio.repositories.sqlite_repository import SQLiteRepository
+from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 from anima_prompt_studio.services.ai_extract_service import AIExtractService, ExtractedPrompt
 from anima_prompt_studio.services.ai_prompt_service import (
     AIAPIError,
@@ -11,7 +11,7 @@ from anima_prompt_studio.services.ai_prompt_service import (
     AIEngineConfig,
     OPENCODE_GO_BASE_URL,
 )
-from anima_prompt_studio.services.remote.credential_store import CredentialStore
+from anima_prompt_studio_v3.remote.credential_store import CredentialStore
 
 from ...domain import (
     ConstraintGraph,

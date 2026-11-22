@@ -1,0 +1,26 @@
+{
+  "id": 159769,
+  "title": "Italian Landscape",
+  "url": "https://clevelandart.org/art/1997.137",
+  "creation_date": "c. 1790–92",
+  "technique": "watercolor over graphite",
+  "creditline": "Leonard C. Hanna Jr. Fund",
+  "accession_number": "1997.137",
+  "share_license_status": "CC0",
+  "creators": [
+    {
+      "description": "John Robert Cozens (British, 1752–1797)",
+      "role": "artist",
+      "qualifier": null
+    }
+  ],
+  "api_url": "https://openaccess-api.clevelandart.org/api/artworks/159769",
+  "image_url": "https://openaccess-cdn.clevelandart.org/1997.137/1997.137_web.jpg",
+  "downloaded_on": "2026-09-10",
+  "downloaded_jpeg_sha256": "07522921d33ed4174a37443ae8da38279d5009d0c88b6b9d45b5405cc3955864",
+  "packaged_webp_sha256": "a34aa8ee23e6fa0a523d6027a920c9da5099198ee2569a5324b3aa4402305984",
+  "conversion": "RGB JPEG decode to lossless WebP; same pixel dimensions and decoded RGB values",
+  "visual_review": "Reviewed by Codex from downloaded image; model quality evaluation pending",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "license_text_source": "https://raw.githubusercontent.com/ClevelandMuseumArt/openaccess/refs/heads/master/LICENSE"
+}

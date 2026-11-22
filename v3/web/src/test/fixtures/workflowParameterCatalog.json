@@ -1,0 +1,4668 @@
+[
+  {
+    "model": "anima_aesthetic_v1_1",
+    "workflow": "v3_aesthetic_v1_1",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "v3_aesthetic_v1_1",
+      "workflow_display_name": "ANIMA Aesthetic - V3 Baseline v1.1",
+      "compatible_model_profiles": [
+        "anima_aesthetic_v1_1"
+      ],
+      "template_revision": "e14b24aa9c60a7f4dc4057872a1f02533fc9eecb1918e51e7c8307749ba8e8e2",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "v3_aesthetic_v1_1",
+        "templateRevision": "e14b24aa9c60a7f4dc4057872a1f02533fc9eecb1918e51e7c8307749ba8e8e2",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 35,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4.5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "euler",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "normal",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "stable_baseline",
+      "generation_recipes": [
+        {
+          "id": "stable_baseline",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "creative_euler",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "detail_study",
+          "parameters": {
+            "steps": 40,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_aesthetic_v1_0",
+    "workflow": "v3_aesthetic_v1_0",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "v3_aesthetic_v1_0",
+      "workflow_display_name": "ANIMA Aesthetic - V3 Legacy v1.0",
+      "compatible_model_profiles": [
+        "anima_aesthetic_v1_0"
+      ],
+      "template_revision": "cc015da5edf46a22ff6ca44bcc8ef6284f3d8cdcc08d0c26d2862d073f9f1213",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "v3_aesthetic_v1_0",
+        "templateRevision": "cc015da5edf46a22ff6ca44bcc8ef6284f3d8cdcc08d0c26d2862d073f9f1213",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 35,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4.5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "euler",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "normal",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "stable_baseline",
+      "generation_recipes": [
+        {
+          "id": "stable_baseline",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "anima-aesthetic-v1.0.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "creative_euler",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "anima-aesthetic-v1.0.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "detail_study",
+          "parameters": {
+            "steps": 40,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "anima-aesthetic-v1.0.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_base_v1",
+    "workflow": "v3_base_v1",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "v3_base_v1",
+      "workflow_display_name": "ANIMA Base v1.0 - V3 Baseline",
+      "compatible_model_profiles": [
+        "anima_base_v1"
+      ],
+      "template_revision": "464e178e3f4cf30ea3e7999ba5e810a4d8646f3d46f6a51d042b14faef0e0bf7",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "v3_base_v1",
+        "templateRevision": "464e178e3f4cf30ea3e7999ba5e810a4d8646f3d46f6a51d042b14faef0e0bf7",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 35,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4.5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "normal",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "stable_baseline",
+      "generation_recipes": [
+        {
+          "id": "stable_baseline",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "creative_euler",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "detail_study",
+          "parameters": {
+            "steps": 40,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_turbo_v1_1",
+    "workflow": "23_Turbo_v1.1",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "23_Turbo_v1.1",
+      "workflow_display_name": "ANIMA Turbo v1.1 - Verified Baseline",
+      "compatible_model_profiles": [
+        "anima_turbo_v1_1"
+      ],
+      "template_revision": "26308dbeb627b1dc315a6cd3d931792ce33b990531b158fdba7a57cd8e676e55",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "23_Turbo_v1.1",
+        "templateRevision": "26308dbeb627b1dc315a6cd3d931792ce33b990531b158fdba7a57cd8e676e55",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 10,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 1.0,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "turbo_v11_baseline",
+      "generation_recipes": [
+        {
+          "id": "turbo_v11_preview",
+          "parameters": {
+            "steps": 8,
+            "cfg": 1.0,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "turbo_v11_baseline",
+          "parameters": {
+            "steps": 10,
+            "cfg": 1.0,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "turbo_v11_euler",
+          "parameters": {
+            "steps": 10,
+            "cfg": 1.0,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "turbo_v11_upper",
+          "parameters": {
+            "steps": 12,
+            "cfg": 1.0,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_2_9b_preview_v1",
+    "workflow": "v3_anima_2_9b_preview_v1",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "v3_anima_2_9b_preview_v1",
+      "workflow_display_name": "Anima 2.9B Preview v1 · 作者参数基线",
+      "compatible_model_profiles": [
+        "anima_2_9b_preview_v1"
+      ],
+      "template_revision": "82108271b1a13da423a4b1d2a797eab215f284bc1fd8a15ea78778aa43efe117",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "v3_anima_2_9b_preview_v1",
+        "templateRevision": "82108271b1a13da423a4b1d2a797eab215f284bc1fd8a15ea78778aa43efe117",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 30,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4.0,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "euler",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "sgm_uniform",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "anima29_creator",
+      "generation_recipes": [
+        {
+          "id": "anima29_creator",
+          "parameters": {
+            "steps": 30,
+            "cfg": 4.0,
+            "sampler": "euler",
+            "scheduler": "sgm_uniform"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "Anima-2.9B-preview-v1.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "anima29_50_steps",
+          "parameters": {
+            "steps": 50,
+            "cfg": 4.0,
+            "sampler": "euler",
+            "scheduler": "sgm_uniform"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "Anima-2.9B-preview-v1.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "anima29_beta",
+          "parameters": {
+            "steps": 30,
+            "cfg": 4.0,
+            "sampler": "euler",
+            "scheduler": "beta"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "Anima-2.9B-preview-v1.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "model": "animayume_v1_0_final",
+    "workflow": "24_AnimaYume_v1.0_Final",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "24_AnimaYume_v1.0_Final",
+      "workflow_display_name": "AnimaYume v1.0 Final - Verified Baseline",
+      "compatible_model_profiles": [
+        "animayume_v1_0_final"
+      ],
+      "template_revision": "d1b47e62bbe5221b9c56dabdd939ba6d0cd247d9ad0f9a2928fc85b445f3b178",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "24_AnimaYume_v1.0_Final",
+        "templateRevision": "d1b47e62bbe5221b9c56dabdd939ba6d0cd247d9ad0f9a2928fc85b445f3b178",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 30,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 5.5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "euler_ancestral",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "normal",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "yume_creator",
+      "generation_recipes": [
+        {
+          "id": "yume_creator",
+          "parameters": {
+            "steps": 30,
+            "cfg": 5.5,
+            "sampler": "euler_ancestral",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "animayume_v10BaseFinal.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "yume_community",
+          "parameters": {
+            "steps": 30,
+            "cfg": 4.0,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "animayume_v10BaseFinal.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "model": "animayume_v1_5_base",
+    "workflow": "v3_animayume_v1_5_base",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "v3_animayume_v1_5_base",
+      "workflow_display_name": "AnimaYume v1.5 Base · 作者参数基线",
+      "compatible_model_profiles": [
+        "animayume_v1_5_base"
+      ],
+      "template_revision": "995a6c37d45f54e885361927658a62ca5d2b82857995e073aa76962e524ba7ef",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "v3_animayume_v1_5_base",
+        "templateRevision": "995a6c37d45f54e885361927658a62ca5d2b82857995e073aa76962e524ba7ef",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 30,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 5.5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "euler_ancestral",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "normal",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "yume15_creator",
+      "generation_recipes": [
+        {
+          "id": "yume15_creator",
+          "parameters": {
+            "steps": 30,
+            "cfg": 5.5,
+            "sampler": "euler_ancestral",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "yume15_40_steps",
+          "parameters": {
+            "steps": 40,
+            "cfg": 5.5,
+            "sampler": "euler_ancestral",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "moss_image_sft_int8",
+    "workflow": "v3_moss_image_sft_int8",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "v3_moss_image_sft_int8",
+      "workflow_display_name": "MOSS Image SFT INT8 · 中文原文",
+      "compatible_model_profiles": [
+        "moss_image_sft_int8"
+      ],
+      "template_revision": "ec1f2a046a726ca72c380871e35f17204a01a132933f5ea13ead2f84bc26ba0f",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "v3_moss_image_sft_int8",
+        "templateRevision": "ec1f2a046a726ca72c380871e35f17204a01a132933f5ea13ead2f84bc26ba0f",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 1024,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 16
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1024,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 16
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 25,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 2.5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "moss_baseline",
+      "generation_recipes": [
+        {
+          "id": "moss_baseline",
+          "parameters": {
+            "steps": 25,
+            "cfg": 2.5,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "moss_image_sft_int8_convrot.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            },
+            {
+              "kind": "missing_weight",
+              "node": "3",
+              "class": "CLIPLoader",
+              "input": "clip_name",
+              "value": "qwen3.5_9b_w4a8_gptq.safetensors",
+              "choices": [
+                "qwen_3_06b_base.safetensors"
+              ]
+            },
+            {
+              "kind": "missing_weight",
+              "node": "8",
+              "class": "VAELoader",
+              "input": "vae_name",
+              "value": "flux2-vae_small.safetensors",
+              "choices": [
+                "qwen_image_vae.safetensors",
+                "pixel_space"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "model": "miaomiao_harem_anima_v1_6",
+    "workflow": "25_MiaoMiao_Harem_ANIMA_v1.6",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "25_MiaoMiao_Harem_ANIMA_v1.6",
+      "workflow_display_name": "MiaoMiao Harem ANIMA v1.6 - Verified Baseline",
+      "compatible_model_profiles": [
+        "miaomiao_harem_anima_v1_6"
+      ],
+      "template_revision": "bb5bdd61ea27a8dc9479c8e8fe505c4cc1b3695d8ef46ca0cb6e8aead4a38df4",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "25_MiaoMiao_Harem_ANIMA_v1.6",
+        "templateRevision": "bb5bdd61ea27a8dc9479c8e8fe505c4cc1b3695d8ef46ca0cb6e8aead4a38df4",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 30,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4.5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "euler",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "normal",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "miaomiao_creator",
+      "generation_recipes": [
+        {
+          "id": "miaomiao_creator",
+          "parameters": {
+            "steps": 30,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "3",
+              "class": "CLIPLoader",
+              "input": "clip_name",
+              "value": "miaomiaoHarem_anima16_txt.safetensors",
+              "choices": [
+                "qwen_3_06b_base.safetensors"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "miaomiao_euler_a",
+          "parameters": {
+            "steps": 30,
+            "cfg": 4.5,
+            "sampler": "euler_ancestral",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "3",
+              "class": "CLIPLoader",
+              "input": "clip_name",
+              "value": "miaomiaoHarem_anima16_txt.safetensors",
+              "choices": [
+                "qwen_3_06b_base.safetensors"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "miaomiao_community",
+          "parameters": {
+            "steps": 30,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "3",
+              "class": "CLIPLoader",
+              "input": "clip_name",
+              "value": "miaomiaoHarem_anima16_txt.safetensors",
+              "choices": [
+                "qwen_3_06b_base.safetensors"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "model": "wai_anima_v1_0",
+    "workflow": "v3_wai_anima_v1_0",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "v3_wai_anima_v1_0",
+      "workflow_display_name": "WAI ANIMA v1.0 · 基础生成",
+      "compatible_model_profiles": [
+        "wai_anima_v1_0"
+      ],
+      "template_revision": "7a45c5020d0bdf02d514ee494beca8d5b31e374026e5d1c7bbbb7237de898b0a",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "v3_wai_anima_v1_0",
+        "templateRevision": "7a45c5020d0bdf02d514ee494beca8d5b31e374026e5d1c7bbbb7237de898b0a",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 25,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4.5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "euler_ancestral",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "normal",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "wai_baseline",
+      "generation_recipes": [
+        {
+          "id": "wai_baseline",
+          "parameters": {
+            "steps": 25,
+            "cfg": 4.5,
+            "sampler": "euler_ancestral",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_base_v1",
+    "workflow": "01___Base_Quality_T2I",
+    "origin": "user",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "01___Base_Quality_T2I",
+      "workflow_display_name": "01_基础高质量文生图_Base_Quality_T2I",
+      "compatible_model_profiles": [
+        "anima_base_v1"
+      ],
+      "template_revision": "b9b9c67dff5c68b1c04077e9fa138c396b711480f6b1c1195e237cb38ad365b0",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "01___Base_Quality_T2I",
+        "templateRevision": "b9b9c67dff5c68b1c04077e9fa138c396b711480f6b1c1195e237cb38ad365b0",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 30,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "889279093635260",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "stable_baseline",
+      "generation_recipes": [
+        {
+          "id": "stable_baseline",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "creative_euler",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "detail_study",
+          "parameters": {
+            "steps": 40,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_turbo_v1",
+    "workflow": "03__NAG__Turbo_NAG_Few_Step",
+    "origin": "user",
+    "localErrors": [
+      "缺少工作流绑定：cfg, scheduler, seed, steps",
+      "workflow kind is unknown"
+    ],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "03__NAG__Turbo_NAG_Few_Step",
+      "workflow_display_name": "03_极速NAG少步生成_Turbo_NAG_Few_Step",
+      "compatible_model_profiles": [
+        "anima_turbo_v1"
+      ],
+      "template_revision": "ec5999ed0f50ee550ccbf310d8cf2bf22d1430102e3ae6bc2e091b1be305109e",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "03__NAG__Turbo_NAG_Few_Step",
+        "templateRevision": "ec5999ed0f50ee550ccbf310d8cf2bf22d1430102e3ae6bc2e091b1be305109e",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "28",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "28",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "euler",
+            "group": "sampling",
+            "binding": {
+              "node_id": "82",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "28",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "turbo_standard",
+      "generation_recipes": [
+        {
+          "id": "turbo_preview",
+          "parameters": {
+            "steps": 8,
+            "cfg": 1.0,
+            "sampler": "euler",
+            "scheduler": "simple"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：cfg, scheduler, seed, steps"
+          ],
+          "remote_issues": []
+        },
+        {
+          "id": "turbo_standard",
+          "parameters": {
+            "steps": 10,
+            "cfg": 1.0,
+            "sampler": "euler",
+            "scheduler": "simple"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：cfg, scheduler, seed, steps"
+          ],
+          "remote_issues": []
+        },
+        {
+          "id": "turbo_upper",
+          "parameters": {
+            "steps": 12,
+            "cfg": 1.0,
+            "sampler": "euler",
+            "scheduler": "simple"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：cfg, scheduler, seed, steps"
+          ],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_base_v1",
+    "workflow": "04__1_5__HiresFix_1_5x",
+    "origin": "user",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "04__1_5__HiresFix_1_5x",
+      "workflow_display_name": "04_高清修复1点5倍_HiresFix_1_5x",
+      "compatible_model_profiles": [
+        "anima_base_v1"
+      ],
+      "template_revision": "49dd04cb6ed91b66b186df6646bbc3493696bc9749095c5f52e61fba741f1953",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "04__1_5__HiresFix_1_5x",
+        "templateRevision": "49dd04cb6ed91b66b186df6646bbc3493696bc9749095c5f52e61fba741f1953",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 34,
+            "group": "sampling",
+            "binding": {
+              "node_id": "8",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4.5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "8",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "sampling",
+            "binding": {
+              "node_id": "8",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "sampling",
+            "binding": {
+              "node_id": "8",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "44",
+            "group": "common",
+            "binding": {
+              "node_id": "8",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          },
+          {
+            "key": "refiner_steps",
+            "label": "精修 Steps",
+            "type": "integer",
+            "default": 18,
+            "group": "workflow",
+            "binding": {
+              "node_id": "10",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "refiner_cfg",
+            "label": "精修 CFG",
+            "type": "number",
+            "default": 4.5,
+            "group": "workflow",
+            "binding": {
+              "node_id": "10",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "refiner_sampler",
+            "label": "精修 Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "workflow",
+            "binding": {
+              "node_id": "10",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "refiner_scheduler",
+            "label": "精修 Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "workflow",
+            "binding": {
+              "node_id": "10",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "refiner_denoise",
+            "label": "精修降噪",
+            "type": "number",
+            "default": 0.35,
+            "group": "workflow",
+            "binding": {
+              "node_id": "10",
+              "input_name": "denoise"
+            },
+            "min": 0,
+            "max": 1,
+            "step": 0.01
+          },
+          {
+            "key": "upscale_factor",
+            "label": "放大倍率",
+            "type": "number",
+            "default": 1.5,
+            "group": "workflow",
+            "binding": {
+              "node_id": "14",
+              "input_name": "scale_by"
+            },
+            "min": 1,
+            "max": 8,
+            "step": 0.1
+          }
+        ],
+        "seedDerivation": "第二阶段 Seed = (基础 Seed + 1) mod (2^63 − 1)，沿用派生规则。"
+      },
+      "default_recipe_id": "hires_template",
+      "generation_recipes": [
+        {
+          "id": "hires_template",
+          "parameters": {
+            "steps": 34,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_turbo_v1",
+    "workflow": "05__DMDX__4_Step_DMDX_Distill",
+    "origin": "user",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "05__DMDX__4_Step_DMDX_Distill",
+      "workflow_display_name": "05_四步DMDX蒸馏_4_Step_DMDX_Distill",
+      "compatible_model_profiles": [
+        "anima_turbo_v1"
+      ],
+      "template_revision": "79ce92ac8063d97dc927d29b77ed40039f60b071a5ec6ee4b14699ec891ee44a",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "05__DMDX__4_Step_DMDX_Distill",
+        "templateRevision": "79ce92ac8063d97dc927d29b77ed40039f60b071a5ec6ee4b14699ec891ee44a",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "8",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "8",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 4,
+            "group": "sampling",
+            "binding": {
+              "node_id": "9",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 1,
+            "group": "sampling",
+            "binding": {
+              "node_id": "9",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "sampling",
+            "binding": {
+              "node_id": "9",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "sampling",
+            "binding": {
+              "node_id": "9",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "42",
+            "group": "common",
+            "binding": {
+              "node_id": "9",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "8",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "dmdx_4step",
+      "generation_recipes": [
+        {
+          "id": "dmdx_4step",
+          "parameters": {
+            "steps": 4,
+            "cfg": 1.0,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "3",
+              "class": "LoraLoaderModelOnly",
+              "input": "lora_name",
+              "value": "anima-distill/dmdx_student_final_comfy.safetensors",
+              "choices": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_base_v1",
+    "workflow": "06_LLLite__LLLite_Any_Test_Control",
+    "origin": "user",
+    "localErrors": [
+      "workflow kind is unknown"
+    ],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "06_LLLite__LLLite_Any_Test_Control",
+      "workflow_display_name": "06_LLLite控制_LLLite_Any_Test_Control",
+      "compatible_model_profiles": [
+        "anima_base_v1"
+      ],
+      "template_revision": "cc8368b37f48eef90dbac67d730d19b4d5cfe6c14c216a90e832510f70c6a0b8",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "06_LLLite__LLLite_Any_Test_Control",
+        "templateRevision": "cc8368b37f48eef90dbac67d730d19b4d5cfe6c14c216a90e832510f70c6a0b8",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 30,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "158122451693170",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "stable_baseline",
+      "generation_recipes": [
+        {
+          "id": "stable_baseline",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "required_input_missing",
+              "node": "11",
+              "class": "AnimaLLLiteApply",
+              "input": "model_patch"
+            },
+            {
+              "kind": "missing_input_image",
+              "node": "12",
+              "class": "LoadImage",
+              "input": "image",
+              "value": "ChatGPT Image 2026年6月27日 18_20_17 (3).png",
+              "choices": [
+                "_API_CONNECTION_TEST_65922eb8.png"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "creative_euler",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "required_input_missing",
+              "node": "11",
+              "class": "AnimaLLLiteApply",
+              "input": "model_patch"
+            },
+            {
+              "kind": "missing_input_image",
+              "node": "12",
+              "class": "LoadImage",
+              "input": "image",
+              "value": "ChatGPT Image 2026年6月27日 18_20_17 (3).png",
+              "choices": [
+                "_API_CONNECTION_TEST_65922eb8.png"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "detail_study",
+          "parameters": {
+            "steps": 40,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "required_input_missing",
+              "node": "11",
+              "class": "AnimaLLLiteApply",
+              "input": "model_patch"
+            },
+            {
+              "kind": "missing_input_image",
+              "node": "12",
+              "class": "LoadImage",
+              "input": "image",
+              "value": "ChatGPT Image 2026年6月27日 18_20_17 (3).png",
+              "choices": [
+                "_API_CONNECTION_TEST_65922eb8.png"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_base_v1",
+    "workflow": "07_LLLite__LLLite_Regional_Mask",
+    "origin": "user",
+    "localErrors": [
+      "缺少工作流绑定：positive_prompt",
+      "workflow kind is unknown"
+    ],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "07_LLLite__LLLite_Regional_Mask",
+      "workflow_display_name": "07_LLLite区域遮罩_LLLite_Regional_Mask",
+      "compatible_model_profiles": [
+        "anima_base_v1"
+      ],
+      "template_revision": "5c8853e859f0ed474d99db85a9e96c3c26aa75b0d4a8eb982e63aee4163141e8",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "07_LLLite__LLLite_Regional_Mask",
+        "templateRevision": "5c8853e859f0ed474d99db85a9e96c3c26aa75b0d4a8eb982e63aee4163141e8",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 30,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "52282829950939",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "stable_baseline",
+      "generation_recipes": [
+        {
+          "id": "stable_baseline",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：positive_prompt"
+          ],
+          "remote_issues": []
+        },
+        {
+          "id": "creative_euler",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：positive_prompt"
+          ],
+          "remote_issues": []
+        },
+        {
+          "id": "detail_study",
+          "parameters": {
+            "steps": 40,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：positive_prompt"
+          ],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_turbo_v1",
+    "workflow": "08_LLLite_HF__LLLite_Regional_HF",
+    "origin": "user",
+    "localErrors": [
+      "缺少工作流绑定：negative_prompt",
+      "workflow kind is unknown",
+      "parameter_schema: steps: 必须是有效数值；sampler: 必须是非空文本",
+      "recipe_contract: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'"
+    ],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "08_LLLite_HF__LLLite_Regional_HF",
+      "workflow_display_name": "08_LLLite区域HF原版_LLLite_Regional_HF",
+      "compatible_model_profiles": [
+        "anima_turbo_v1"
+      ],
+      "template_revision": "d59ec493b94a8dd468131d2548d100237b0dde7d7af7a2f011decc2c239580ec",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "08_LLLite_HF__LLLite_Regional_HF",
+        "templateRevision": "d59ec493b94a8dd468131d2548d100237b0dde7d7af7a2f011decc2c239580ec",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": null,
+            "group": "sampling",
+            "binding": {
+              "node_id": "9",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 12,
+            "group": "sampling",
+            "binding": {
+              "node_id": "9",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": 1,
+            "group": "sampling",
+            "binding": {
+              "node_id": "9",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "euler_ancestral",
+            "group": "sampling",
+            "binding": {
+              "node_id": "9",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "-1",
+            "group": "common",
+            "binding": {
+              "node_id": "9",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": null,
+      "generation_recipes": []
+    }
+  },
+  {
+    "model": "anima_base_v1",
+    "workflow": "09_Preview3__Preview3_Inpaint",
+    "origin": "user",
+    "localErrors": [
+      "缺少工作流绑定：batch_size, height, width",
+      "workflow kind is unknown"
+    ],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "09_Preview3__Preview3_Inpaint",
+      "workflow_display_name": "09_Preview3局部重绘_Preview3_Inpaint",
+      "compatible_model_profiles": [
+        "anima_base_v1"
+      ],
+      "template_revision": "dd2a488a54f6fa42bb15077e63c6970663f33af437b14b00d82a821663de8803",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "09_Preview3__Preview3_Inpaint",
+        "templateRevision": "dd2a488a54f6fa42bb15077e63c6970663f33af437b14b00d82a821663de8803",
+        "fields": [
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 30,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 3,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "linear/euler",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "beta57",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "937858870712653",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          }
+        ]
+      },
+      "default_recipe_id": "stable_baseline",
+      "generation_recipes": [
+        {
+          "id": "stable_baseline",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：batch_size, height, width"
+          ],
+          "remote_issues": []
+        },
+        {
+          "id": "creative_euler",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：batch_size, height, width"
+          ],
+          "remote_issues": []
+        },
+        {
+          "id": "detail_study",
+          "parameters": {
+            "steps": 40,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：batch_size, height, width"
+          ],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_base_v1",
+    "workflow": "10___Simple_Inpaint",
+    "origin": "user",
+    "localErrors": [
+      "缺少工作流绑定：batch_size, height, width",
+      "workflow kind is unknown",
+      "recipe_contract: int() argument must be a string, a bytes-like object or a real number, not 'list'"
+    ],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "10___Simple_Inpaint",
+      "workflow_display_name": "10_简易局部重绘_Simple_Inpaint",
+      "compatible_model_profiles": [
+        "anima_base_v1"
+      ],
+      "template_revision": "83e90f7c945026afeb1ac4bec889066d5b68479975695a82c5d3d649d15f22b8",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "10___Simple_Inpaint",
+        "templateRevision": "83e90f7c945026afeb1ac4bec889066d5b68479975695a82c5d3d649d15f22b8",
+        "fields": [
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 35,
+            "group": "sampling",
+            "binding": {
+              "node_id": "265",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1,
+            "readOnlyReason": "该输入由模板节点计算，需在高级 JSON 中修改"
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4.5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "265",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1,
+            "readOnlyReason": "该输入由模板节点计算，需在高级 JSON 中修改"
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "linear/euler",
+            "group": "sampling",
+            "binding": {
+              "node_id": "265",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "sgm_uniform",
+            "group": "sampling",
+            "binding": {
+              "node_id": "265",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "-1",
+            "group": "common",
+            "binding": {
+              "node_id": "265",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807",
+            "readOnlyReason": "该输入由模板节点计算，需在高级 JSON 中修改"
+          }
+        ]
+      },
+      "default_recipe_id": null,
+      "generation_recipes": []
+    }
+  },
+  {
+    "model": "anima_base_v1",
+    "workflow": "15___Artist_Mixer_UI",
+    "origin": "user",
+    "localErrors": [
+      "缺少工作流绑定：positive_prompt",
+      "workflow kind is unknown"
+    ],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "15___Artist_Mixer_UI",
+      "workflow_display_name": "15_艺术家混合_Artist_Mixer_UI",
+      "compatible_model_profiles": [
+        "anima_base_v1"
+      ],
+      "template_revision": "3d362d0be1e96baa0934fc9f3caa26fd30c4f5e58fcca661efdddf122e21ebfe",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "15___Artist_Mixer_UI",
+        "templateRevision": "3d362d0be1e96baa0934fc9f3caa26fd30c4f5e58fcca661efdddf122e21ebfe",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "1",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "1",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 32,
+            "group": "sampling",
+            "binding": {
+              "node_id": "10",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4.6,
+            "group": "sampling",
+            "binding": {
+              "node_id": "10",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "dpmpp_2m_sde_gpu",
+            "group": "sampling",
+            "binding": {
+              "node_id": "10",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "sampling",
+            "binding": {
+              "node_id": "10",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "43",
+            "group": "common",
+            "binding": {
+              "node_id": "10",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "1",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "stable_baseline",
+      "generation_recipes": [
+        {
+          "id": "stable_baseline",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：positive_prompt"
+          ],
+          "remote_issues": []
+        },
+        {
+          "id": "creative_euler",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：positive_prompt"
+          ],
+          "remote_issues": []
+        },
+        {
+          "id": "detail_study",
+          "parameters": {
+            "steps": 40,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：positive_prompt"
+          ],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_base_v1",
+    "workflow": "17__LoRA_IC",
+    "origin": "user",
+    "localErrors": [
+      "节点 6 引用了不存在的节点或输出。",
+      "工作流连接存在环或无效依赖。",
+      "缺少工作流绑定：batch_size, height, positive_prompt, width",
+      "workflow kind is unknown",
+      "parameter_schema: steps: 必须是有效数值；sampler: 必须是非空文本",
+      "recipe_contract: invalid literal for int() with base 10: 'fixed'"
+    ],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "17__LoRA_IC",
+      "workflow_display_name": "17_编辑LoRA与IC方法",
+      "compatible_model_profiles": [
+        "anima_base_v1"
+      ],
+      "template_revision": "c60c0ed98e9d6f3ff730501576f870dea728e859255a6b172b504f89671ca9e5",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "17__LoRA_IC",
+        "templateRevision": "c60c0ed98e9d6f3ff730501576f870dea728e859255a6b172b504f89671ca9e5",
+        "fields": [
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": "fixed",
+            "group": "sampling",
+            "binding": {
+              "node_id": "13",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 20,
+            "group": "sampling",
+            "binding": {
+              "node_id": "13",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": 5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "13",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "dpmpp_2m_sde_gpu",
+            "group": "sampling",
+            "binding": {
+              "node_id": "13",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "-1",
+            "group": "common",
+            "binding": {
+              "node_id": "13",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807",
+            "readOnlyReason": "该输入由模板节点计算，需在高级 JSON 中修改"
+          }
+        ]
+      },
+      "default_recipe_id": null,
+      "generation_recipes": []
+    }
+  },
+  {
+    "model": "anima_base_v1",
+    "workflow": "18___Better_Sampler_Test",
+    "origin": "user",
+    "localErrors": [
+      "缺少工作流绑定：cfg, sampler, scheduler, seed, steps",
+      "workflow kind is unknown"
+    ],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "18___Better_Sampler_Test",
+      "workflow_display_name": "18_采样器测试_Better_Sampler_Test",
+      "compatible_model_profiles": [
+        "anima_base_v1"
+      ],
+      "template_revision": "d4414958f4e0230431bb0332a8bdb6e3a72bb2d2f4844755563b41288ee98dc6",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "18___Better_Sampler_Test",
+        "templateRevision": "d4414958f4e0230431bb0332a8bdb6e3a72bb2d2f4844755563b41288ee98dc6",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "9",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "9",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "9",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "stable_baseline",
+      "generation_recipes": [
+        {
+          "id": "stable_baseline",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：cfg, sampler, scheduler, seed, steps"
+          ],
+          "remote_issues": []
+        },
+        {
+          "id": "creative_euler",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：cfg, sampler, scheduler, seed, steps"
+          ],
+          "remote_issues": []
+        },
+        {
+          "id": "detail_study",
+          "parameters": {
+            "steps": 40,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "normal"
+          },
+          "errors": [
+            "WorkflowRenderError: 缺少工作流绑定：cfg, sampler, scheduler, seed, steps"
+          ],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_aesthetic_v1_0",
+    "workflow": "21___Aesthetic_v1.0",
+    "origin": "user",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "21___Aesthetic_v1.0",
+      "workflow_display_name": "21_美学文生图_Aesthetic_v1.0",
+      "compatible_model_profiles": [
+        "anima_aesthetic_v1_0"
+      ],
+      "template_revision": "0cc34686cbdef63e2d96eca83cffa8401ba064b66c41a23e4ae419b3c57ac68f",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "21___Aesthetic_v1.0",
+        "templateRevision": "0cc34686cbdef63e2d96eca83cffa8401ba064b66c41a23e4ae419b3c57ac68f",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 30,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "889279093635260",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "stable_baseline",
+      "generation_recipes": [
+        {
+          "id": "stable_baseline",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "anima-aesthetic-v1.0.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "creative_euler",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "anima-aesthetic-v1.0.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "detail_study",
+          "parameters": {
+            "steps": 40,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "anima-aesthetic-v1.0.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_aesthetic_v1_1",
+    "workflow": "22___Aesthetic_v1.1",
+    "origin": "user",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "22___Aesthetic_v1.1",
+      "workflow_display_name": "22_美学文生图_Aesthetic_v1.1",
+      "compatible_model_profiles": [
+        "anima_aesthetic_v1_1"
+      ],
+      "template_revision": "ca43136be6c75d9fc6d82a4696f005d9c251c5b98286b89615a8244a915e12a8",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "22___Aesthetic_v1.1",
+        "templateRevision": "ca43136be6c75d9fc6d82a4696f005d9c251c5b98286b89615a8244a915e12a8",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 30,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "889279093635260",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "stable_baseline",
+      "generation_recipes": [
+        {
+          "id": "stable_baseline",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "creative_euler",
+          "parameters": {
+            "steps": 35,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "detail_study",
+          "parameters": {
+            "steps": 40,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_turbo_v1_1",
+    "workflow": "26_Turbo_v1.1",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "26_Turbo_v1.1",
+      "workflow_display_name": "ANIMA Turbo v1.1 - Community Optimization",
+      "compatible_model_profiles": [
+        "anima_turbo_v1_1"
+      ],
+      "template_revision": "83e25419177348b571307b346372f4c52591f4275952515464a0120e6e17bfbc",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "26_Turbo_v1.1",
+        "templateRevision": "83e25419177348b571307b346372f4c52591f4275952515464a0120e6e17bfbc",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 10,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 1.0,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "turbo_v11_baseline",
+      "generation_recipes": [
+        {
+          "id": "turbo_v11_preview",
+          "parameters": {
+            "steps": 8,
+            "cfg": 1.0,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "turbo_v11_baseline",
+          "parameters": {
+            "steps": 10,
+            "cfg": 1.0,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "turbo_v11_euler",
+          "parameters": {
+            "steps": 10,
+            "cfg": 1.0,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": []
+        },
+        {
+          "id": "turbo_v11_upper",
+          "parameters": {
+            "steps": 12,
+            "cfg": 1.0,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": []
+        }
+      ]
+    }
+  },
+  {
+    "model": "animayume_v1_0_final",
+    "workflow": "27_AnimaYume",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "27_AnimaYume",
+      "workflow_display_name": "AnimaYume - Community Optimization Experiment",
+      "compatible_model_profiles": [
+        "animayume_v1_0_final"
+      ],
+      "template_revision": "e1653e72b374c45825d136a0725e936e788587db6ef0de0b0c69508af236fd41",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "27_AnimaYume",
+        "templateRevision": "e1653e72b374c45825d136a0725e936e788587db6ef0de0b0c69508af236fd41",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 30,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 5.5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "euler_ancestral",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "normal",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "yume_creator",
+      "generation_recipes": [
+        {
+          "id": "yume_creator",
+          "parameters": {
+            "steps": 30,
+            "cfg": 5.5,
+            "sampler": "euler_ancestral",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "animayume_v10BaseFinal.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "yume_community",
+          "parameters": {
+            "steps": 30,
+            "cfg": 4.0,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "1",
+              "class": "UNETLoader",
+              "input": "unet_name",
+              "value": "animayume_v10BaseFinal.safetensors",
+              "choices": [
+                "AnimaYume_v15_base.safetensors",
+                "anima-aesthetic-v1.1.safetensors",
+                "anima-base-v1.0.safetensors",
+                "anima-turbo-v1.1.safetensors",
+                "miaomiaoHarem_anima16.safetensors",
+                "waiANIMA_v10Base10.safetensors"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "model": "miaomiao_harem_anima_v1_6",
+    "workflow": "28_MiaoMiao",
+    "origin": "official",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "28_MiaoMiao",
+      "workflow_display_name": "MiaoMiao - Community Optimization Experiment",
+      "compatible_model_profiles": [
+        "miaomiao_harem_anima_v1_6"
+      ],
+      "template_revision": "73968553e6a869e6c6894a0676d8c7e94dd20da9edb4b6baaccd455fcf1327ba",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "28_MiaoMiao",
+        "templateRevision": "73968553e6a869e6c6894a0676d8c7e94dd20da9edb4b6baaccd455fcf1327ba",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 30,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 4.5,
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "euler",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "normal",
+            "group": "sampling",
+            "binding": {
+              "node_id": "7",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "0",
+            "group": "common",
+            "binding": {
+              "node_id": "7",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "6",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "miaomiao_creator",
+      "generation_recipes": [
+        {
+          "id": "miaomiao_creator",
+          "parameters": {
+            "steps": 30,
+            "cfg": 4.5,
+            "sampler": "euler",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "3",
+              "class": "CLIPLoader",
+              "input": "clip_name",
+              "value": "miaomiaoHarem_anima16_txt.safetensors",
+              "choices": [
+                "qwen_3_06b_base.safetensors"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "miaomiao_euler_a",
+          "parameters": {
+            "steps": 30,
+            "cfg": 4.5,
+            "sampler": "euler_ancestral",
+            "scheduler": "normal"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "3",
+              "class": "CLIPLoader",
+              "input": "clip_name",
+              "value": "miaomiaoHarem_anima16_txt.safetensors",
+              "choices": [
+                "qwen_3_06b_base.safetensors"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "miaomiao_community",
+          "parameters": {
+            "steps": 30,
+            "cfg": 4.5,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "3",
+              "class": "CLIPLoader",
+              "input": "clip_name",
+              "value": "miaomiaoHarem_anima16_txt.safetensors",
+              "choices": [
+                "qwen_3_06b_base.safetensors"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "model": "anima_turbo_v1",
+    "workflow": "02___Turbo_Fast_T2I",
+    "origin": "user",
+    "localErrors": [],
+    "target": {
+      "remote_profile_id": "catalog-fixture",
+      "workflow_profile_id": "02___Turbo_Fast_T2I",
+      "workflow_display_name": "02_极速文生图_Turbo_Fast_T2I",
+      "compatible_model_profiles": [
+        "anima_turbo_v1"
+      ],
+      "template_revision": "74112ddee87657619f304ee2dcfab3d5f59de8200d2b0ba8f6776b2208d4f5d9",
+      "parameter_schema": {
+        "version": 1,
+        "workflowId": "02___Turbo_Fast_T2I",
+        "templateRevision": "74112ddee87657619f304ee2dcfab3d5f59de8200d2b0ba8f6776b2208d4f5d9",
+        "fields": [
+          {
+            "key": "width",
+            "label": "宽度",
+            "type": "integer",
+            "default": 896,
+            "group": "common",
+            "binding": {
+              "node_id": "28",
+              "input_name": "width"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "height",
+            "label": "高度",
+            "type": "integer",
+            "default": 1152,
+            "group": "common",
+            "binding": {
+              "node_id": "28",
+              "input_name": "height"
+            },
+            "min": 64,
+            "max": 8192,
+            "step": 8
+          },
+          {
+            "key": "steps",
+            "label": "Steps",
+            "type": "integer",
+            "default": 12,
+            "group": "sampling",
+            "binding": {
+              "node_id": "19",
+              "input_name": "steps"
+            },
+            "min": 1,
+            "max": 200,
+            "step": 1
+          },
+          {
+            "key": "cfg",
+            "label": "CFG",
+            "type": "number",
+            "default": 1,
+            "group": "sampling",
+            "binding": {
+              "node_id": "19",
+              "input_name": "cfg"
+            },
+            "min": 0,
+            "max": 30,
+            "step": 0.1
+          },
+          {
+            "key": "sampler",
+            "label": "Sampler",
+            "type": "string",
+            "default": "er_sde",
+            "group": "sampling",
+            "binding": {
+              "node_id": "19",
+              "input_name": "sampler_name"
+            }
+          },
+          {
+            "key": "scheduler",
+            "label": "Scheduler",
+            "type": "string",
+            "default": "simple",
+            "group": "sampling",
+            "binding": {
+              "node_id": "19",
+              "input_name": "scheduler"
+            }
+          },
+          {
+            "key": "seed",
+            "label": "Seed",
+            "type": "seed",
+            "default": "1078082399015246",
+            "group": "common",
+            "binding": {
+              "node_id": "19",
+              "input_name": "seed"
+            },
+            "min": "-1",
+            "max": "9223372036854775807"
+          },
+          {
+            "key": "batch_size",
+            "label": "张数",
+            "type": "integer",
+            "default": 1,
+            "group": "common",
+            "binding": {
+              "node_id": "28",
+              "input_name": "batch_size"
+            },
+            "min": 1,
+            "max": 100,
+            "step": 1
+          }
+        ]
+      },
+      "default_recipe_id": "turbo_standard",
+      "generation_recipes": [
+        {
+          "id": "turbo_preview",
+          "parameters": {
+            "steps": 8,
+            "cfg": 1.0,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "46",
+              "class": "LoraLoaderModelOnly",
+              "input": "lora_name",
+              "value": "anima-turbo-lora-v0.2.safetensors",
+              "choices": []
+            }
+          ]
+        },
+        {
+          "id": "turbo_standard",
+          "parameters": {
+            "steps": 10,
+            "cfg": 1.0,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "46",
+              "class": "LoraLoaderModelOnly",
+              "input": "lora_name",
+              "value": "anima-turbo-lora-v0.2.safetensors",
+              "choices": []
+            }
+          ]
+        },
+        {
+          "id": "turbo_upper",
+          "parameters": {
+            "steps": 12,
+            "cfg": 1.0,
+            "sampler": "er_sde",
+            "scheduler": "simple"
+          },
+          "errors": [],
+          "remote_issues": [
+            {
+              "kind": "missing_weight",
+              "node": "46",
+              "class": "LoraLoaderModelOnly",
+              "input": "lora_name",
+              "value": "anima-turbo-lora-v0.2.safetensors",
+              "choices": []
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

@@ -22,8 +22,15 @@ if not (V3_ROOT / "web" / "dist" / "index.html").is_file():
 if not (PACK_SOURCE / "data-pack.json").is_file() or not (PACK_SOURCE / "reference.db").is_file():
     raise SystemExit(f"V3 data pack is incomplete: {PACK_SOURCE}")
 
+from anima_prompt_studio_v3.storage.bundled_examples import bundled_example_source
+from anima_prompt_studio_v3.storage.official_examples import OfficialPack
+EXAMPLE_SOURCE = bundled_example_source()
+OfficialPack.validate(EXAMPLE_SOURCE)
+
 datas = [
+    (str(EXAMPLE_SOURCE), f"anima_prompt_studio_v3/example_packs/{EXAMPLE_SOURCE.name}"),
     (str(V3_PACKAGE / "configs"), "anima_prompt_studio_v3/configs"),
+    (str(V3_PACKAGE / "seed_data"), "anima_prompt_studio_v3/seed_data"),
     (str(V3_ROOT / "web" / "dist"), "anima_prompt_studio_v3/web/dist"),
     (str(V2_PACKAGE / "configs"), "anima_prompt_studio/configs"),
     (str(PACK_SOURCE), f"data-packs/{PACK_SOURCE.name}"),
@@ -33,6 +40,9 @@ hiddenimports = sorted(
     set(
         collect_submodules("anima_prompt_studio.services.remote")
         + collect_submodules("anima_prompt_studio_v3.adapters.v2")
+        + collect_submodules("anima_prompt_studio_v3.runtime")
+        + collect_submodules("anima_prompt_studio_v3.remote")
+        + collect_submodules("anima_prompt_studio_v3.storage")
     )
 )
 

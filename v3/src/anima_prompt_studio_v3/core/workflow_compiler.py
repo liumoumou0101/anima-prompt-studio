@@ -1,0 +1,266 @@
+from __future__ import annotations
+
+import copy
+import secrets
+from dataclasses import dataclass, field
+from typing import Any
+
+from anima_prompt_studio.domain.execution_models import (
+    HIRES_FIX_WORKFLOW_KIND,
+    RemoteProfile,
+    WorkflowBinding,
+    WorkflowProfile,
+)
+from anima_prompt_studio.domain.models import PromptJob
+from .model_versions import model_matches_workflow
+from .lora_resolution import apply_slot
+from .workflow_parameters import resolve_generation_parameters
+
+
+class WorkflowRenderError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class WorkflowRenderResult:
+    workflow: dict[str, Any]
+    resolved_seed: int
+    checkpoint_name: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class V3WorkflowCompiler:
+    CORE_BINDINGS = {
+        "positive_prompt",
+        "negative_prompt",
+        "checkpoint",
+        "seed",
+        "steps",
+        "cfg",
+        "sampler",
+        "scheduler",
+        "width",
+        "height",
+        "batch_size",
+        "filename_prefix",
+    }
+
+    def validate_profile(self, profile: WorkflowProfile) -> list[str]:
+        errors: list[str] = []
+        missing = sorted(self.CORE_BINDINGS - profile.bindings.keys())
+        if missing:
+            errors.append("缺少工作流绑定：" + ", ".join(missing))
+        for field_name, binding in profile.bindings.items():
+            node = profile.api_workflow.get(binding.node_id)
+            if not isinstance(node, dict):
+                errors.append(f"{field_name} 绑定的节点不存在：{binding.node_id}")
+                continue
+            inputs = node.get("inputs")
+            if not isinstance(inputs, dict) or binding.input_name not in inputs:
+                errors.append(f"{field_name} 绑定的输入不存在：{binding.node_id}.{binding.input_name}")
+        for index, slot in enumerate(profile.lora_slots, 1):
+            node = profile.api_workflow.get(slot.node_id)
+            if not isinstance(node, dict):
+                errors.append(f"LoRA 插槽 {index} 的节点不存在：{slot.node_id}")
+                continue
+            inputs = node.get("inputs", {})
+            for input_name in (slot.name_input, slot.model_strength_input, slot.clip_strength_input):
+                if input_name is not None and input_name not in inputs:
+                    errors.append(f"LoRA 插槽 {index} 的输入不存在：{slot.node_id}.{input_name}")
+        return errors
+
+    def render(
+        self,
+        job: PromptJob,
+        workflow_profile: WorkflowProfile,
+        remote_profile: RemoteProfile,
+        checkpoint_logical_name: str,
+        run_id: str,
+    ) -> WorkflowRenderResult:
+        errors = self.validate_profile(workflow_profile)
+        if errors:
+            raise WorkflowRenderError("；".join(errors))
+        compatible_models = workflow_profile.compatible_model_profiles
+        if not compatible_models:
+            raise WorkflowRenderError(
+                f"工作流 {workflow_profile.display_name} 尚未声明兼容模型，不能安全提交。"
+            )
+        if compatible_models and not model_matches_workflow(job.model_profile_id, workflow_profile):
+            raise WorkflowRenderError(
+                f"工作流 {workflow_profile.display_name} 不支持模型配置 {job.model_profile_id}。"
+            )
+
+        if job.model_profile_id == "moss_image_sft_int8" and any(value % 16 for value in (job.generation_params.width, job.generation_params.height)):
+            raise WorkflowRenderError("MOSS 宽高必须为 16 的倍数。")
+        workflow = copy.deepcopy(workflow_profile.api_workflow)
+        seed = job.generation_params.seed
+        if seed < 0:
+            seed = secrets.randbelow(2**63 - 1)
+        checkpoint_binding = workflow_profile.bindings.get("checkpoint")
+        template_checkpoint = ""
+        if checkpoint_binding is not None:
+            template_checkpoint = str(
+                workflow.get(checkpoint_binding.node_id, {})
+                .get("inputs", {})
+                .get(checkpoint_binding.input_name, "")
+            )
+        checkpoint = template_checkpoint
+        params = job.generation_params
+        resolved_parameters = resolve_generation_parameters(workflow_profile, params,
+            job.integration_metadata.get("workflow_parameter_overrides", {}),
+            requested_schema=job.integration_metadata.get("parameter_schema"))
+        if "seed" in resolved_parameters["values"]:
+            resolved_parameters["values"]["seed"] = str(seed)
+        common_values: dict[str, Any] = {
+            "positive_prompt": job.positive_prompt,
+            "negative_prompt": job.negative_prompt,
+            "checkpoint": checkpoint,
+            "seed": seed,
+            "width": params.width,
+            "height": params.height,
+            "batch_size": params.batch_size,
+            "filename_prefix": f"Anima_{run_id[:8]}",
+        }
+        values = dict(common_values)
+        for field_name in ("text_encoder", "text_encoder_type", "vae", "model_shift"):
+            if field_name in workflow_profile.runtime_assets:
+                values[field_name] = workflow_profile.runtime_assets[field_name]
+        # Explicit job parameters always win, including historical recipe names.
+        values.update({
+            "steps": params.steps, "cfg": params.cfg,
+            "sampler": params.sampler, "scheduler": params.scheduler,
+        })
+        values.update(resolved_parameters["values"])
+        values["seed"] = seed
+        for field_name, value in values.items():
+            binding = workflow_profile.bindings.get(field_name)
+            if binding is not None:
+                self._set_binding(workflow, binding, value)
+
+        metadata: dict[str, Any] = {
+            "compiler": "v3-workflow/1",
+            "base_sampler": self._sampler_snapshot(workflow, workflow_profile.bindings.get("seed")),
+            "workflow_kind": workflow_profile.workflow_kind,
+            "runtime_assets": self._runtime_asset_snapshot(workflow),
+            "workflow_parameters": resolved_parameters,
+        }
+        if workflow_profile.workflow_kind == HIRES_FIX_WORKFLOW_KIND:
+            refiner_seed = (seed + 1) % (2**63 - 1)
+            refiner_seed_binding = workflow_profile.bindings.get("refiner_seed")
+            if refiner_seed_binding is None:
+                raise WorkflowRenderError("高清修复工作流缺少第二阶段 Seed 绑定。")
+            self._set_binding(workflow, refiner_seed_binding, refiner_seed)
+            scale = self._binding_number(workflow, workflow_profile.bindings.get("upscale_factor"), 1.5)
+            metadata.update({
+                "operation": "txt2img_hiresfix",
+                "scale": scale,
+                "base_width": params.width,
+                "base_height": params.height,
+                "output_width": round(params.width * scale),
+                "output_height": round(params.height * scale),
+                "base_sampler": self._sampler_snapshot(workflow, workflow_profile.bindings.get("seed")),
+                "refiner_sampler": self._sampler_snapshot(workflow, refiner_seed_binding),
+            })
+
+        active = [selection for selection in job.lora_selection if selection.enabled]
+        if len(active) > len(workflow_profile.lora_slots):
+            raise WorkflowRenderError(
+                f"当前任务选择了 {len(active)} 个 LoRA，但工作流只有 "
+                f"{len(workflow_profile.lora_slots)} 个 LoRA 插槽。"
+            )
+        resolved = job.integration_metadata.get("resolved_lora_bindings")
+        by_slot = None
+        if resolved is not None:
+            by_slot = {item["slot_key"]: item for item in resolved}
+            slots = {f"{slot.node_id}.{slot.name_input}" for slot in workflow_profile.lora_slots}
+            selections = {item.logical_id: item for item in active}
+            if (len(by_slot) != len(resolved) or not set(by_slot).issubset(slots)
+                    or len(selections) != len(active)
+                    or len(resolved) != len(selections)
+                    or {item["logical_id"] for item in resolved} != set(selections)):
+                raise WorkflowRenderError("已解析的 LoRA 绑定与任务或工作流不一致。")
+            for item in resolved:
+                selection = selections[item["logical_id"]]
+                if (selection.file_name != item["remote_file_name"] or selection.weight != item["weight"]
+                        or selection.sha256 != item.get("sha256") or selection.clip_weight != item.get("clip_weight")):
+                    raise WorkflowRenderError("LoRA 绑定后的文件名或权重被改变。")
+        for index, slot in enumerate(workflow_profile.lora_slots):
+            if by_slot is not None:
+                binding = by_slot.get(f"{slot.node_id}.{slot.name_input}")
+                if binding is not None:
+                    apply_slot(slot, workflow, binding["remote_file_name"], binding["weight"], binding.get("clip_weight"))
+                    continue
+            elif index < len(active):
+                selection = active[index]
+                lora_name = selection.file_name or selection.logical_id
+                filename = selection.file_name if selection.sha256 else remote_profile.model_aliases.get(lora_name, lora_name)
+                apply_slot(slot, workflow, filename, selection.weight, selection.clip_weight)
+                continue
+            # Keep the template's valid filename but neutralize an unused fixed slot.
+            apply_slot(slot, workflow)
+
+        return WorkflowRenderResult(
+            workflow=workflow,
+            resolved_seed=seed,
+            checkpoint_name=checkpoint,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _set_binding(workflow: dict[str, Any], binding: WorkflowBinding, value: Any) -> None:
+        workflow[binding.node_id]["inputs"][binding.input_name] = value
+
+    @staticmethod
+    def _binding_number(
+        workflow: dict[str, Any],
+        binding: WorkflowBinding | None,
+        fallback: float,
+    ) -> float:
+        if binding is None:
+            return fallback
+        value = workflow.get(binding.node_id, {}).get("inputs", {}).get(binding.input_name, fallback)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    @staticmethod
+    def _sampler_snapshot(
+        workflow: dict[str, Any],
+        binding: WorkflowBinding | None,
+    ) -> dict[str, Any]:
+        if binding is None:
+            return {}
+        inputs = workflow.get(binding.node_id, {}).get("inputs", {})
+        return {
+            key: inputs[key]
+            for key in ("seed", "steps", "cfg", "sampler_name", "scheduler", "denoise")
+            if key in inputs and not isinstance(inputs[key], (list, tuple, dict))
+        }
+
+    @staticmethod
+    def _runtime_asset_snapshot(workflow: dict[str, Any]) -> dict[str, Any]:
+        fields = {
+            "unet_name": "checkpoint",
+            "ckpt_name": "checkpoint",
+            "clip_name": "text_encoder",
+            "type": "text_encoder_type",
+            "vae_name": "vae",
+            "shift": "model_shift",
+        }
+        snapshot: dict[str, Any] = {}
+        for node in workflow.values():
+            if not isinstance(node, dict):
+                continue
+            class_type = str(node.get("class_type", "")).casefold()
+            inputs = node.get("inputs", {})
+            for input_name, output_name in fields.items():
+                value = inputs.get(input_name)
+                if isinstance(value, (str, int, float)) and (
+                    (input_name in {"unet_name", "ckpt_name"} and "loader" in class_type)
+                    or (input_name in {"clip_name", "type"} and "cliploader" in class_type)
+                    or (input_name == "vae_name" and "vaeloader" in class_type)
+                    or (input_name == "shift" and "modelsampling" in class_type)
+                ):
+                    snapshot[output_name] = value
+        return snapshot

@@ -1,0 +1,31 @@
+{
+  "id": 144688,
+  "title": "Landscape with a Milkmaid",
+  "url": "https://clevelandart.org/art/1969.307",
+  "creation_date": "c. 1525",
+  "technique": "woodcut",
+  "creditline": "Mr. and Mrs. Charles G. Prasse Collection",
+  "accession_number": "1969.307",
+  "share_license_status": "CC0",
+  "creators": [
+    {
+      "description": "Niccolo Boldrini (Italian, c. 1500–after 1566)",
+      "role": "artist",
+      "qualifier": null
+    },
+    {
+      "description": "Titian (Italian, c. 1488–1576)",
+      "role": null,
+      "qualifier": "after"
+    }
+  ],
+  "api_url": "https://openaccess-api.clevelandart.org/api/artworks/144688",
+  "image_url": "https://openaccess-cdn.clevelandart.org/1969.307/1969.307_web.jpg",
+  "downloaded_on": "2026-09-10",
+  "downloaded_jpeg_sha256": "d42e32fb866db774922ba27a44b08445203aa12fb9754db8c459af6119114690",
+  "packaged_webp_sha256": "6a4a7f5a528ecc7a3f2cf6b50c67a21a3d53866dfe27fa836498220e58ddc1a6",
+  "conversion": "RGB JPEG decode to lossless WebP; same pixel dimensions and decoded RGB values",
+  "visual_review": "Reviewed by Codex from downloaded image; model quality evaluation pending",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "license_text_source": "https://raw.githubusercontent.com/ClevelandMuseumArt/openaccess/refs/heads/master/LICENSE"
+}

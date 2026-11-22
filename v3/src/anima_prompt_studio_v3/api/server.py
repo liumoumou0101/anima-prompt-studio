@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+import os
 import threading
 import time
 from pathlib import Path
@@ -26,7 +27,13 @@ class LocalApiServer:
         gallery_service: object | None = None,
         translation_service: object | None = None,
         app_version: str | None = None,
+        preferred_port: int = 0,
+        allow_local_sessions: bool = False,
+        desktop_instance_id: str = "",
     ) -> None:
+        if isinstance(preferred_port, bool) or not isinstance(preferred_port, int) or not 0 <= preferred_port <= 65535:
+            raise ValueError("本地首选端口必须为 0–65535 的整数。")
+        self.preferred_port = preferred_port
         if v2_database is not None and (
             generation_queue is not None or intent_parser is not None or gallery_service is not None
             or translation_service is not None
@@ -36,17 +43,18 @@ class LocalApiServer:
         self._owned_gallery_service = None
         self._owned_comfy_access = None
         if v2_database is not None:
+            from ..runtime.packaged_workflows import migrate_packaged_workflow_ownership
+            migrate_packaged_workflow_ownership(v2_database.resolve())
             try:
                 from ..adapters.v2 import (
                     build_v2_gallery_service,
-                    build_v2_generation_queue,
                     build_v2_intent_parser,
                     build_v2_local_translation_adapter,
-                    ManagedComfyAccess,
                 )
+                from ..runtime import build_generation_queue, ManagedComfyAccess
             except ModuleNotFoundError as exc:
                 raise RuntimeError("当前安装不包含 V2 兼容运行时。") from exc
-            self._owned_generation_queue = build_v2_generation_queue(v2_database)
+            self._owned_generation_queue = build_generation_queue(v2_database)
             generation_queue = self._owned_generation_queue
             intent_parser = build_v2_intent_parser(v2_database)
             gallery_service = build_v2_gallery_service(v2_database)
@@ -64,6 +72,8 @@ class LocalApiServer:
             translation_service=translation_service,
             comfy_access=self._owned_comfy_access,
             app_version=app_version,
+            allow_local_sessions=allow_local_sessions,
+            desktop_instance_id=desktop_instance_id,
         )
         self._socket: socket.socket | None = None
         self._server: uvicorn.Server | None = None
@@ -87,10 +97,18 @@ class LocalApiServer:
     def start(self, *, timeout: float = 10.0) -> "LocalApiServer":
         if self._thread is not None and self._thread.is_alive():
             return self
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock = _local_socket()
         try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.bind(("127.0.0.1", 0))
+            try:
+                sock.bind(("127.0.0.1", self.preferred_port))
+            except OSError:
+                if self.preferred_port == 0:
+                    raise
+                # Never reuse another application's listening socket. A failed
+                # preferred bind gets a fresh, exclusively owned random port.
+                sock.close()
+                sock = _local_socket()
+                sock.bind(("127.0.0.1", 0))
             sock.listen(128)
             self._port = int(sock.getsockname()[1])
             config = uvicorn.Config(
@@ -99,6 +117,7 @@ class LocalApiServer:
                 port=self._port,
                 log_level="warning",
                 access_log=False,
+                proxy_headers=False,
             )
             self._server = uvicorn.Server(config)
             self._socket = sock
@@ -124,6 +143,12 @@ class LocalApiServer:
             raise
 
     def stop(self, *, timeout: float = 10.0) -> None:
+        submissions = getattr(self.runtime.app.state, "submission_service", None)
+        if submissions is not None:
+            submissions.close()
+        workflow_jobs = getattr(self.runtime.app.state, "workflow_jobs", None)
+        if workflow_jobs is not None:
+            workflow_jobs.close()
         if self._server is not None:
             self._server.should_exit = True
         if self._thread is not None and self._thread.is_alive():
@@ -151,3 +176,18 @@ class LocalApiServer:
 
     def __exit__(self, *_args: object) -> None:
         self.stop()
+
+
+def _local_socket() -> socket.socket:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if os.name == "nt":
+            # Windows SO_REUSEADDR can permit a second bind to an active port.
+            # Exclusive binding protects both existing apps and this server.
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        return sock
+    except Exception:
+        sock.close()
+        raise

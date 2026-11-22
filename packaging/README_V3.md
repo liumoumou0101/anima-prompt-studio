@@ -41,3 +41,8 @@ PyInstaller 运行环境的 PATH 可能包含 Poppler 自带的 `icuuc.dll`/`icu
 ## CI 安装版
 
 `.github/workflows/release-v3.yml` 只允许手动触发，并要求提供数据包 HTTPS 地址及预期 SHA-256。CI 会在构建前校验下载归档，随后安装 Inno Setup、生成两种 Windows 产物，并在临时目录执行 Setup 静默安装、冻结 EXE 启动和卸载 smoke test。正式数据发布地址确定前，不会把临时下载源写死在工作流中。
+# 内置参考样例
+
+构建会校验并携带三图官方样例的图片、来源、NOTICE 和完整许可证。便携版/安装版可以运行 `AnimaPromptStudioV3.exe --install-bundled-examples`，安装到默认工作台目录后退出；自定义目录使用 `--workspace-db <路径>`。该操作无需前端或云主机，正常启动不会替换已激活的样例版本。
+
+Windows 构建脚本的 EXE smoke 增加了内置样例安装检查和重复启动的激活指针保护。wheel 的实际 sdist → wheel → 独立目录安装路径由 `test_bundled_examples.py` 验证；这些检查不替代 Windows 产物本身的打包和安装验收。

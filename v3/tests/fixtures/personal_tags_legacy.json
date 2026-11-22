@@ -1,0 +1,15 @@
+{
+  "format": "anima-legacy-tags",
+  "version": 1,
+  "source_key": "fixture-legacy",
+  "categories": [
+    {"id": 1, "name": "人物", "parent_id": null, "description": "legacy root"},
+    {"id": 2, "name": "头发", "parent_id": 1, "description": "legacy child"},
+    {"id": 3, "name": "卷发", "parent_id": 2, "description": "legacy grandchild"}
+  ],
+  "tags": [
+    {"id": 10, "display_name": "长发", "content": "long hair", "aliases": ["长头发"], "category_id": 1, "category": "人物", "sub_category": "头发", "global_weight": 1.5, "extra_legacy": "first"},
+    {"id": 11, "display_name": "长发变体", "content": "long_hair", "aliases": ["长发"], "category_id": 1, "category": "人物", "sub_category": "头发", "global_weight": 1.0},
+    {"id": 12, "display_name": "片段", "content": "first, second\nthird", "aliases": [], "category_id": 1, "category": "人物", "sub_category": "Unknown", "global_weight": 9.0}
+  ]
+}

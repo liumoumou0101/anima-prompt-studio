@@ -1,0 +1,24 @@
+.scene-design { padding: 16px 0; border-block: 1px solid var(--line); }
+.scene-design__heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.scene-design__heading h3, .scene-design__heading h4 { margin: 0; font-size: 15px; }
+.scene-design__heading p { margin: 5px 0 12px; color: var(--muted); font-size: 12px; }
+.scene-design__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.scene-design__field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.scene-design__field > label { font-size: 12px; font-weight: 600; }
+.scene-design__field select, .scene-design__field input { width: 100%; min-width: 0; padding: 8px; color: var(--text, inherit); background: var(--panel); border: 1px solid var(--line-bright); border-radius: 5px; }
+.scene-design__field select { min-height: 37px; }
+.scene-design__field small, .scene-design__note, .scene-design__context, .scene-design__status { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.scene-design__selection, .scene-design__status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
+.scene-design__selection { color: var(--accent); font-size: 11px; }
+.scene-design__target { display: flex; flex-direction: column; gap: 5px; color: var(--muted); }
+.scene-design__custom { display: flex; gap: 5px; }
+.scene-design__status, .scene-design__context { margin-top: 12px; }
+.scene-design__context p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.scene-design button { white-space: normal; }
+.scene-design__review, .scene-design__suggestion { padding: 12px; margin-top: 10px; border: 1px solid var(--line); background: var(--panel-raised); border-radius: 5px; }
+.scene-design__review button + button { margin-left: 8px; }
+.scene-design__advice { margin-top: 16px; }
+.scene-design__suggestion strong, .scene-design__suggestion p, .scene-design__suggestion li { font-size: 13px; line-height: 1.6; }
+.scene-design__suggestion p { margin: 6px 0; color: var(--muted); }
+.scene-design__suggestion ul { padding-left: 20px; margin: 8px 0; }
+.scene-design__error { color: var(--danger); font-size: 13px; }

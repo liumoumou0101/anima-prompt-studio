@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f6f2">
+  <title>ANIMA · 工作台交互预览</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="studio">
+  <header class="topbar">
+    <div class="brand">ANIMA<span>Prompt Studio</span></div>
+    <div class="project"><span class="project-divider"></span><strong>黄昏街角</strong><span class="preview-badge">交互预览</span></div>
+    <div class="top-actions"><button id="reset" class="text-button">重置演示</button><button id="open-history" class="button">创作记录 <span id="history-count" class="count">2</span></button></div>
+  </header>
+
+  <nav class="compact-tabs" aria-label="工作区视图"><button id="view-images" aria-pressed="true">图片预览</button><button id="view-prompt" aria-pressed="false">提示词</button><span>交互预览 · 示例数据</span></nav>
+  <main class="workspace">
+    <section class="editor" aria-labelledby="editor-heading">
+      <div class="section-head"><div><p class="eyebrow">当前创作</p><h1 id="editor-heading">提示词</h1></div><span id="draft-status" class="status-label">已就绪</span></div>
+      <div class="edit-toolbar"><div class="undo-group"><button id="undo" class="small-button" disabled>撤销</button><button id="redo" class="small-button" disabled>重做</button></div><span id="undo-label">暂无可撤销操作</span></div>
+      <div id="source-line" class="source-line"><img id="source-thumb" src="assets/red.png" alt="当前创作来源"><div><span>当前起点</span><strong id="source-title">外套换成红色</strong></div></div>
+      <div class="editor-content">
+        <div class="field-head"><label for="positive">正向提示词</label><span>直接编辑，即可生图</span></div>
+        <textarea id="positive" class="prompt-text" spellcheck="false" aria-describedby="prompt-help"></textarea>
+        <p id="prompt-help" class="quiet">生成图片始终使用这里的文字和下方选定的条件。</p>
+        <details class="negative-panel"><summary>负向提示词 <span>展开编辑</span></summary><label class="sr-only" for="negative">负向提示词</label><textarea id="negative" spellcheck="false"></textarea></details>
+        <div class="change-note"><span class="note-label">最近一步</span><p id="latest-change">外套换成红色，其他保持。</p><button id="show-diff" class="text-button">查看本次文字变化</button><div id="prompt-diff" hidden></div></div>
+      </div>
+      <div class="editor-foot"><span class="live-dot"></span>修改可撤销，历史图片会保留</div>
+    </section>
+
+    <section class="results" aria-labelledby="results-heading">
+      <div class="section-head results-head"><div><p class="eyebrow">看结果，再继续调整</p><h2 id="results-heading">图片预览</h2></div><button id="compare" class="button" aria-pressed="false">对比上一张</button></div>
+      <div class="preview-surface" id="preview-surface">
+        <figure id="comparison-figure" hidden><img id="comparison-image" src="assets/blue.png" alt="用于对比的上一张图片"><figcaption id="comparison-caption">蓝外套 · 初始画面</figcaption></figure>
+        <figure class="main-figure"><img id="main-image" src="assets/red.png" alt="当前查看的图片：红外套女性手捧花束站在街道"><figcaption><span id="image-title">外套换成红色</span><span class="sample-label">已有样例</span></figcaption></figure>
+        <div id="busy-overlay" class="busy-overlay" hidden><span class="spinner"></span><strong id="busy-label">正在更新提示词</strong><span>交互演示，不调用模型</span></div>
+      </div>
+      <div class="image-info"><span id="image-match">图片使用的提示词与当前一致</span><button id="show-used" class="text-button">查看实际用词</button></div>
+      <div class="restore-bar"><div><strong>想回到这一步？</strong><span>载入这张图的提示词和当时设置</span></div><div class="restore-actions"><button id="restore-image" class="button">从这张继续</button><button id="prompt-only" class="text-button">只用提示词</button></div></div>
+      <div class="filmstrip-head"><span>本次创作的图片</span><span id="image-count">2 张</span></div>
+      <div id="filmstrip" class="filmstrip" aria-label="本次创作图片列表"></div>
+    </section>
+  </main>
+
+  <footer class="composer">
+    <div class="conditions">
+      <label>模型<select id="model"><option>Turbo v1.1</option><option>Aesthetic v1.1</option><option>ANIMA Base</option></select></label>
+      <label>工作流<select id="workflow"><option>基础文生图</option><option>细节增强</option></select></label>
+      <label>尺寸<select id="size"><option value="640x832">640 × 832</option><option value="896x1152">896 × 1152</option><option value="1024x1024">1024 × 1024</option></select></label>
+      <button id="more-settings" class="text-button" aria-expanded="false">更多参数</button>
+      <span class="demo-note">预览模式 · 使用已有样例图</span>
+    </div>
+    <div id="advanced" class="advanced" hidden><label>种子<input id="seed" value="20260918"></label><label>步数<input id="steps" type="number" min="1" max="150" value="10"></label><label>CFG<input id="cfg" type="number" min="0" max="30" step="0.1" value="1"></label><span>修改后可以直接生成</span></div>
+    <div class="composer-top"><label for="delta">这次想怎么改？</label><span id="pending-note">写下修改意见，再更新提示词</span></div>
+    <div class="composer-row"><textarea id="delta" rows="2" placeholder="例如：外套换成蓝色，人物和背景保持不变"></textarea><div class="composer-buttons"><button id="update" class="button update-button">更新提示词</button><button id="generate" class="button primary">生成图片</button><button id="combined" class="button combined">更新并生图</button></div></div>
+    <div class="composer-bottom"><div class="suggestions"><span>试一下</span><button data-suggestion="外套换成蓝色，其他保持">外套换蓝色</button><button data-suggestion="背景改为月夜，人物保持">背景改为月夜</button><button data-suggestion="增强暖色光照">增强暖色光照</button></div><span id="action-message" role="status" aria-live="polite">更新后直接生效，不用再确认采用</span></div>
+  </footer>
+</div>
+
+<dialog id="history-dialog" class="history-dialog" aria-labelledby="history-title">
+  <div class="drawer-head"><div><p class="eyebrow">按想法和图片找回</p><h2 id="history-title">创作记录</h2></div><button id="close-history" class="button">关闭</button></div>
+  <p class="drawer-intro">恢复前会保留当前草稿。恢复错了，也可以撤销。</p>
+  <div id="history-list" class="history-list"></div>
+</dialog>
+
+<dialog id="used-dialog" class="used-dialog" aria-labelledby="used-title"><div class="drawer-head"><div><p class="eyebrow">这张图片的生成记录</p><h2 id="used-title">实际使用的内容</h2></div><button id="close-used" class="button">关闭</button></div><div id="used-content"></div></dialog>
+<script type="module" src="app.js"></script>
+</body>
+</html>

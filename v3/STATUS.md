@@ -1,266 +1,101 @@
 # V3 开发状态
 
-当前开发版本：`0.1.0`（工作流级生成配方与参数能力契约）
+## 工作流清理与角色画师标签闭环（2026-10-29）
 
-更新日期：2026-08-30
+清理25个旧版、重复、未适配及实验工作流，原35项保留10项（9个主生图工作流与图库放大专用源）。使用持久移除标记和完整版本归档，重启不复现；MOSS、2.9B预览和图库放大不因当前缺权重而删除。原始记录、历史图片和冻结图保留，带有效快照的历史会话无需当前目录条目也能继续生成。
 
-## 当前阶段
+角色、作品、手动或推荐画师的显式选择现立即同步到可见正向提示词，无需LLM；保存回执、直接请求与实际ComfyUI文本保持一致。手动/推荐画师统一显示与删除，角色正式别名在最近使用/收藏追加时去重。保留正文、换行、权重、中文原文及画师串；显示所选tag在当前正向中的实际数量。补齐删除最后tag时负向保留、历史跨环境合并、画师身份完整匹配等边界。另修复Windows参考导入首次锁文件初始化的真实并发竞态。
 
-Phase 3 主产品闭环已进入功能冻结与收尾：远程生成、画廊、标签/画师浏览、自然语言 Scene Draft、Literal/Hybrid、画师批量对照和候选快照持久化均已可用。当前版本不再扩展超出 ANIMA 纯提示词稳定能力的复杂语义结构，剩余工作集中在缺陷修复、固定 Seed 效果验收、发布整理和风险说明。
+最终后端1480通过、前端84文件862通过，TS与生产构建通过；TS/Python真实helper48组完全一致。隔离工作台UI实测添加/删除/保存重开/别名/两来源画师列表；3次云端出图核对到实际文本节点，含退役模板的冻结历史复用（现环境资源确认后，Seed20261030）。原项目源码/网页与恢复性清理均有哈希核对和SQLite备份。本机验收报告位于 `reports/workbench-cleanup-tags-20261029`；云端终止与关机回执另记于报告。
 
-## 已完成
+## 参数来源与全模型工作流校验修复（2026-10-29）
 
-- 顶层 `v3/` 独立工程、包、测试、Web 和工具目录。
-- V3 wheel 明确依赖 V2 核心包，干净环境安装时会一并解析画廊、远程执行和 PySide6 运行依赖，不再只在源码工作区内偶然可用。
-- V3.2 产品、架构、数据/API、评测、合规和路线文档。
-- 四个上游项目的开发起点 commit 快照。
-- `anima-v3-data/1` manifest 领域模型：
-  - 截止模式和 corpus size 模式一致性。
-  - 上游 HTTPS、40 位 commit 和许可字段。
-  - 安全相对路径、文件大小和 SHA-256。
-  - manifest 读取、写入和安装文件验证。
-- `reference.db` 构建器：
-  - CSV、JSON 和可选 Parquet 输入。
-  - tags、aliases、groups、Tag–Tag、Artist–Tag 和 FTS5 表。
-  - 当前 upstream 字段及旧 `count` 命名兼容。
-  - 普通标签与画师独立存储，支持同名而不发生 category 冲突。
-  - UTF-8/GB18030 CSV、当前别名 Parquet 字段和缺失目标过滤。
-  - 共现边双向展开、NPMI 计算或上游分数验证。
-  - SQLite integrity check、临时构建、默认拒绝覆盖。
-- 只读 `ReferenceDataStore`：
-  - 英文、中文、别名 FTS 搜索。
-  - 标签详情和标签组。
-  - 多 seed 相关标签聚合。
-  - 多标签画师推荐和 `@` 展示渲染。
-  - SQLite `mode=ro`。
-- 小型上游 fixtures，包含当前 schema 与错误 schema。
-- 数据构建 CLI、结构化 diagnostics 和锁定快照文件哈希。
-- 锁定 commit 的 40 MB 真实上游数据首次全量构建及健康查询。
-- `IntentElement`、`ConstraintGraph`、`IntentDocument` 领域合同：
-  - locked/excluded/required/user-selected/suggested/automatic 固定优先级。
-  - 关系边、悬空引用保护和 required/excluded 冲突检测。
-  - 输入 span、canonical tag、置信度和 provenance。
-- `PromptCandidate` 与 `CandidateSet` 领域合同：
-  - literal/conservative/artist/hybrid lane。
-  - 标签和画师来源、分数、理由及数据/算法版本追踪。
-  - literal 唯一基线、必需元素覆盖、excluded 泄漏和版本一致性硬约束。
-  - 可供后续 API/前端使用的 JSON Schema 导出。
-- 正式开发分支：`codex/v3-development`。
-- ANIMA 模型配置和 literal 主链路：
-  - Base/Aesthetic/Turbo 配置随 V3 包分发并做变体一致性校验。
-  - exact、alias 和本地中文精确词映射；不把模糊结果伪装成必需标签。
-  - canonical 下划线到 ANIMA 空格文本渲染，`score_*` 特殊 token 保留。
-  - 模型专用正向前缀、负向模板、排除项和 unresolved 警告。
-- 推荐候选纵向切片：
-  - Literal 只保留精确映射、用户确认和可追踪的本地 prose baseline。
-  - 相关标签与画师按可解释的建议池返回；它们默认不进入提示词。
-  - 已保留 `RecommendationLaneGenerator` 的 Conservative/Artist 实现，供将来的显式选择与对照流程复用，但默认 API 不调用它们。
-  - alias 解析后才显现的 required/excluded 冲突会在生成前阻断。
-- hybrid、validator 与静态 benchmark：
-  - 显式关系边或经 V2 抽取器产生的英文画面计划会生成 hybrid；普通结构化输入不会凭空猜测自然语言关系。
-  - validator 独立复核 tag 可解析性、渲染格式、模型/数据/算法版本和排除项。
-  - 自动 character/copyright 泄漏、重复 lane、可解析必需项误报 unresolved 会阻断放行。
-  - `anima-v3-benchmark` 输出结构化硬门槛报告。
-- 统一 localhost API：
-  - `LocalApiServer` 只绑定 `127.0.0.1` 随机端口，可由桌面壳安全启动和停止。
-  - 一次性 bootstrap token 交换短期 session；服务端只保存 token SHA-256。
-  - Host、Origin、Content-Type、请求体大小和 session 保护。
-  - `/health`、bootstrap、标签搜索/详情、相关标签和画师推荐端点。
-  - 数据包缺失时 bootstrap 降级，数据查询返回稳定错误合同。
-  - API 每次查询单独只读打开 reference.db，不把连接跨线程共享。
-  - 可选同源托管 React 生产构建，前端路由回退不会掩盖不存在的 API。
-- React/Vite/TypeScript 产品层：
-  - 独立依赖锁文件，不复用 V2 `web_gallery`。
-  - 一次性 bootstrap token 交换 session 后立即清理地址栏。
-  - 响应式应用壳、标签搜索、分类筛选、空/加载/离线/错误状态。
-  - 标签详情展示本地说明、别名、中文检索词、标签组和相关标签。
-  - 在线图片预览保留明确的离线占位，尚未静默发起联网请求。
-- 工作台候选闭环：
-  - `/workbench/candidates` 把结构化输入转换为 Intent，并生成 Literal 与显式关系 Hybrid；相关标签和画师单独作为建议池返回。
-  - 每次响应前运行独立 CandidateValidator，未知模型、冲突和不可生成输入返回稳定错误。
-  - 工作台支持正向概念、显式排除、`!` 锁定和 Base/Aesthetic/Turbo 配置。
-  - Literal 与显式关系 Hybrid 使用同一 DTO，逐条展示正负提示词、标签来源和 unresolved 说明；选择池不会静默成为候选内容。
-  - 正负提示词可一键复制；工作台与标签浏览器保留为并列入口。
-- 自然语言输入闭环：
-  - 默认 `/local-natural/candidates` 使用 V2 `TranslationService`、原文精确索引和 V3 标签数据；不调用 AI API、V2 UI、`PromptPipeline` 或 `PromptCompiler`。
-  - 结构化概念页签同样接受中文概念而不要求用户输入 canonical；无关系图的中文条目会复用同一 Scene Draft 消歧与译文，明确排除项单独进入负向提示词。
-  - 响应保留 `scene_draft`：已确认、待确认建议、未命中内容、原文证据与译文彼此分离。用户确认标签时复用当前译文重新编译，不重新翻译或解析。
-  - Scene Draft 已按参考数据支持事实分层、可见实体锚点和人工属性归属；单实体只给归属建议，不会自动确认或改写 Literal。
-  - 首个显式关系切片支持在服装归属确认后单独确认 `wearing`；关系只写入 ConstraintGraph 与 Hybrid，Literal 保持不变，并可随工作台候选快照保存和恢复。
-  - 没有安全标签命中时，Literal 使用 `local_prose_baseline` 保留译文，避免 422 或擅自增加 `1girl` 等内容。
-  - `/intent/parse` 与 `V2NaturalLanguageIntentAdapter` 保留为未来明确触发的 AI 辅助拆解，不是前端默认主路径。
-  - 工作台可在“结构化概念”和“自然语言描述”之间切换，自然语言正文、选中的建议和输入模式随工作台草稿保存。
-- V2 本地翻译薄适配：
-  - `V2LocalTranslationAdapter` 仅复用 `TranslationService`，禁止引入 V2 `PromptPipeline`、`PromptCompiler` 或 UI。
-  - 已安装 Marian 模型及运行依赖时按需、本地文件限定加载；否则自动使用内置离线基础翻译，不触发下载。
-  - `/translation` 提供独立英译预览；工作台可将翻译作为可编辑 prose baseline，但不会把它或其索引结果静默并入 required 标签。
-- 独立工作台状态层：
-  - `.local/state/workspaces.db` 与只读参考数据包物理分离。
-  - 工作台创建、列表、读取、更新和软删除 API；每条记录包含 revision 和 UTC 时间。
-  - `BEGIN IMMEDIATE` 加 revision 乐观锁，旧标签页更新稳定返回 409，不发生静默覆盖。
-  - Web 工作台支持保存、刷新后重新打开、当前 revision 展示，以及 50 步本地撤销/恢复。
-  - 冲突时保留页面内未保存编辑，并提示重新打开后人工合并。
-- V2 生图能力复用桥：
-  - `CandidateToV2PromptJobAdapter` 把已验证 V3 候选和 Intent 转为现有 V2 `PromptJob`，不依赖 PySide UI。
-  - V3 已改为工作流级生成配方：配方随目标返回，包含用途、证据等级、实际参数、可编辑/固定能力和多阶段快照，不再复制 V2 的模型三档数值。
-  - DMDX 四步和 HiRes 分阶段参数由真实工作流模板锁定；普通 Turbo 约束为 8–12 Steps/CFG 1；Base/Aesthetic 将稳定基线、创意风格和待验证细节实验分开表达。
-  - Web 工作台在生成规格区选择云主机、工作流和对应配方；手动调参会标记为“自定义参数”，固定字段只读并说明原因，HiRes 显示基础/精修两个阶段。
-  - 工作区持久化远程目标和工作流 ID，重新打开时不再静默套用最近一次全局目标。
-  - 服务端在入队前校验配方与工作流能力，阻止普通 Turbo 参数覆盖 DMDX；V3 HiRes 的声明基础参数会写入实际基础节点。
-  - V3 候选、Intent、工作区 revision 和版本信息作为不透明快照进入 V2 任务及结果 manifest。
-  - `/generation-requests/preview` 可在不发起远程请求的情况下检查桥接结果；bootstrap 明确报告 V2 runtime 是否可用。
-  - V2 `RemoteExecutionCoordinator` 仅新增向后兼容的预创建 run 入口；伪远程端到端流程确认 SSH/ComfyUI/工作流/归档主链仍直接复用。
-  - 无 UI 单工作线程 FIFO 队列支持等待上限、排队取消、快照执行与安全停止。
-  - 生成幂等键进入 V2 run 快照，API 服务重启后仍不会重复提交。
-  - V2 SQLite 的云主机、工作流、输出目录及系统凭据直接复用；job/run/artifact 持续写回原有仓库。
-  - 提交、查询和 `cancel_queued` API 已实现，响应不包含任务内部快照、工作流或凭据。
-  - 历史未完成 run 可使用 `retry_check` / `continue_download` 恢复，沿用原 remote prompt ID，不重复提交。
-  - Web 工作台只展示已确认指纹且兼容当前模型的 V2 目标，候选可直接提交并跳转生成页。
-  - 工作台可锁定一条无画师候选，从当前推荐池选择 1–20 位画师，以同一模型、工作流、生成配方、尺寸和固定 Seed 分别提交独立任务；不会混合画师或静默修改基准提示词。
-  - 批量任务及其画廊资产保留画师对照批次、画师顺序和 Seed；生成页和画廊可直接识别每张对照图。
-  - V2 本地等待队列默认容量提高至 20，以支持一次提交完整对照组。
-  - Web 生成页轮询展示进度、产物数量、安全错误和服务端明确授予的恢复动作。
-  - 加密私钥 passphrase 通过独立端点进入按云主机隔离的进程内保险箱；工作台只在提交前传递一次，退出时覆写清空，不进入工作区、run 快照、SQLite、manifest、日志或响应。
-  - RTX 4090 / ComfyUI 0.25.0 真实验收已完成：V3 Literal 候选经 API、V2 队列、SSH 隧道和 01 Base 工作流生成并下载 640×640 图片，run 达到 completed 且 manifest 保留候选/数据包版本。
-- V3 统一画廊首个切片：
-  - `V2GalleryReadService` 复用 V2 `load_gallery_batches`、manifest 恢复、资产状态和路径安全函数，不导入旧 GalleryServer 或 V2 UI。
-  - `/gallery/assets` 返回本地归档、项目/模型筛选项及 V3 candidate lane/算法/数据包版本线索。
-  - 原图和缩略图经统一 session API 提供；图片专用 HttpOnly SameSite cookie 只作用于 `/gallery/assets/`，不会把普通 API 改为 cookie 鉴权。
-  - V2 原缩略图算法已抽成 `GalleryThumbnailCache`，V2 旧画廊与 V3 共用确定性 WebP 缓存。
-  - V3 `/gallery` 支持本地网格、懒加载缩略图、项目/模型/文本筛选和包含正负提示词的 Lightbox。
-  - Lightbox 可标记保留/淘汰；状态继续写入 V2 用户库而不修改图片或只读参考数据包。
-  - “移入回收站”只移动到输出根目录的 `.trash`，不永久删除；活动中的放大/再生成源图会被拒绝。
-  - 回收站页面可浏览被移走的图片并恢复原路径；原位置冲突时沿用 V2 的安全重命名规则。
-  - 再生成与 1.5× 放大直接复用 V2 `GalleryUpscaleManager`、SSH/ComfyUI coordinator、持久化任务和重启恢复，不建立第二套远程实现。
-  - 处理任务页展示排队/运行/失败进度，并支持排队取消和失败重试；服务停止时安全取消尚未开始的队列项。
-  - 同一 4090 镜像已真实完成画廊同提示词再生成和 20 Tile Upscale；结果分别为 640×640 与严格 960×960，并重新进入统一画廊。
-- 候选快照持久化：
-  - 工作台新增可迁移的 `candidate_snapshot_json`，保存最后一次通过 validator 的完整 Intent、候选、校验报告和 data pack ID。
-  - 编辑、撤销或恢复输入会清除旧候选，避免把与当前草稿不一致的结果保存为快照。
-  - 刷新后打开工作台会恢复当时的候选卡片，可直接复制或提交同一不可变候选。
-  - 浏览器恢复快照同时保存工作台 ID 与 revision；刷新后不再把已保存工作台错误显示为“未保存”。
-- 数据包安装、原子更新与回滚：
-  - `DataPackManager` 将每个 pack 安装到不可变 `packs/<pack_id>/`，不直接替换 Windows 上可能仍被读取的 SQLite 文件。
-  - 安装前后都验证 manifest、文件大小/SHA-256、SQLite integrity、五类记录数、数据库契约、pack ID 和固定健康查询。
-  - 只有强校验通过后才用 `os.replace` 原子切换 `active.json`；写入失败保持旧状态并清理临时指针。
-  - 自动保留上一个活动版本，支持显式 activate 和双向 rollback；同 ID 不同内容、篡改包和损坏状态均拒绝处理。
-  - 跨进程更新锁在进程异常退出后由操作系统释放，不依赖删除可能遗留的锁文件。
-  - `anima-v3-data-pack` 提供 install/status/resolve/activate/rollback；`anima-v3-api --data-root` 从活动指针启动。
-- 可双击启动入口：
-  - 仓库根目录 `启动 ANIMA V3.cmd` 改为纯 ASCII 薄入口，由 `tools/start_anima_v3.ps1` 处理中文路径，自动使用项目 `.venv`，显式加入 V2/V3 开发源码路径，并调用与正式发布包共用的 `anima-v3-desktop` 启动核心。
-  - 首次运行会从随项目数据包完成强校验和安装，随后复用活动指针、现有 V2 数据库、V3 工作区数据库及已构建 Web。
-  - 启动成功后自动打开一次性 bootstrap URL；失败时保留窗口和中文错误，关闭窗口会停止 loopback API。
-  - 已复现并修复旧 `.cmd` 在中文目录下错误解析变量/续行符的问题；修复后的真实双击等价入口完成首次数据包安装、浏览器启动和 `/health` 检查。
-- Windows 发布工程：
-  - 独立 `AnimaPromptStudioV3.exe`、PyInstaller onedir spec、便携 ZIP 构建脚本和 Inno Setup 安装配置已完成；V2/V3 使用不同 AppId 和安装目录。
-  - 冻结包内置 V3 Web、V2 稳定服务、V3 配置和版本化数据包；首次启动仍经过正式安装器强校验，不直接信任内置数据库。
-  - 修复构建环境 Poppler ICU 污染导致的 QtCore WinError 127，spec 明确拒绝同名外部 ICU DLL。
-  - EXE 已分别通过无 V2 和真实 V2 数据库桥接 smoke；自然语言、远程队列和画廊适配器均可从冻结包装载。
-  - 发布脚本连续启动冻结 EXE 两次并验证活动指针和已安装 reference.db 哈希不变，覆盖首次安装和程序升级场景。
-  - 已用 374,484,992-byte 真实数据重建完整 alpha.1 便携包；最新 ZIP 为 265,776,659 bytes，SHA-256 `581897C5C2765DE809FD71B65522CCFC9D63A91F94DB4421D4BB56C24E163E77`，内容含 EXE、Web、manifest、reference.db、本地翻译和内存凭据通道，未携带 `.local`、临时脚本或源码测试数据。
-  - 手动触发的 Windows CI 要求数据包 HTTPS 地址和固定 SHA-256，使用 Inno Setup 生成安装版并执行静默安装、冻结 EXE 启动和卸载 smoke；临时数据源不会硬编码进仓库。
+修复新建/模型/工作流切换时沿用旧配方、参考入口默认值与持久化/提交参数不一致；保留手动覆盖、64位种子、随机模式、批量和历史冻结图。当前模型推荐值独立显示，历史旧参数可显式应用目标配方。仅切换执行环境保留历史图；显式改用当前模板更新版本和参数声明。
 
-## 测试结果
+能力缓存遗漏新安装资产时，在原准备时限内至多检测一次；精确报告缺节点/文件。HTTP云端目录可为无手动映射的新提交提供当前已认证映射副本，Miao基础图支持目录声明的共享TE。修复普通URL学习实例身份后的误冲突，以及info读取吞准备超时的问题。
 
-```text
-V3 Python 全量：88 passed
-V3 Web：30 passed；TypeScript typecheck 与 Vite production build 通过
-V2 全量回归：585 passed
-真实数据静态门槛：4 个 case/profile 组合全部通过
-真实数据 manifest：大小、SHA-256、SQLite integrity 和 5 类记录计数通过
-Web 依赖审计：npm 官方源 high 级别 0 vulnerabilities
-发布包：V2/V3 wheel 构建、内容扫描、干净安装、pip check、CLI 与 HTTP smoke 全部通过
-Windows 冻结包：真实数据 EXE 首启/升级/V2 桥接通过；便携 ZIP 内容与哈希检查通过
-真实远程闭环：RTX 4090 上基础生成、下载、画廊索引、再生成和 1.5× 放大全部通过
-收尾四图效果矩阵：3080 Ti / Aesthetic v1.1 复跑 4/4 completed；关系确认保持可选，默认负向 `artist name` 保留
-精致二次元插画探索：3080 Ti / Aesthetic v1.1 五方向 5/5 completed；人物环境、都市氛围和幻想场景已形成可保留基线
-```
+覆盖12模型档案、35当前工作流和6历史副本。当前环境9个ready工作流、6款已准备模型全部真实出图，共10张，含1344×1728高分修复。Turbo同896×1152、10步/CFG1两次端到端约12.2秒，云端执行4.5–4.8秒。缺权重的旧模型/MOSS及缺扩展的实验图列明原因，未下载或改写它们。
 
-V2 回归覆盖远程执行、Web 画廊、本地翻译保护和模型参数预设。本阶段对 V2 `PromptJob` 仅做向后兼容的不透明集成元数据扩展，585 项全量回归全部通过。
+最终后端1441通过、前端83文件839通过，TypeScript与生产构建通过。保留Gemini/Claude的UI修改，按原文件哈希基线备份并同步源码/网页构建到原项目，在队列空闲时重启7085服务并验证新构建、能力刷新、连接与文件哈希。未重打包EXE。详见本机 `reports/parameter-workflow-fix-20261029/验收报告.md`。
 
-发布包内容扫描确认未携带 `.local`、参考数据库、临时脚本、`.env` 或 `__pycache__`。从 wheel 安装后的 API 已用真实 `anima-v3-dso-0636f762-r1` 数据包完成一次性 session 交换、bootstrap 和 `1girl` 检索；同源保护也在缺失 `Origin` 时按设计拒绝写请求。终端中曾出现的中文乱码已核对为 PowerShell 输出编码问题，数据库内 `1个女孩` 的 Unicode 与 UTF-8 字节均正确。
+## MOSS 中文多画风工作台第一版（2026-10-27）
 
-真实 374,484,992-byte 数据包已通过管理器完成复制安装、强校验、原子激活、状态/路径解析和 `--data-root` API 启动。测试同时确认完整强校验只发生在安装、切换或显式 `resolve`，普通 API 冷启动不会重复扫描整个数据库。
+新增独立 `/moss` 入口、MOSS SFT INT8 家族与原生文生图工作流。支持中文原文直接出图、只整理润色、创意扩写；辅助结果可编辑且需显式采用，再单独出图。共用连接、认证、实例核验、生成意图、任务与画廊，ANIMA 标签/英文规则限定在原家族中。
 
-## 已验证的失败保护
+真实 L4 完成 9 张图（8 张 MOSS、1 张 ANIMA 切换对照）：原文/润色/扩写、平涂、真人竖图、带中文文字的宫廷二次元及 MOSS→ANIMA→MOSS。实际 PNG 工作流、文本、组件、参数与运行实例均核对；页面获取建议、采用和出图也已实测。最终后端 **1354 通过**（1 条既有弃用警告），前端 **81 文件 / 669 通过**，类型检查与生产构建通过；独立任务审查、整支审查和集中修复复查通过。使用与验收记录见 [MOSS 第一版说明](../docs/v3/MOSS_WORKBENCH_20261027.md)。本轮不重打包 EXE。
 
-- 路径穿越 manifest 文件名被拒绝。
-- `exact` 截止模式配 estimated corpus size 被拒绝。
-- Artist–Tag 缺少 `artist_post_count` 被拒绝，不留下数据库或 manifest 半成品。
-- 精确快照中，共现次数超过两端边际计数会被拒绝；近似快照会隔离统计并显式报告。
-- 画师与普通标签可安全同名。
-- 已存在的数据包默认不覆盖。
-- 只读 store 不能执行写 SQL。
-- ConstraintGraph 的重复 ID、悬空边和直接约束冲突被拒绝或显式报告。
-- literal 候选不能包含共现扩展或自动画师。
-- required/locked 元素必须被 literal 保留或列入 unresolved。
-- excluded canonical tag 不能进入任何候选正向标签。
-- 自动标签没有来源 element，或共现标签没有数据/算法版本时被拒绝。
-- Aesthetic 默认加入 `score_*`、Turbo 启用 negative prompt 等模型配置错误被拒绝。
-- 推荐策略允许自动 character/copyright 泄漏时被拒绝。
-- bootstrap token 复用、无 session、恶意 Host/Origin 和错误 Content-Type 被拒绝。
-- API 查询前后 reference.db SHA-256 保持不变。
-- SPA 深链接正常回退到 `index.html`，未知 `/api/v3/*` 不会误返回网页。
-- 实际 Uvicorn 工作线程中的 SQLite 连接不会跨线程复用。
-- 未知模型配置、无效工作台 intent 和候选内部验证失败不会伪装成成功响应。
-- 普通输入不会凭空生成 Hybrid；只有显式 relation edge 或明确的抽取画面计划才生成自然语言表达。
-- 自然语言适配器源码边界测试禁止引入 V2 UI、旧 PromptPipeline 或 PromptCompiler。
-- 本地翻译适配器边界测试禁止引入 V2 UI、旧 PromptPipeline/PromptCompiler 或远程模型下载调用。
-- 私钥 passphrase 测试确认其可到达 SSH tunnel，但不会出现在 SQLite 字节中，服务重启后配置状态恢复为未设置。
-- 未配置 AI API Key 时 `/intent/parse` 稳定返回 503，不伪装成本地解析成功。
-- 画廊原图/缩略图要求有效会话；目录穿越和 `.trash` 私有目录访问返回 404。
-- V3 画廊 adapter 边界测试禁止导入 V2 GalleryServer、PySide 或 UI。
-- 活动画廊处理任务的源图不能移入回收站；完成后才允许移动，状态记录同步清理。
-- 回收站恢复只接受 `.trash` 内受支持图片，目录越界不会产生文件操作。
-- 画廊处理队列沿用 V2 上限、重复任务、缺失提示词、缺失尺寸、工作流兼容和凭据检查。
-- 旧工作台数据库启动时只新增 nullable 快照列；没有快照的历史记录继续读取为 `null`。
-- 工作台状态不会写入 reference.db；创建、恢复、软删除和旧 revision 冲突均有 API 测试。
-- 真实远程报告不含 SSH 密码；临时 profile/credentials 只存在于验收进程内，镜像上的 3 个测试输出和 1 个上传副本已在下载、哈希及尺寸校验后删除。
+## Colab ANIMA 第一版兼容（2026-10-27）
 
-## 首次真实数据结果
+已接入有界云端模型目录、显式工作流文件映射和云端建议参数预览/应用；新增 WAI-ANIMA 1.0，保留其他五款模型默认。新版 Colab 支持按单模型准备，并给真实服务进程分配实例标识；本地目录、探测、预检、执行和恢复共用同一连接会话的持久身份记录，发现重建时拒绝旧请求。
 
-锁定来源：`DanbooruSearchOnline@0636f762694fc436b4ac472cf59b85d172eaaac4`。
+真实 L4 验收：六款 ANIMA 各完成 512×512 单图，Turbo 另完成 896×1152；同地址重启后旧连接请求被拒绝，更新同一连接后再出图成功，共 8 张。工作台中目录刷新、映射、参数保留、资源确认及图片回传已实测。此处保留 ANIMA 阶段记录；MOSS 后续交付见上方。
 
-```text
-原始文件：约 40 MB
-构建时间：约 2 分 17 秒
-峰值内存：约 667 MB
-reference.db：374,484,992 bytes
-tags：52,475
-artists：24,636
-aliases：14,122
-tag_edges：3,755,808
-artist_edges：614,772
-```
+最终 V3 后端 **1313 通过**，前端 **80 文件 / 654 通过**，TypeScript 与生产构建通过；Notebook 阶段根项目 619 通过，最终旧版远程/图库回归通过；独立审查及集中修复复查通过。详见 [使用与验收说明](../docs/v3/COLAB_ANIMA_COMPATIBILITY_20261027.md)。本轮交付源码和网页构建，安装包/便携 EXE 未重新生成。
 
-真实数据 diagnostics 已记录 1 个合并重复标签、25,907 个缺失目标别名、528 个与 canonical 冲突的别名、52 条未知 Tag–Tag 边、15 条未知 Artist–Tag 边，以及近似快照中的边际计数差异。`maid` 的英文搜索、中文详情、标签组、相关标签和画师推荐均已通过抽查；数据库大小和 SHA-256 复核通过。
+## 临时云端连接导入（2026-10-26，源码与网页构建验收）
 
-Phase 1 真实数据 smoke test 使用“女仆、双马尾、不要金发”得到：literal 为 `score_7, maid, twintails`；conservative 只增加 `maid headdress / maid apron / enmaided`；artist 在相同保守候选上增加单个 `@motizou`。三条 lane 都保留 `blonde hair` 排除项。
+设置页新增“导入临时连接”，支持粘贴 HTTPS API 地址和原始密钥、粘贴 Colab 连接 JSON，或选择最大 64 KiB 的 moss_connection.json。可新建或显式更新同一临时连接，保留名称、模型映射和工作流偏好；更新后重新核验资源。密钥独立存储于 Windows 凭据管理器，不进入数据库、任务或 localStorage。界面空密钥会明确清除旧认证，JSON 自带密钥仍可正常导入；HTTP 不显示 SSH 指纹/密码控件。
 
-`v3-static-v1` 已在真实数据包执行 4 个 case/profile 组合：8/8 required 保留、excluded 泄漏 0、自动 character/copyright 泄漏 0、validator 错误 0。显式 `wearing` 关系案例生成 literal/conservative/artist/hybrid 四条不同 lane。
+生成和图库新任务使用当前会话，已接受任务保留各自捕获配置；持久图库排队任务在重启后核对非秘密会话元数据，缺失或不匹配时在 coordinator/联网前拒绝，不会自动将旧任务发往新环境。旧 SSH/local 行为继续。未提供云端 runtime_id 时仍属于弱身份，临时链接支持不等于新增 MOSS 工作流。
 
-真实数据 API smoke test 已完成 session exchange、bootstrap、`maid` 搜索、`maid_uniform → maid` 详情解析、相关标签和画师推荐；数据包 ID 正确返回 `anima-v3-dso-0636f762-r1`。
+最终验证：V3 后端 **1245 项通过**（1 条既有 Starlette/AnyIO 弃用警告），完整前端 **77 个文件、630 项通过**，旧版远程/图库回归 **54 项通过**；TypeScript 与生产构建通过。构建使用 npm run build -- --emptyOutDir false；普通构建两次在转换后无诊断退出，原因未确认，保留既有大包提示。隔离数据上的真实 TLS/Bearer、JSON 文件选择/导入/更新、公开地址清除旧密钥、内嵌密钥恢复、准确端点展示、浅深主题及 390px 窄屏已检查；Windows 凭据使用独立测试条目完成保存/读取/删除。独立代码审查及恢复补丁复审均通过。
 
-真实浏览器 smoke test 已完成“女仆”中文搜索和 `maid` 详情导航；页面读取 52,475 标签的真实数据包，正确展示中文说明、5 个别名、3 个标签组和 12 个相关标签，浏览器控制台无警告或错误。
+原项目同步采用逐文件基线核对、代码与网页备份及 SHA-256 回读，不替换个人数据库或配置；回执及本机验证证据位于 reports/temporary-cloud-connections-20261026。真实 Colab/GPU 出图、MOSS 专用工作流与新安装包未验收，未推送或发布。使用方法见[临时连接说明](../docs/v3/TEMPORARY_CLOUD_CONNECTIONS_20261026.md)。下方数字和交付记录为历史，不作为本轮验证结果。
 
-真实浏览器工作台 smoke test 使用“锁定女仆、双马尾、排除金发”生成 3 条通过验证的候选：Literal 保持 `score_7, maid, twintails`，Conservative 增加 3 个可追踪共现标签，Artist 增加 `@motizou`；金发只进入负向提示词。一键复制、桌面和 390px 窄屏布局均通过，控制台无警告或错误。
+## 单一工作台（2026-10-25，本机源码交付）
 
-真实持久化 smoke test 已完成保存 revision 1、刷新页面、从独立状态库重新打开，并模拟另一个标签页推进到 revision 2。持有旧 revision 的页面收到 409 冲突提示，未保存的“咖啡厅”编辑仍保留，未发生静默覆盖。
+`codex/single-workbench-20261025` 已实现统一编辑工作台：`/direct` 恢复入口并入同一控制器，保留浅色/夜间/系统主题，移除 studio/editorial 布局选择；加入持久化操作链、不同范围的历史/图片继续、声明式参数与配方、独立 auto/pinned 执行策略及可恢复生成意图。原 `WorkbenchPage.tsx` 独有高级流程保留源码但不在主路由，不能宣称全部已迁入新界面。
 
-## 尚未开始
+本机主屏 2560×1440 已核实，2K 与等效缩放 CSS 视口、桌面/窄屏、浅深主题及记录面板 Escape 返回焦点有浏览器证据。最终后端全量 1142 项、前端全量 582 项通过，TypeScript 与生产构建通过。源码和 Web 构建已同步到原项目，原有未提交修改保留，并备份被替换的程序文件；通过原“启动 ANIMA V3.cmd”重启加载，个人配置和数据库未替换。真实 LLM 质量、云端/ComfyUI/GPU 出图和新安装包回合仍未验收，安装包未重打。详见[迁移与能力边界](../docs/v3/SINGLE_WORKBENCH_MIGRATION.md)及[当前设计 QA](web/design-qa.md)。
 
-- 数据包联网下载、发布索引和带宽中断续传。
-- 语义 embeddings 的体积、冷启动与内存测试。
-- 更多静态 benchmark 家族和正式生图 benchmark。
-- 工作台软删除恢复入口和多标签页可视化合并。
-- 在线标签图片预览、限流和缓存。
-- 用户 ComfyUI 环境的真实生图验收。
-- Illustrious（光辉系）、Pony 等后续模型族的独立 ModelProfile 与工作流兼容。
-- 将区域提示、姿势控制、局部重绘等 ComfyUI 操作编排下沉到产品层；该项属于更后续正式版本。
+以下为此前交付的历史记录；其中“四种外观”、fixed dock、旧测试数字和安装包状态均不能作为当前单一工作台的验证结论。
 
-## 下一步
+历史状态日期：2026-09-12。当时的本机交付为 `3.0.0-alpha.3`，Python/API 包版本仍为 `0.1.0`；当时的开发分支为 `feature/llm-workbench`，该轮源码尚未提交或推送。
 
-1. 按 [RELEASE_FINISH_CHECKLIST.md](RELEASE_FINISH_CHECKLIST.md) 完成当前 ANIMA 版本收尾，不再增加未经过生图证明的复杂语义结构。
-2. 保留四图机器报告与人工视觉复核作为当前 ANIMA 固定 Seed 基线，不为单张结果继续增加关系特判。
-3. 数据包正式下载地址确定后，在 Windows CI 实际生成并安装/卸载测试 Setup EXE。
-4. 在用户真实 ComfyUI 环境复核生成、恢复、再生成和放大。
+已接续完成四种外观与 LLM 画面设计辅助：工作室／编辑台 × 浅色／夜间，另有跟随系统策略。本机服务已重新构建并启动在 `http://127.0.0.1:9534`，原入口「启动 ANIMA V3.cmd」沿用个人数据。当前 UI 源码尚未重新打成安装包。详见 [本次接续交接](../docs/v3/SESSION_HANDOFF_2026-09-12.md)。
+
+## 个人标签超市（2026-09-29，隔离分支）
+
+`codex/personal-tag-market` 在独立工作区实施，尚未合并到原目录或发布安装包。功能包括独立个人标签库、分类和回收站、原文权重与快照组合、JSON 迁移，以及工作台追加预览和撤销。集成后端指定选择实际为 209 项通过、1 项既有参考样例安装失败；前端完整套件在修复前基线为 489 项通过，随后受影响范围 95 项通过。整分支独立审查已完成，发现的导入校验及三项边界／反馈问题均已修复；本次专项验证后端 46 项、前端 5 个文件 44 项通过，TypeScript 检查通过，未重跑完整套件。标准裸 `npm run build` 在默认目录清理时异常退出；`npm run build -- --emptyOutDir false` 在本次修复后再次完成压缩构建。隔离副本上的最终桌面／窄屏、浅／深色和工作台追加／撤销界面验收通过；修复专项复审记录保存在本地审计目录，详见 [交付记录](../docs/v3/PERSONAL_TAG_MARKET_20260929.md)。
+
+只读 PostgreSQL 导出后，实际个人库已导入 11,473 条标签和 174 个分类，原始内容、别名、旧权重元数据、源 ID 与分类父子关系已按迁移审计逐条核对；重复导入没有新增条目。原 PostgreSQL 未写入。浏览器初轮检查使用的是正式库的 **QA 副本**，并非正式用户库；正式库数据与备份路径见交付记录。
+
+下面的 2026-09-12 UI 状态与测试数字是此前版本记录，不代表本次功能的最终集成验证。
+
+## 最新 UI 接续验证
+
+- 后端全量 609 passed；前端全量 208 passed，最后参数定位与操作条修复另有受影响 55 项通过（当前共 209 项）。TypeScript 与生产构建通过。
+- 四种模式、草稿保留、建议失败、窄屏参数定位与实际参考库已在浏览器检查。真实 LLM 与 GPU 效果留待人工测试。
+
+## 此前非视觉功能交付
+
+- 角色、作品、画师分类补全：正式名称与有效别名优先，支持中文、键盘、输入法、多项粘贴、自由输入、最近使用、收藏和用户别名。
+- 标签篮与画师详情可带入当前或新会话，按类别写入、去重、保留草稿、允许撤销。普通标签在提示词编译中确定性保留；加载失败及响应丢失后可安全重试。
+- 导入 124 条社区参考并激活 3 条内置示例，本机共 127 条；支持模型、画师、LoRA 与内容筛选、原文复制及直接借用提示词。重复导入不会重复建档，未知来源参数保持未知。
+- 画师推荐增加本地提示词短语匹配和已有样图。生成结果可记录角色辨识、构图、结构、风格等人工观察，连同原图、原提示词、参数与任务来源归档。
+- 新用户目录可初始化运行库并创建首个连接；活跃会话续期、新标签页恢复、请求恢复重试、图库访问边界和桌面端口复用已补齐。
+- CI 增加完整 V3 与前端检查；Windows 构建增加空目录首连接及二次启动的数据保留验证，并限制打包清理路径。
+
+之前已加入的 Anima 2.9B Preview 与 AnimaYume 1.5 配置和工作流兼容能力包含在本次产物中，详见 [社区模型兼容](../docs/v3/COMMUNITY_MODELS_20260912.md)。本轮功能开发没有新增 LLM 或云端生图请求；模型效果仍由用户验收。
+
+## 此前非视觉版本的验证与产物
+
+- 最终 V3 后端 **581 项通过**，前端 **149 项通过**；TypeScript 和生产 Web 构建通过。此前 V2＋V3 联合 1147 项通过，后续后端变更由最终 V3 全量回归覆盖。
+- 实际浏览器已验证补全、键盘选择、收藏、跨页带入与撤销、草稿保留、参考缩略图与筛选、原提示词借用以及新标签页恢复。
+- `release/ANIMA-Prompt-Studio-V3-Portable-v3.0.0-alpha.3.zip` 与 `release/ANIMA-Prompt-Studio-V3-Setup-v3.0.0-alpha.3.exe` 已构建；冻结 EXE 空目录首次运行、HTTP 首连接和二次启动数据保留通过。
+- 本轮未重跑安装向导的安装／卸载，也未做新的云端画质对比。Web 单包体积提示留待后续加载与 UI 优化。
+
+## 接下来
+
+用户先按 [本次接续交接](../docs/v3/SESSION_HANDOFF_2026-09-12.md) 检查四种界面和画面设计流程，结合 [非视觉功能验收清单](../docs/v3/NON_UI_RELEASE_20260912.md) 测试日常操作与模型效果。参考资料缺 seed 或完整工作流时不宣称可精确复现；共现推荐与词库命中也不代表模型一定认识角色或画师。
+
+个人参考、会话、草稿和凭据不会自动随 Git 同步。数据位置、备份、迁移边界及产物验证回执见交付清单。标准发行包含词库及内置示例，个人收集的 124 条参考在本机用户数据中。
+
+## 当前文档
+
+- [非视觉功能交付与验收](../docs/v3/NON_UI_RELEASE_20260912.md)
+- [角色／作品／画师补全](../docs/v3/IDENTITY_COMPLETION_20260912.md)
+- [参考资料导入](../docs/v3/REFERENCE_COLLECTION_20260912.md)
+- [运行时与会话恢复](../docs/v3/RUNTIME_RECOVERY_20260912.md)
+- [本轮之前的项目审查](../docs/v3/audits/2026-09-12-project-review/REVIEW.md)
+- [历史状态全文](../docs/v3/HISTORY_THROUGH_20260912.md)（原 STATUS 完整保留；历史待办和测试数量不代表当前状态）

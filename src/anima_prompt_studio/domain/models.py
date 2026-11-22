@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_serializer, model_validator
 
 
 def utc_now() -> datetime:
@@ -160,7 +160,36 @@ class LoRAProfile(BaseModel):
     notes: str = ""
 
 
-class LoRASelection(BaseModel):
+class LoRAStackFields(BaseModel):
+    """Additional stack controls shared by submitted, required and frozen LoRAs."""
+    logical_id: str
+    file_name: str
+    sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    enabled: bool = True
+    clip_weight: float | None = Field(default=None, ge=-2, le=2, allow_inf_nan=False)
+
+    @model_serializer(mode="wrap")
+    def serialize_stack_fields(self, handler):
+        # Omit additive defaults to preserve stored job, requirement and idempotency hashes.
+        result = handler(self)
+        if self.sha256 is None:
+            result.pop("sha256", None)
+        if self.enabled:
+            result.pop("enabled", None)
+        if self.clip_weight is None:
+            result.pop("clip_weight", None)
+        return result
+
+    @model_validator(mode="after")
+    def validate_library_identity(self):
+        if self.sha256 or self.logical_id.startswith("library:") or self.file_name.startswith("anima_library/"):
+            if (self.sha256 is None or self.logical_id != f"library:{self.sha256}"
+                    or self.file_name != f"anima_library/{self.sha256}.safetensors"):
+                raise ValueError("库 LoRA 的文件路径、资源 ID 和 SHA-256 必须一致。")
+        return self
+
+
+class LoRASelection(LoRAStackFields):
     logical_id: str
     file_name: str = ""
     weight: float = 0.8

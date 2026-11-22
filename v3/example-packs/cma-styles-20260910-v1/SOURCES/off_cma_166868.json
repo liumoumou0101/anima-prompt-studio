@@ -1,0 +1,26 @@
+{
+  "id": 166868,
+  "title": "Portrait of Jean Ajalbert",
+  "url": "https://clevelandart.org/art/2009.116",
+  "creation_date": "c. 1893",
+  "technique": "charcoal with white chalk",
+  "creditline": "Bequest of Muriel Butkin",
+  "accession_number": "2009.116",
+  "share_license_status": "CC0",
+  "creators": [
+    {
+      "description": "Eugène Carrière (French, 1849–1906)",
+      "role": "artist",
+      "qualifier": null
+    }
+  ],
+  "api_url": "https://openaccess-api.clevelandart.org/api/artworks/166868",
+  "image_url": "https://openaccess-cdn.clevelandart.org/2009.116/2009.116_web.jpg",
+  "downloaded_on": "2026-09-10",
+  "downloaded_jpeg_sha256": "3f523ad573c6ab546cab1cb0c8a5f3514f624f206d787c04a7d8493111d39eed",
+  "packaged_webp_sha256": "96aa87737c7465b577cb796d9ce08b4a8fe724aea9043fb148ea3bea30948071",
+  "conversion": "RGB JPEG decode to lossless WebP; same pixel dimensions and decoded RGB values",
+  "visual_review": "Reviewed by Codex from downloaded image; model quality evaluation pending",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "license_text_source": "https://raw.githubusercontent.com/ClevelandMuseumArt/openaccess/refs/heads/master/LICENSE"
+}

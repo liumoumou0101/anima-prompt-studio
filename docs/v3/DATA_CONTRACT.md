@@ -1,5 +1,17 @@
 # V3 参考数据契约
 
+## 工作流运行时扩展（2026-09-06）
+
+这是用户执行数据，不属于可替换参考数据包。使用及边界见 [工作流管理](WORKFLOW_MANAGEMENT.md)。
+
+- Template：随包 WorkflowProfile（图、bindings、runtime_assets、compatible_model_profiles、workflow_kind）与 `anima-workflow-catalog/1` 清单组合。清单含 version/tier/model/source/license；revision 为规范 JSON SHA-256，运行时移除无引用尺寸编辑器节点后计算执行版本。
+- Capabilities：settings `workflow_capabilities:{remote}`，含 fingerprint、checked_at（Unix 秒）、object_info、devices、error；TTL 900 秒，不含凭据。
+- Binding：`workflow_mapping:{remote}:{workflow}`，含 revision、fingerprint、mapping；键为 `node_id.input_name`，仅允许服务器枚举中的模型资产。版本/配置不一致则失效。
+- UserWorkflow：保留原 workflow_profiles 表，导入分配 user:UUID，来源存 `workflow_source:{id}`；传输 schema `anima-user-workflow/1`，内含 profile。
+- `workflow_disabled:{id}` 为可逆停用；`workflow_version:{id}:{revision}` 保留官方版本，无自动清理。迁移先备份后写 schema 标记。
+- 任务 request_json 保存 workflow_snapshot/workflow_revision，画廊再生成 parameters 保存 workflow_snapshot；实际图和产物沿用 GenerationRun/Artifact，产物保存后才发布 completed。
+- 状态为 unchecked/stale/connection_failed/missing_nodes/invalid_inputs/mapping_stale/disabled/ready。资产缺失归入 invalid_inputs 并附具体错误。检测任务状态单列；generation_verified=false 不推断实际生图成功。
+
 状态：首版开发合同
 
 契约版本：`anima-v3-data/1`

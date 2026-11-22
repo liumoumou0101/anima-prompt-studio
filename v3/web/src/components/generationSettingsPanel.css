@@ -1,0 +1,21 @@
+.generation-settings-panel .generation-parameter-commit {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  display: grid;
+  gap: 8px;
+}
+.generation-settings-panel .generation-parameter-commit[data-pending="true"] { border-color: var(--accent); }
+.generation-settings-panel .generation-parameter-applied { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; line-height: 1.6; color: var(--text); }
+.generation-settings-panel .generation-parameter-commit p { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
+.generation-settings-panel .generation-parameter-commit p[role="alert"] { color: var(--danger); }
+.generation-settings-panel .generation-parameter-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.generation-settings-panel .generation-parameter-actions button { min-height: 36px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 5px; font-size: 13px; color: var(--text); background: var(--input-bg); cursor: pointer; }
+.generation-settings-panel .generation-parameter-actions button:first-child:not(:disabled) { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+.generation-settings-panel .generation-parameter-actions button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.generation-settings-panel .generation-parameter-actions button:disabled { color: var(--disabled-text); background: var(--disabled-bg); cursor: not-allowed; }

@@ -1,0 +1,201 @@
+import {useCallback, useEffect, useRef, useState} from "react";
+import {ArrowsOutSimple, CaretLeft, CaretRight, Copy} from "@phosphor-icons/react";
+import type {ConversationRecord, LocalConversation} from "../lib/conversation";
+import type {GenerationRunRecord} from "../lib/types";
+import {canRestoreRun, canUseRunPrompt, runSeedNote, runVersion, useWorkbenchArtifacts, useWorkbenchVersions, versionIntent, type WorkbenchHistoryVersion} from "../lib/workbenchHistory";
+import {ImagePreview} from "./ImagePreview";
+import {GallerySourcePreview} from "./GallerySourcePreview";
+import {RunInputDetails} from "./WorkbenchHistory";
+import {copyImageFileToClipboard} from "../lib/copyImage";
+import "./workbenchResults.css";
+
+export interface WorkbenchImageResultsProps {
+  record: ConversationRecord; local: LocalConversation; runs: GenerationRunRecord[]; run: GenerationRunRecord | null;
+  disabled?: boolean; onSelectRun(run: GenerationRunRecord): void;
+  onContinueRun?(run: GenerationRunRecord): void;
+  onRestoreRun(run: GenerationRunRecord, onlyPrompt: boolean, version?: WorkbenchHistoryVersion): void;
+}
+
+function batchLabel(run: GenerationRunRecord, versions: WorkbenchHistoryVersion[]) {
+  return `${versionIntent(runVersion(run, versions))} · ${new Date(run.created_at).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})} · ${run.artifact_count} 张`;
+}
+
+function isEditableElement(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return true;
+  const role = target.getAttribute("role");
+  if (role && ["slider", "spinbutton", "textbox", "combobox", "searchbox", "tab", "radiogroup", "radio"].includes(role)) return true;
+  if (target.closest("dialog[open]")) return true;
+  return false;
+}
+
+export function WorkbenchImageResults({record, local, runs, run, onSelectRun, onRestoreRun, onContinueRun, disabled}: WorkbenchImageResultsProps) {
+  const selectedRun = run || runs[0] || null;
+  const versions = useWorkbenchVersions(record);
+  const choices = selectedRun && !runs.some(item => item.id === selectedRun.id) ? [selectedRun, ...runs] : runs;
+  const [selectedImages, setSelectedImages] = useState<Record<string, string>>({});
+  const [compare, setCompare] = useState(false), [baselineId, setBaselineId] = useState("");
+  const [baselineImages, setBaselineImages] = useState<Record<string, string>>({});
+  const [showInput, setShowInput] = useState(false), [preview, setPreview] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [copyResult, setCopyResult] = useState<{key: string; error?: string} | null>(null);
+  const copyInFlight = useRef(false);
+  const rootRef = useRef<HTMLElement>(null);
+  const pictures = useWorkbenchArtifacts(selectedRun);
+  const baselineRun = compare ? choices.find(item => item.id === baselineId) || choices.find(item => item.id !== selectedRun?.id) || selectedRun : null;
+  const baseline = useWorkbenchArtifacts(baselineRun);
+  useEffect(() => {setCompare(false); setBaselineId(""); setSelectedImages({}); setBaselineImages({}); setPreview(false);}, [record.id]);
+  useEffect(() => {setPreview(false);}, [selectedRun?.id]);
+  const selectedId = selectedRun ? selectedImages[selectedRun.id] : "";
+  const image = pictures.items.find(item => item.id === selectedId) || pictures.items[0];
+  const selectedIndex = image ? pictures.items.indexOf(image) : -1;
+  const runIndex = selectedRun ? choices.findIndex(item => item.id === selectedRun.id) : -1;
+  const canPrev = selectedIndex > 0 || runIndex > 0;
+  const canNext = (selectedIndex >= 0 && selectedIndex < pictures.items.length - 1) || (runIndex >= 0 && runIndex < choices.length - 1);
+
+  const goPrev = useCallback(() => {
+    if (!selectedRun) return;
+    if (selectedIndex > 0) {
+      const prevImage = pictures.items[selectedIndex - 1];
+      if (prevImage) setSelectedImages(previous => ({...previous, [selectedRun.id]: prevImage.id}));
+    } else if (runIndex > 0) {
+      onSelectRun(choices[runIndex - 1]);
+    }
+  }, [selectedRun, selectedIndex, pictures.items, runIndex, choices, onSelectRun]);
+
+  const goNext = useCallback(() => {
+    if (!selectedRun) return;
+    if (selectedIndex >= 0 && selectedIndex < pictures.items.length - 1) {
+      const nextImage = pictures.items[selectedIndex + 1];
+      if (nextImage) setSelectedImages(previous => ({...previous, [selectedRun.id]: nextImage.id}));
+    } else if (runIndex >= 0 && runIndex < choices.length - 1) {
+      onSelectRun(choices[runIndex + 1]);
+    }
+  }, [selectedRun, selectedIndex, pictures.items, runIndex, choices, onSelectRun]);
+
+  useEffect(() => {
+    if (!selectedRun || preview || (!canPrev && !canNext)) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      if (isEditableElement(event.target) || isEditableElement(document.activeElement)) return;
+      const root = rootRef.current;
+      if (!root || root.closest("[hidden]")) return;
+      if (typeof window.getComputedStyle === "function") {
+        const editorOrInspector = root.closest(".conversation-studio__inspector");
+        if (editorOrInspector && window.getComputedStyle(editorOrInspector).display === "none") return;
+      }
+      if (event.key === "ArrowLeft" && canPrev) {
+        event.preventDefault();
+        goPrev();
+      } else if (event.key === "ArrowRight" && canNext) {
+        event.preventDefault();
+        goNext();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedRun, preview, canPrev, canNext, goPrev, goNext]);
+
+  const imageKey = `${record.id}:${selectedRun?.id}:${image?.id}:${image?.content_url}`;
+  const currentCopyResult = copyResult?.key === imageKey ? copyResult : null;
+  async function copyOriginal() {
+    if (!image?.content_url || !image.path || copyInFlight.current) return;
+    copyInFlight.current = true; setCopying(true); setCopyResult(null);
+    try {
+      await copyImageFileToClipboard(image.path);
+      setCopyResult({key: imageKey});
+    } catch (error) {
+      setCopyResult({key: imageKey, error: error instanceof Error ? error.message : "复制失败，请重试。"});
+    } finally {copyInFlight.current = false; setCopying(false);}
+  }
+  const baselineImage = baseline.items.find(item => item.id === (baselineRun ? baselineImages[baselineRun.id] : "")) || baseline.items[0];
+  const baselineIndex = baselineImage ? baseline.items.indexOf(baselineImage) : -1;
+  const matchingPrompt = selectedRun?.source && local.positive === selectedRun.source.positive_prompt && local.negative === selectedRun.source.negative_prompt;
+  if (!selectedRun && record.draft.gallery_source) return <GallerySourcePreview
+    key={`${record.id}:${record.draft.gallery_source.path}`} source={record.draft.gallery_source} />;
+  if (!selectedRun) return <section ref={rootRef} className="workbench-image-results workbench-image-empty" aria-label="图片预览"><div><h2>图片会出现在这里</h2>
+    <p>写下画面或修改意见，更新提示词后即可生成。</p></div></section>;
+  const version = runVersion(selectedRun, versions.items);
+  return <section ref={rootRef} className="workbench-image-results" aria-label="图片预览">
+    <header className="workbench-result-heading">
+      <div className="workbench-result-heading__primary">
+        <h2>图片预览</h2>
+        {choices.length > 1 ? (
+          <label className="workbench-batch-select">
+            <span className="conversation-sr-only">查看生成批次</span>
+            <select aria-label="查看生成批次" value={selectedRun.id} onChange={event => {
+              const next = choices.find(item => item.id === event.target.value); if (next) onSelectRun(next);
+            }}>{choices.map(item => <option key={item.id} value={item.id}>{batchLabel(item, versions.items)}</option>)}</select>
+          </label>
+        ) : (
+          <p title={versionIntent(version)}>{versionIntent(version)}</p>
+        )}
+      </div>
+      <div className="workbench-result-heading__tools">
+        <button type="button" className="workbench-copy-original" disabled={copying || !image?.content_url || !image?.path}
+          title={image?.content_url && image.path ? "复制当前原图文件，可粘贴到文件夹或图片应用" : "暂无可复制的原图文件"}
+          onClick={() => void copyOriginal()}><Copy size={15} aria-hidden="true" />{copying ? "复制中…" : "复制原图"}</button>
+        <button type="button" aria-pressed={compare} onClick={() => setCompare(value => !value)} disabled={!pictures.items.length}>{compare ? "结束对比" : "对比图片"}</button>
+      </div>
+    </header>
+    {currentCopyResult && <p className="workbench-copy-feedback" role={currentCopyResult.error ? "alert" : "status"}>
+      {currentCopyResult.error || "已复制原图文件，可粘贴到文件夹。"}</p>}
+    {compare && <div className="workbench-compare-controls"><label>对比批次<select aria-label="对比批次" value={baselineRun?.id || ""} onChange={event => setBaselineId(event.target.value)}>
+      {choices.map(item => <option key={item.id} value={item.id}>{batchLabel(item, versions.items)}</option>)}</select></label>
+      <label>对比图片<select aria-label="对比图片" value={baselineImage?.id || ""} disabled={!baseline.items.length} onChange={event => {
+        if (baselineRun) setBaselineImages(previous => ({...previous, [baselineRun.id]: event.target.value}));
+      }}>{baseline.items.map((item, index) => <option key={item.id} value={item.id}>第 {index + 1} 张</option>)}</select></label></div>}
+    <div className={`workbench-image-stage${compare ? " is-comparing" : ""}`}>
+      {compare && <figure className="workbench-image-frame">{baselineImage ? <img src={baselineImage.content_url || baselineImage.thumbnail_url!} alt={`对比图片：第 ${baselineIndex + 1} 张`} />
+        : <p>{baseline.loading ? "正在读取对比图片…" : "此批次暂无可用图片"}</p>}<figcaption>对比 · {baselineRun ? batchLabel(baselineRun, versions.items) : ""}</figcaption>
+        {baseline.error && <p role="alert">{baseline.error} <button onClick={baseline.retry}>重新读取对比图片</button></p>}</figure>}
+      <figure className="workbench-image-frame">
+        {(canPrev || canNext) && (
+          <button type="button" className="workbench-image-nav workbench-image-nav--prev" aria-label="上一张图片" title="上一张图片（← 方向键）" disabled={!canPrev} onClick={goPrev}>
+            <CaretLeft size={18} weight="bold" aria-hidden="true" />
+          </button>
+        )}
+        {image ? <button type="button" className="workbench-image-open" aria-label="放大查看当前图片" title="点击全屏放大查看" onClick={() => setPreview(true)}>
+          <img src={image.content_url || image.thumbnail_url!} alt={`当前图片：第 ${selectedIndex + 1} 张`} />
+          <span className="workbench-image-zoom-hint" aria-hidden="true"><ArrowsOutSimple size={14} /></span>
+        </button>
+        : <div className="workbench-image-placeholder"><p>{pictures.loading ? "正在读取图片…" : selectedRun.state === "completed" ? "此批次没有可用图片" : selectedRun.status_message}</p>
+          {!["completed", "failed", "canceled", "remote_missing"].includes(selectedRun.state) && <progress max={1} value={selectedRun.progress} aria-label="生图进度" />}</div>}
+        {(canPrev || canNext) && (
+          <button type="button" className="workbench-image-nav workbench-image-nav--next" aria-label="下一张图片" title="下一张图片（→ 方向键）" disabled={!canNext} onClick={goNext}>
+            <CaretRight size={18} weight="bold" aria-hidden="true" />
+          </button>
+        )}
+        <figcaption>
+          第 {selectedIndex + 1 || "—"} / {pictures.items.length} 张
+          {choices.length > 1 ? ` · 批次 ${runIndex + 1}/${choices.length}` : ""}
+          {(canPrev || canNext) ? " · ←/→ 切换" : ""}
+        </figcaption>
+      </figure>
+    </div>
+    {pictures.error && <p role="alert">{pictures.error} <button onClick={pictures.retry}>重新读取图片</button></p>}
+    {pictures.items.length > 1 && <div className="workbench-image-filmstrip" aria-label="本批次图片">{pictures.items.map((item, index) => <button key={item.id} aria-pressed={image?.id === item.id}
+      aria-label={`查看第 ${index + 1} 张图片`} onClick={() => setSelectedImages(previous => ({...previous, [selectedRun.id]: item.id}))}>
+      <img src={item.thumbnail_url || item.content_url!} alt={`缩略图 ${index + 1}`} loading="lazy" /><span>{index + 1}</span></button>)}</div>}
+    <div className="workbench-result-footer">
+      <div className="workbench-result-actions">
+        <button disabled={disabled || !canRestoreRun(selectedRun)} onClick={() => onRestoreRun(selectedRun, false, version)}>从这张继续</button>
+        <button disabled={disabled || !canUseRunPrompt(selectedRun)} onClick={() => onRestoreRun(selectedRun, true, version)}>只用提示词</button>
+        <button aria-expanded={showInput} onClick={() => setShowInput(value => !value)}>{showInput ? "收起实际输入" : "查看实际输入"}</button>
+      </div>
+      <div className="workbench-result-meta">
+        <p className="workbench-results-note">{selectedRun.source ? matchingPrompt ? "当前提示词与这批图片一致" : "当前提示词已与这批图片不同" : "这批图片未保留提示词记录"}</p>
+        {!canRestoreRun(selectedRun) && <p className="workbench-results-note">生成设置记录不完整，无法完整恢复。</p>}
+        <p className="workbench-results-note">{runSeedNote(selectedRun)}</p>
+      </div>
+    </div>
+    {onContinueRun && <details className="workbench-more-ops"><summary>更多图片操作</summary><button disabled={disabled} onClick={() => onContinueRun(selectedRun)}>沿用本次条件，新建会话</button></details>}
+    {showInput && <section className="workbench-actual-input" aria-label="实际提交输入"><RunInputDetails run={selectedRun} />
+      {compare && baselineRun && <details><summary>对比图片的实际输入</summary><RunInputDetails run={baselineRun} /></details>}</section>}
+    {preview && <ImagePreview index={selectedIndex} onClose={() => setPreview(false)} images={pictures.items.map((item, index) => ({
+      src: item.content_url || item.thumbnail_url!, alt: `${versionIntent(version)} · 第 ${index + 1} 张`, positive: selectedRun.source?.positive_prompt,
+      negative: selectedRun.source?.negative_prompt, parameters: {模型: selectedRun.source?.model_profile, 工作流: selectedRun.workflow_profile_id, ...selectedRun.source?.settings}}))} />}
+  </section>;
+}

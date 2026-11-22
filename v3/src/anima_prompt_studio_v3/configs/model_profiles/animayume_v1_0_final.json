@@ -4,7 +4,7 @@
   "family": "anima",
   "variant": "community",
   "positive_prefix": [],
-  "negative_prompt": ["worst quality", "low quality", "score_1", "score_2", "score_3", "artist name", "blurry", "jpeg artifacts"],
+  "negative_prompt": [],
   "negative_prompt_mode": "enabled",
   "tag_separator": ", ",
   "renderer_version": "anima-renderer-v1"

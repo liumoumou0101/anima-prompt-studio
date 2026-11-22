@@ -1,12 +1,15 @@
 import {useEffect, useMemo, useState} from "react";
 import {ArrowLeft, Check, Copy, MagnifyingGlass, Plus} from "@phosphor-icons/react";
-import {Link, useParams} from "react-router-dom";
+import {Link, useNavigate, useParams} from "react-router-dom";
+import {transferUrl} from "../lib/contentTransfer";
 import {ApiClientError, apiRequest} from "../lib/api";
 import {useTagBasket} from "../lib/tagBasket";
 import type {ArtistContextDimension, ArtistContextTag, ArtistDetail, TagSearchItem} from "../lib/types";
 import {TagBasket} from "../components/TagBasket";
+import {ArtistReferencePreview} from "../components/ArtistReferencePreview";
 import {NsfwBadge, TagBadge} from "../components/TagBadge";
 import {EmptyState, ErrorState, LoadingState} from "../components/States";
+import "./libraryPages.css";
 
 type SafetyMode = "safe" | "nsfw" | "all";
 type ContextSort = "association" | "coverage" | "popularity";
@@ -23,6 +26,7 @@ const dimensions: Array<{value: ArtistContextDimension | "all"; label: string; d
 ];
 
 export function ArtistDetailPage() {
+  const navigate = useNavigate();
   const {name = ""} = useParams();
   const [data, setData] = useState<ArtistDetail | null>(null);
   const [error, setError] = useState<ApiClientError | null>(null);
@@ -32,6 +36,7 @@ export function ArtistDetailPage() {
   const [sort, setSort] = useState<ContextSort>("association");
   const [query, setQuery] = useState("");
   const [copied, setCopied] = useState(false);
+  const [transferError, setTransferError] = useState("");
   const basket = useTagBasket();
 
   useEffect(() => {
@@ -67,21 +72,27 @@ export function ArtistDetailPage() {
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   }
+  function addArtist(destination: "current" | "new") {
+    try {navigate(transferUrl([{name: data!.name, category: "artist"}], destination));}
+    catch (caught) {setTransferError((caught as Error).message);}
+  }
 
   if (error) return <div className="page"><ErrorState message={error.message} requestId={error.requestId} onRetry={() => setRunId((value) => value + 1)} /></div>;
   if (!data) return <div className="page"><LoadingState label="正在分析画师关联场景…" /></div>;
 
   const strongest = data.contexts.filter((item) => item.nsfw === false && item.category_name === "general").slice(0, 6);
-  return <div className={`page artist-detail-page${basket.selected.length ? " has-selection" : ""}`}>
+  return <div className={`page library-page artist-detail-page${basket.selected.length ? " has-selection" : ""}`}>
     <nav className="tag-breadcrumb" aria-label="面包屑"><Link to="/artists"><ArrowLeft />画师研究室</Link><span>/</span><strong>{data.render_name}</strong></nav>
     <header className="artist-profile-hero">
-      <div className="artist-profile-mark">@</div>
-      <div><span className="eyebrow">ARTIST CONTEXT PROFILE</span><h1>{data.render_name}</h1><code>{data.name}</code><p>{data.analysis_note}</p></div>
+      <div className="artist-profile-copy"><h1>{data.render_name}</h1><code>{data.name}</code><p>{data.analysis_note}</p></div>
       <dl><div><dt>历史作品</dt><dd>{formatCount(data.post_count)}</dd></div><div><dt>关联线索</dt><dd>{data.association_count}</dd></div><div><dt>非敏感线索</dt><dd>{data.safety_summary.safe_count}</dd></div></dl>
       <button type="button" onClick={() => void copyArtist()}><Copy />{copied ? "已复制" : "复制画师 tag"}</button>
+      <button type="button" onClick={() => addArtist("current")}>加入当前会话</button><button type="button" onClick={() => addArtist("new")}>用此画师新建会话</button>
     </header>
+    {transferError && <p role="alert">{transferError}</p>}
+    <section className="artist-detail-samples" aria-label="本地画师样图"><ArtistReferencePreview artist={data.name} initiallyOpen /></section>
 
-    {strongest.length > 0 && <section className="artist-signature-strip" aria-label="优先测试线索"><header><div><span>START HERE</span><strong>优先测试的关联题材</strong></div><small>从高特征关联的非敏感通用标签开始</small></header><div>{strongest.map((item) => <button type="button" key={item.name} aria-pressed={basket.selectedNames.has(item.name)} onClick={() => basket.toggle(contextToSearchItem(item))}>{basket.selectedNames.has(item.name) ? <Check /> : <Plus />}<span>{item.cn_name || item.render_name}</span><small>{Math.round((item.association_score || 0) * 100)}%</small></button>)}</div></section>}
+    {strongest.length > 0 && <section className="artist-signature-strip" aria-label="优先测试线索"><header><div><strong>优先测试的关联题材</strong></div><small>从高特征关联的一般内容标签开始</small></header><div>{strongest.map((item) => <button type="button" key={item.name} aria-pressed={basket.selectedNames.has(item.name)} onClick={() => basket.toggle(contextToSearchItem(item))}>{basket.selectedNames.has(item.name) ? <Check /> : <Plus />}<span>{item.cn_name || item.render_name}</span><small>{Math.round((item.association_score || 0) * 100)}%</small></button>)}</div></section>}
 
     <section className="artist-context-controls">
       <div className="artist-dimension-tabs" aria-label="关联场景维度">{dimensions.map((item) => <button type="button" key={item.value} className={dimension === item.value ? "is-active" : ""} title={item.detail} onClick={() => setDimension(item.value)}>{item.label}{item.value !== "all" && <small>{data.dimension_counts[item.value] || 0}</small>}</button>)}</div>

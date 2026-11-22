@@ -1,0 +1,11 @@
+{
+  "id": "animayume_v1_5_base",
+  "display_name": "AnimaYume v1.5 Base",
+  "family": "anima",
+  "variant": "community",
+  "positive_prefix": [],
+  "negative_prompt": [],
+  "negative_prompt_mode": "enabled",
+  "tag_separator": ", ",
+  "renderer_version": "anima-renderer-v1"
+}

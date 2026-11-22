@@ -1,0 +1,207 @@
+{
+  "id": "v3_anima_2_9b_preview_v1",
+  "display_name": "Anima 2.9B Preview v1 · 作者参数基线",
+  "api_workflow": {
+    "5": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "clip": [
+          "3",
+          0
+        ],
+        "text": ""
+      },
+      "_meta": {
+        "title": "提示词编码 CLIP Text Encode"
+      }
+    },
+    "6": {
+      "class_type": "EmptyLatentImage",
+      "inputs": {
+        "width": 896,
+        "height": 1152,
+        "batch_size": 1
+      },
+      "_meta": {
+        "title": "空潜空间 Empty Latent"
+      }
+    },
+    "7": {
+      "class_type": "KSampler",
+      "inputs": {
+        "model": [
+          "1",
+          0
+        ],
+        "positive": [
+          "4",
+          0
+        ],
+        "negative": [
+          "5",
+          0
+        ],
+        "latent_image": [
+          "6",
+          0
+        ],
+        "seed": 0,
+        "steps": 30,
+        "cfg": 4.0,
+        "sampler_name": "euler",
+        "scheduler": "sgm_uniform",
+        "denoise": 1.0
+      },
+      "_meta": {
+        "title": "采样器 KSampler"
+      }
+    },
+    "9": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "7",
+          0
+        ],
+        "vae": [
+          "8",
+          0
+        ]
+      },
+      "_meta": {
+        "title": "VAE解码 VAE Decode"
+      }
+    },
+    "10": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "images": [
+          "9",
+          0
+        ],
+        "filename_prefix": "v3_anima_2_9b_preview_v1"
+      },
+      "_meta": {
+        "title": "保存图片 Save Image"
+      }
+    },
+    "1": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "Anima-2.9B-preview-v1.safetensors",
+        "weight_dtype": "default"
+      },
+      "_meta": {
+        "title": "模型加载 UNET Loader"
+      }
+    },
+    "3": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "qwen_3_06b_base.safetensors",
+        "type": "stable_diffusion",
+        "device": "default"
+      },
+      "_meta": {
+        "title": "文本编码器加载 CLIP Loader"
+      }
+    },
+    "8": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "qwen_image_vae.safetensors"
+      },
+      "_meta": {
+        "title": "VAE加载 VAE Loader"
+      }
+    },
+    "4": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "clip": [
+          "3",
+          0
+        ],
+        "text": ""
+      },
+      "_meta": {
+        "title": "提示词编码 CLIP Text Encode"
+      }
+    }
+  },
+  "bindings": {
+    "positive_prompt": {
+      "node_id": "4",
+      "input_name": "text"
+    },
+    "negative_prompt": {
+      "node_id": "5",
+      "input_name": "text"
+    },
+    "checkpoint": {
+      "node_id": "1",
+      "input_name": "unet_name"
+    },
+    "text_encoder": {
+      "node_id": "3",
+      "input_name": "clip_name"
+    },
+    "text_encoder_type": {
+      "node_id": "3",
+      "input_name": "type"
+    },
+    "vae": {
+      "node_id": "8",
+      "input_name": "vae_name"
+    },
+    "seed": {
+      "node_id": "7",
+      "input_name": "seed"
+    },
+    "steps": {
+      "node_id": "7",
+      "input_name": "steps"
+    },
+    "cfg": {
+      "node_id": "7",
+      "input_name": "cfg"
+    },
+    "sampler": {
+      "node_id": "7",
+      "input_name": "sampler_name"
+    },
+    "scheduler": {
+      "node_id": "7",
+      "input_name": "scheduler"
+    },
+    "width": {
+      "node_id": "6",
+      "input_name": "width"
+    },
+    "height": {
+      "node_id": "6",
+      "input_name": "height"
+    },
+    "batch_size": {
+      "node_id": "6",
+      "input_name": "batch_size"
+    },
+    "filename_prefix": {
+      "node_id": "10",
+      "input_name": "filename_prefix"
+    }
+  },
+  "workflow_kind": "txt2img_basic",
+  "lora_slots": [],
+  "compatible_model_profiles": [
+    "anima_2_9b_preview_v1"
+  ],
+  "runtime_assets": {
+    "checkpoint": "Anima-2.9B-preview-v1.safetensors",
+    "text_encoder": "qwen_3_06b_base.safetensors",
+    "text_encoder_type": "stable_diffusion",
+    "vae": "qwen_image_vae.safetensors"
+  },
+  "source_path": "packaged://anima-community/v3_anima_2_9b_preview_v1",
+  "notes": "原生 40 层，需 ComfyUI 0.33.1+；Euler / sgm_uniform，30 步，CFG 4。可用 50 步做细节对照。无需额外 LoRA，复用 Qwen3 0.6B 和 Qwen Image VAE；旧 Anima LoRA 不视为兼容。不额外覆盖模型 shift，不叠加 NAG、Layer Replay 或蒸馏 LoRA。"
+}

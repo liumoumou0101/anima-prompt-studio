@@ -5,6 +5,7 @@ import {TagDetailPage} from "./TagDetailPage";
 import {TagGroupPage} from "./TagGroupPage";
 import {TagSearchPage} from "./TagSearchPage";
 import {TagUngroupedPage} from "./TagUngroupedPage";
+import {readTransfer} from "../lib/contentTransfer";
 
 beforeEach(() => {
   sessionStorage.setItem("anima-v3-session", "session-token");
@@ -57,7 +58,9 @@ it("browses grouped shelves, previews and sends selected tags to the workbench",
   expect(await screen.findByText("女仆服装说明。")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: "加入标签篮"}));
   fireEvent.click(screen.getByRole("button", {name: "带入工作台"}));
-  expect(await screen.findByText("?tag=maid")).toBeInTheDocument();
+  const location = await screen.findByText(/^\?transfer=/);
+  const transferId = new URLSearchParams(location.textContent || "").get("transfer")!;
+  expect(readTransfer(transferId)).toMatchObject({destination: "current", items: [{name: "maid", category: "general"}]});
 });
 
 it("browses ungrouped tags and can show only NSFW entries", async () => {

@@ -1,0 +1,275 @@
+"""Accept once in SQLite, then deliver frozen jobs to the execution queue."""
+from __future__ import annotations
+
+import secrets
+from contextlib import nullcontext
+from copy import deepcopy
+import logging
+import sqlite3
+import time
+from threading import Event, Thread
+from uuid import uuid4
+
+from anima_prompt_studio.domain.execution_models import GenerationRun
+from anima_prompt_studio.domain.models import PromptJob
+from ..api.workspace_store import WorkspaceRevisionConflictError
+from ..core.requirements import PromptEdit, RequirementLora, WorkbenchError, compile_state, digest
+from ..storage.generation_submissions import SubmissionStore, IdempotencyConflict
+from .generation import PreparedGeneration
+from .workflow_catalog import fingerprint
+from ..remote.connections import http_connection_snapshot, validate_http_session
+from ..storage.runtime_repository import SQLiteRepository
+from ..core.model_versions import matches_model_declaration
+from ..remote.preparation_budget import DirectPreparationBudget
+
+
+def payload_digest(payload, endpoint):
+    data = payload.model_dump(mode="json", by_alias=True)
+    # The opt-in was absent in historical direct submission receipts. Preserve
+    # their identity, including clients that explicitly send the false default.
+    if not data.get("use_current_prompt"):
+        data.pop("use_current_prompt", None)
+    # Keep the historical integer canonical form across browser string transport.
+    # Existing receipts must remain replayable after the precision fix.
+    if hasattr(payload, "settings") and "settings" in data:
+        data["settings"]["seed"] = payload.settings.seed
+    return digest({"endpoint": endpoint, "payload": data})
+
+
+class SubmissionService:
+    def __init__(self, workspaces, queue, response_factory, *, start=True, runtime_database=None):
+        self.store = SubmissionStore(workspaces)
+        self.queue = queue
+        self.runtime_database = runtime_database
+        self.reference_get = None
+        self.response_factory = response_factory
+        self.wake, self.stopping = Event(), Event()
+        for entry in self.store.list():
+            queue.restore_durable(entry)
+        queue.on_durable_cancel = lambda sid: self.store.mark(sid, "canceled")
+        self.worker = Thread(target=self._loop, name="anima-submission-dispatch", daemon=True)
+        if start:
+            self.worker.start()
+            self.wake.set()
+
+    def submit(self, payload, key, endpoint, prepare, *, expected_snapshot=None, planned=None, acceptance_hook=None,
+               acceptance_context=None):
+        started = time.monotonic()
+        use_current_prompt = getattr(payload, "use_current_prompt", False)
+        if use_current_prompt and (endpoint != "direct" or payload.submission_kind != "conversational"):
+            raise WorkbenchError("invalid_request", "使用当前提示词仅适用于对话工作台的英文直出。")
+        key = key.strip()
+        if not key or len(key) > 256:
+            raise WorkbenchError("invalid_request", "幂等键必须是 1–256 个字符。")
+        request_hash = payload_digest(payload, endpoint)
+        old = self.store.lookup(key, request_hash)
+        if old:
+            return old["response"]
+        existing = self.queue.existing_request(key, request_hash)
+        if existing is not None:
+            if existing.request_json.get("submission_id"):
+                accepted = self.store.lookup(key, request_hash)
+                if accepted is None:
+                    raise IdempotencyConflict("提交回执缺失，请检查原任务。")
+                return accepted["response"]
+            return self.response_factory(existing)
+        reference = None
+        if payload.submission_kind == "reference":
+            if self.reference_get is None:
+                raise WorkbenchError("reference_preset_not_found", "参考目录尚未接入。")
+            reference = deepcopy(self.reference_get(payload.reference_preset_id, payload.source_version))
+            if not reference["requirements_valid"]:
+                raise WorkbenchError("empty_requirements", "参考图尚无有效要求。")
+        workspace = None
+        if payload.submission_kind == "conversational":
+            workspace = self.store.workspaces.get(payload.workspace_id)
+            if workspace["revision"] != payload.workspace_revision:
+                raise WorkspaceRevisionConflictError(workspace["revision"])
+            draft = workspace["draft"]
+            if (not draft["compiled"] or draft["compiled"]["compiled_token"] != payload.compiled_token
+                    or (not use_current_prompt and compile_state(draft) != "fresh")):
+                raise WorkbenchError("stale_compiled_prompt", "要求或编译版本已变化，请重新编译。")
+            resources = [RequirementLora.model_validate(item) for item in (draft.get("requirements") or {}).get("loras", [])]
+        elif reference and "lora_selection" not in payload.model_fields_set:
+            resources = [RequirementLora.model_validate(item) for item in reference["requirements"]["loras"] if item["required"]]
+        else:
+            resources = [RequirementLora.model_validate(item.model_dump()) for item in payload.lora_selection]
+        if expected_snapshot is not None:
+            resources = [RequirementLora.model_validate(item) for item in expected_snapshot["resources"]]
+        prepare_started = time.monotonic()
+        prepared = prepare()
+        preparation_ms = round((time.monotonic() - prepare_started) * 1000, 3)
+        if workspace and prepared.job.model_profile_id != workspace["draft"]["model_profile"]:
+            raise WorkbenchError("stale_compiled_prompt", "请求模型与已编译的草稿不一致。")
+        frozen = None
+        routed_intent = planned is not None and acceptance_hook is not None
+        generation_source = workspace["draft"].get("generation_source") if workspace else None
+        if generation_source:
+            from .generation_queue import GenerationRunNotFoundError
+            if ((not routed_intent and payload.remote_profile_id != generation_source["remote_profile_id"])
+                    or payload.workflow_profile_id != generation_source["workflow_profile_id"]
+                    or payload.model_profile != generation_source["model_profile"]):
+                raise WorkbenchError("incompatible_workflow", "请先解除原工作流快照，再更换模型或执行目标。")
+            try:
+                frozen = self.queue.get(generation_source["run_id"]).request_json.get("workflow_snapshot")
+            except GenerationRunNotFoundError:
+                raise WorkbenchError("workflow_snapshot_missing", "原任务快照不可用，请解除来源后明确选择新工作流。") from None
+            if not frozen:
+                raise WorkbenchError("workflow_snapshot_missing", "原任务没有可用工作流快照。")
+        if expected_snapshot is not None:
+            frozen = deepcopy(expected_snapshot["workflow"])
+        elif payload.workflow_snapshot_run_id and not generation_source:
+            from .generation_queue import GenerationRunNotFoundError
+            try:
+                run = self.queue.get(payload.workflow_snapshot_run_id)
+            except GenerationRunNotFoundError as exc:
+                raise WorkbenchError("workflow_snapshot_missing", "原任务没有可用工作流快照。") from exc
+            frozen = run.request_json.get("workflow_snapshot")
+            if not frozen:
+                raise WorkbenchError("workflow_snapshot_missing", "原任务没有可用工作流快照。")
+            source_model = (run.request_json.get("prompt_job") or {}).get("model_profile_id")
+            if ((not routed_intent and run.remote_profile_id != payload.remote_profile_id)
+                    or run.workflow_profile_id != payload.workflow_profile_id
+                    or source_model != prepared.job.model_profile_id):
+                raise WorkbenchError("incompatible_workflow", "原图工作流快照与当前模型或执行目标不一致，请选择当前工作流后重试。")
+        resolution_started = time.monotonic()
+        direct_budget = DirectPreparationBudget() if endpoint == "direct" and not routed_intent else None
+        with direct_budget if direct_budget else nullcontext():
+            prepared, target, resolution = (planned if planned is not None else self.queue.plan(prepared, payload.remote_profile_id,
+                                                          payload.workflow_profile_id, resources, frozen))
+            if direct_budget:
+                direct_budget.check()
+        resolution_ms = round((time.monotonic() - resolution_started) * 1000, 3)
+        if expected_snapshot is not None and (
+            fingerprint(target.remote_profile) != expected_snapshot["remote_fingerprint"]
+            or resolution["bindings"] != expected_snapshot["resolution"]["bindings"]
+            or digest(target.workflow_profile.model_dump(mode="json")) != digest(expected_snapshot["workflow"])
+        ):
+            raise WorkbenchError("gallery_source_changed", "原图的连接或资源映射已变化，请到会话工作台明确选择新的生成条件。")
+        compat = (reference["compat"] if reference else workspace["draft"]["reference_pin"]["source_snapshot"]["compat"]
+                  if workspace and workspace["draft"]["reference_pin"] else None)
+        if compat:
+            if (compat["model_profiles"] and not matches_model_declaration(prepared.job.model_profile_id, compat["model_profiles"])
+                    or compat["workflow_kinds"] and target.workflow_profile.workflow_kind not in compat["workflow_kinds"]):
+                raise WorkbenchError("reference_preset_unavailable", "当前目标不符合已钉选来源的兼容声明。")
+        if prepared.job.generation_params.seed == -1:
+            prepared.job.generation_params.seed = secrets.randbelow(2**63)
+        frozen_parameters = prepared.job.integration_metadata.get('workflow_parameters')
+        if frozen_parameters and 'seed' in frozen_parameters.get('values', {}):
+            frozen_parameters['values']['seed'] = str(prepared.job.generation_params.seed)
+        sid = "sub_" + uuid4().hex
+        run = GenerationRun(prompt_job_id=prepared.job.id, remote_profile_id=payload.remote_profile_id,
+                            workflow_profile_id=payload.workflow_profile_id, status_message="已接受，等待入队",
+                            request_json={"submission_id": sid,
+                                          "resolved_seed": prepared.job.generation_params.seed,
+                                          "acceptance_timings_ms": {"prepare_job": preparation_ms,
+                                              "resolve_target": resolution_ms,
+                                              "before_persistence": round((time.monotonic() - started) * 1000, 3)},
+                                          "prompt_job": prepared.job.model_dump(mode="json"),
+                                          "workflow_snapshot": target.workflow_profile.model_dump(mode="json"),
+                                          "local_queue": {"idempotency_key": key, "payload_hash": request_hash}})
+        if target.remote_profile.connection_type == "http":
+            run.request_json["http_connection"] = http_connection_snapshot(target.remote_profile)
+        if direct_budget:
+            run.request_json["preparation_policy"] = "direct-fast-v1"
+        snapshot = {"run": run.model_dump(mode="json"), "job": prepared.job.model_dump(mode="json"),
+                    "checkpoint_logical_name": prepared.checkpoint_logical_name,
+                    "remote_fingerprint": fingerprint(target.remote_profile),
+                    "workflow": target.workflow_profile.model_dump(mode="json"),
+                    "resources": [r.model_dump(mode="json") for r in resources], "resolution": resolution,
+                    "provenance": {"requirements": None, "positive": prepared.job.positive_prompt,
+                                   "negative": prepared.job.negative_prompt, "model_profile": prepared.job.model_profile_id,
+                                   "settings": prepared.job.generation_params.model_dump(mode="json"),
+                                   "loras": resolution["bindings"], "workflow_snapshot_ref": run.id}}
+        response = {**self.response_factory(run), "submission_id": sid}
+        if reference:
+            origin = {"example_id": reference["id"], "source_version": reference["source_version"],
+                      "source_snapshot": {"requirements": reference["requirements"], "compat": reference["compat"]}}
+            actual_requirements = deepcopy(reference["requirements"])
+            actual_resources = [item.model_dump(mode="json") for item in resources]
+            if actual_requirements["loras"] != actual_resources:
+                actual_requirements["loras"] = actual_resources
+                actual_requirements["revision"] += 1
+            snapshot.update(reference=origin, requirements=actual_requirements)
+            snapshot["provenance"].update(reference=origin, requirements=actual_requirements)
+
+        def accept():
+            with acceptance_context() if acceptance_context else nullcontext():
+                if direct_budget:
+                    direct_budget.check()
+                return self.store.accept(submission_id=sid, key=key, payload_hash=request_hash, run_id=run.id,
+                                     snapshot=snapshot, response=response,
+                                     workspace_id=workspace["id"] if workspace else None,
+                                     revision=payload.workspace_revision if workspace else None,
+                                     token=payload.compiled_token if workspace else None,
+                                     use_current_prompt=use_current_prompt,
+                                     acceptance_hook=acceptance_hook,
+                                     prompt=PromptEdit(positive=prepared.job.positive_prompt, negative=prepared.job.negative_prompt))
+        try:
+            entry = self.queue.accept_durable(
+                key,
+                request_hash,
+                accept,
+                remote_profile_id=payload.remote_profile_id,
+            )
+        except IdempotencyConflict:
+            old = self.store.lookup(key, request_hash)
+            if old:
+                return old["response"]
+            raise
+        self.wake.set()
+        return entry["response"]
+
+    def dispatch_pending(self):
+        for entry in self.store.for_runs(self.queue.reserved_ids()):
+            if self.stopping.is_set() or entry["dispatch_state"] not in {"accepted", "enqueued"}:
+                continue
+            run = self.queue.get(entry["run_id"])
+            if not self.queue.is_reserved(run.id):
+                continue
+            snapshot = entry["snapshot"]
+            try:
+                if self.runtime_database is not None:
+                    repository = SQLiteRepository(self.runtime_database)
+                    try:
+                        validate_http_session(run, repository.get_remote_profile(run.remote_profile_id))
+                    finally:
+                        repository.close()
+                elif run.request_json.get("http_connection"):
+                    raise ValueError("临时连接任务缺少可验证的当前连接数据库。")
+                prepared = PreparedGeneration(job=PromptJob.model_validate(snapshot["job"]),
+                                              checkpoint_logical_name=snapshot["checkpoint_logical_name"])
+                resources = [RequirementLora.model_validate(item) for item in snapshot["resources"]]
+                plan = self.queue.plan_cached if run.request_json.get("preparation_policy") == "direct-fast-v1" else self.queue.plan
+                prepared, target, resolution = plan(prepared, run.remote_profile_id,
+                                                    run.workflow_profile_id, resources, snapshot["workflow"])
+                if (fingerprint(target.remote_profile) != snapshot["remote_fingerprint"]
+                        or resolution["bindings"] != snapshot["resolution"]["bindings"]
+                        or digest(target.workflow_profile.model_dump(mode="json")) != digest(snapshot["workflow"])):
+                    raise ValueError("提交后目标或资源映射变化。")
+                if not self.stopping.is_set() and self.queue.deliver_durable(entry, prepared, target):
+                    self.store.mark(entry["submission_id"], "enqueued")
+            except sqlite3.Error:
+                # No executable work was published before persistence. Keep the
+                # accepted journal entry so local storage failures can be retried.
+                raise
+            except Exception:
+                self.queue.fail_durable(entry, "submission_dispatch_failed")
+                self.store.mark(entry["submission_id"], "failed", "submission_dispatch_failed")
+
+    def _loop(self):
+        while not self.stopping.is_set():
+            self.wake.wait(1)
+            self.wake.clear()
+            if not self.stopping.is_set():
+                try:
+                    self.dispatch_pending()
+                except Exception:
+                    # A local failure remains durable for recovery; never log secrets.
+                    logging.getLogger(__name__).warning("Submission dispatch deferred after a local failure")
+
+    def close(self):
+        self.stopping.set()
+        self.wake.set()
+        if self.worker.is_alive():
+            self.worker.join(timeout=5)

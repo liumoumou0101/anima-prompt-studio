@@ -1,9 +1,16 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from "react";
-import {ArrowClockwise, ArrowsOutSimple, Check, ClockCounterClockwise, Copy, FolderOpen, Funnel, Heart, Images, ListChecks, MagicWand, SelectionAll, SlidersHorizontal, SortAscending, SquaresFour, Trash, X} from "@phosphor-icons/react";
+import {GalleryReferenceButton} from "../components/GalleryReferenceButton";
+import {GalleryWorkspaceButton} from "../components/GalleryWorkspaceButton";
+import {GalleryCompare} from "../components/GalleryCompare";
+import {useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState} from "react";
+import {ArrowClockwise, ArrowsOutSimple, CaretLeft, CaretRight, Check, ClockCounterClockwise, Copy, DotsThree, FolderOpen, Funnel, Heart, Images, ListChecks, MagicWand, Question, SelectionAll, SlidersHorizontal, SortAscending, SquaresFour, Trash, X} from "@phosphor-icons/react";
 import PhotoAlbum from "react-photo-album";
 import "react-photo-album/rows.css";
-import Lightbox from "yet-another-react-lightbox";
-import "yet-another-react-lightbox/styles.css";
+import {createPortal} from "react-dom";
+import {ImagePreview} from "../components/ImagePreview";
+import type {PreviewImage} from "../components/ImagePreview";
+import {useGallerySelection} from "../lib/useGallerySelection";
+import {useBodyScrollLock} from "../lib/useBodyScrollLock";
+import type {MouseEvent} from "react";
 import {apiRequest, ApiClientError} from "../lib/api";
 import {getGallerySnapshot, loadGallery, patchGallerySnapshot, subscribeGallery} from "../lib/galleryStore";
 import type {GalleryAsset, GalleryProcessJob, GalleryResponse, GalleryTrashAsset, GalleryTrashResponse} from "../lib/types";
@@ -20,6 +27,11 @@ function dateKey(value: string) { const d = new Date(value); return Number.isNaN
 function dateLabel(value: string) { const d = new Date(value); return Number.isNaN(d.valueOf()) ? "时间未知" : new Intl.DateTimeFormat("zh-CN", {year: "numeric", month: "long", day: "numeric", weekday: "short"}).format(d); }
 function dateTime(value: string) { const d = new Date(value); return Number.isNaN(d.valueOf()) ? "时间未知" : d.toLocaleString("zh-CN", {hour12: false}); }
 
+type ProcessFailure = {path: string; error: string};
+function processFailureMessage(failed: ProcessFailure[]) {
+  return failed.map(item => item.path ? `${item.path}（${item.error}）` : item.error).join("；");
+}
+
 export function GalleryPage({enabled = false}: {enabled?: boolean}) {
   const [data, setData] = useState<GalleryResponse | null>(() => getGallerySnapshot());
   const [trash, setTrash] = useState<GalleryTrashResponse | null>(null);
@@ -29,17 +41,18 @@ export function GalleryPage({enabled = false}: {enabled?: boolean}) {
   const [model, setModel] = useState("");
   const [batch, setBatch] = useState("");
   const [sort, setSort] = useState<Sort>("newest");
-  const [filterOpen, setFilterOpen] = useState(true);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [thumbSize, setThumbSize] = useState(() => Number(localStorage.getItem("anima-v3-gallery-thumb-size")) || 205);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [active, setActive] = useState<GalleryAsset | null>(null);
   const [activeTrash, setActiveTrash] = useState<GalleryTrashAsset | null>(null);
-  const [lightboxIndex, setLightboxIndex] = useState(-1);
+  const [preview, setPreview] = useState<{images: PreviewImage[]; index: number} | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [jobs, setJobs] = useState<GalleryProcessJob[]>([]);
   const [processSelection, setProcessSelection] = useState<{items: GalleryAsset[]; operation: "regenerate" | "upscale"} | null>(null);
   const [regenCount, setRegenCount] = useState(1);
+  const processRequest = useRef<{body: string; key: string} | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activity, setActivity] = useState("");
@@ -48,7 +61,10 @@ export function GalleryPage({enabled = false}: {enabled?: boolean}) {
   const [renderLimit, setRenderLimit] = useState(80);
   const loadMoreRef = useRef<HTMLButtonElement>(null);
   const pageRef = useRef<HTMLElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const detailTrigger = useRef<HTMLElement | null>(null);
   const dockedDetail = useMediaQuery("(min-width: 1180px)");
+  const hasPendingJobs = jobs.some(job => !["completed", "failed", "canceled"].includes(job.state));
 
   const load = useCallback(async (refresh = false) => {
     if (!enabled) return;
@@ -64,6 +80,31 @@ export function GalleryPage({enabled = false}: {enabled?: boolean}) {
     try { const result = await apiRequest<{jobs: GalleryProcessJob[]}>("/api/v3/gallery/process"); setJobs(result.jobs); if (open) setJobsOpen(true); }
     catch (caught) { setError(caught as ApiClientError); }
   };
+  useEffect(() => {
+    if (!enabled || (!jobsOpen && !hasPendingJobs)) return;
+    let canceled = false;
+    let timer = 0;
+    const completed = new Set<string>();
+    const poll = async () => {
+      let active = false;
+      try {
+        const result = await apiRequest<{jobs: GalleryProcessJob[]}>("/api/v3/gallery/process");
+        if (canceled) return;
+        setJobs(result.jobs);
+        active = result.jobs.some((job) => !["completed", "failed", "canceled"].includes(job.state));
+        const finished = result.jobs.filter((job) => job.state === "completed");
+        if (finished.some((job) => !completed.has(job.id))) {
+          await loadGallery({refresh: true, reason: "generation"});
+          finished.forEach((job) => completed.add(job.id));
+        }
+      } catch {
+        // A failed status read never resubmits a generation request.
+      }
+      if (!canceled) timer = window.setTimeout(() => void poll(), active ? 2500 : 10000);
+    };
+    timer = window.setTimeout(() => void poll(), 1500);
+    return () => { canceled = true; window.clearTimeout(timer); };
+  }, [enabled, jobsOpen, hasPendingJobs]);
   useEffect(() => {
     if (!enabled) return;
     const unsubscribe = subscribeGallery((update) => {
@@ -100,38 +141,61 @@ export function GalleryPage({enabled = false}: {enabled?: boolean}) {
   }, [batch, data, model, project, query, sort, view]);
   const visible = useMemo(() => filtered.slice(0, renderLimit), [filtered, renderLimit]);
   const groups = useMemo(() => {
+    if (sort === "name") return visible.length ? [{key: "name", label: "按文件名排序", items: visible}] : [];
     const map = new Map<string, GalleryAsset[]>();
     visible.forEach((asset) => { const key = dateKey(asset.created_at); map.set(key, [...(map.get(key) || []), asset]); });
     return [...map.entries()].map(([key, items]) => ({key, items, label: dateLabel(items[0].created_at)}));
-  }, [visible]);
+  }, [visible, sort]);
   const visibleTrash = useMemo(() => (trash?.items || []).filter((asset) => !query.trim() || `${asset.name} ${asset.original_path}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [query, trash]);
   const selectedAssets = useMemo(() => filtered.filter((asset) => selected.has(asset.path)), [filtered, selected]);
   const selectedTrash = useMemo(() => visibleTrash.filter((asset) => selected.has(asset.path)), [selected, visibleTrash]);
 
+  const selection = useGallerySelection((view === "trash" ? visibleTrash : filtered).map(item => item.path),
+    JSON.stringify([view, query, project, model, batch, sort]), selected, setSelected, busy);
+  const selectImage = (asset: GalleryAsset, event: MouseEvent) => {
+    if (selection.isSelectionClick(event)) selection.toggle(asset.path, event);
+    else { detailTrigger.current = event.currentTarget as HTMLElement; setActive(asset); }
+  };
+  const activeIndex = active ? filtered.findIndex(item => item.path === active.path) : -1;
+  const openPreview = (asset: GalleryAsset) => {
+    const index = filtered.findIndex(item => item.path === asset.path);
+    if (index < 0) return;
+    // An open viewer keeps its own sequence when new results or notices arrive.
+    setPreview({index, images: filtered.map(item => ({src: item.content_url, alt: item.name,
+      width: item.width || undefined, height: item.height || undefined,
+      positive: item.positive_prompt, negative: item.negative_prompt,
+      parameters: {model: item.model_profile, ...item.generation_params}}))});
+  };
+  const filterCount = [project, model, batch].filter(Boolean).length;
+  useEffect(() => {
+    if (!filterOpen && !jobsOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!controlsRef.current?.contains(event.target as Node)) {setFilterOpen(false); setJobsOpen(false);}
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {setFilterOpen(false); setJobsOpen(false);}
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", escape);};
+  }, [filterOpen, jobsOpen]);
+  function preserveFailures(requested: string[], succeeded: string[]) {
+    const success = new Set(succeeded);
+    setSelected(current => new Set([...current, ...requested].filter(path => !success.has(path))));
+  }
   useEffect(() => { setRenderLimit(80); }, [batch, model, project, query, sort, view]);
   useEffect(() => {
     const target = loadMoreRef.current;
-    if (!target || visible.length >= filtered.length || !("IntersectionObserver" in window)) return;
+    if (!target || active || activeTrash || compareOpen || preview || visible.length >= filtered.length || !("IntersectionObserver" in window)) return;
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) setRenderLimit((value) => Math.min(value + 80, filtered.length));
     }, {rootMargin: "500px"});
     observer.observe(target);
     return () => observer.disconnect();
-  }, [filtered.length, visible.length]);
-  useEffect(() => {
-    const page = pageRef.current;
-    if (!page || dockedDetail || (!active && !activeTrash)) return;
-    const overlayClasses = ["legacy-detail-layer", "legacy-dialog-backdrop", "legacy-compare"];
-    const background = [...page.children].filter((child) => !overlayClasses.some((name) => child.classList.contains(name)));
-    const shell = page.closest(".app-shell");
-    const outsidePage = shell ? [...shell.children].filter((child) => !child.contains(page)) : [];
-    background.push(...outsidePage);
-    background.forEach((child) => ((child as HTMLElement).inert = true));
-    return () => background.forEach((child) => ((child as HTMLElement).inert = false));
-  }, [active, activeTrash, dockedDetail]);
+  }, [filtered.length, visible.length, active, activeTrash, compareOpen, preview]);
 
-  function toggle(path: string) { setSelected((current) => { const next = new Set(current); next.has(path) ? next.delete(path) : next.add(path); return next; }); }
-  function selectGroup(items: Array<{path: string}>) { setSelected((current) => new Set([...current, ...items.map((item) => item.path)])); }
+  function toggle(path: string, event: MouseEvent) { selection.toggle(path, event); }
+  function selectGroup(items: Array<{path: string}>) { if (busy) return; selection.setSelecting(true); setSelected((current) => new Set([...current, ...items.map((item) => item.path)])); }
   function updateData(update: (current: GalleryResponse) => GalleryResponse) {
     const current = getGallerySnapshot() || data;
     if (!current) return;
@@ -173,30 +237,39 @@ export function GalleryPage({enabled = false}: {enabled?: boolean}) {
   }
   async function move(items: GalleryAsset[]) {
     if (!items.length || !window.confirm(`确定将选中的 ${items.length} 张图片移入画廊回收站吗？之后仍可恢复。`)) return; setBusy(true); setActivity("正在移入画廊回收站…");
+    setError(null);
     try {
       const paths = items.map((item) => item.path);
       const result = await apiRequest<{moved: string[]; failed: Array<{error: string}>}>("/api/v3/gallery/assets/trash", {method: "POST", body: JSON.stringify({paths})});
       if (!result.moved.length) throw new ApiClientError(result.failed[0]?.error || "图片未能移入回收站", "gallery_trash_failed");
       updateData((current) => ({...current, items: current.items.filter((item) => !result.moved.includes(item.path)), trash_count: current.trash_count + result.moved.length}));
-      setSelected(new Set()); setActive(null); setNotice(`图片已移入画廊回收站，可随时恢复。`);
+      preserveFailures(paths, result.moved); setActive(current => current && result.moved.includes(current.path) ? null : current);
+      setNotice(result.moved.length === paths.length ? "图片已移入画廊回收站，可随时恢复。" : `已移入回收站 ${result.moved.length} 张，${paths.length - result.moved.length} 张未完成，已保留选择。`);
+      if (result.failed.length) setError(new ApiClientError(result.failed.map(item => item.error).join("；"), "gallery_trash_partial"));
     } catch (caught) { setError(caught as ApiClientError); } finally { setBusy(false); setActivity(""); }
   }
   async function restore(items: GalleryTrashAsset[]) {
     if (!items.length) return; setBusy(true); setActivity("正在恢复图片…");
+    setError(null);
     try {
       const paths = items.map((item) => item.path);
-      const result = await apiRequest<{restored: string[]}>("/api/v3/gallery/trash/restore", {method: "POST", body: JSON.stringify({paths})});
-      setTrash((current) => current ? {...current, items: current.items.filter((item) => !paths.includes(item.path)), trash_count: Math.max(0, current.trash_count - result.restored.length)} : current);
-      setSelected(new Set()); setActiveTrash(null); setNotice(`图片已恢复到原画廊目录。`); await load(true);
+      const result = await apiRequest<{restored: string[]; restored_trash_paths?: string[]}>("/api/v3/gallery/trash/restore", {method: "POST", body: JSON.stringify({paths})});
+      // Restore receipts contain destination paths; trash paths have a separate batch prefix.
+      const succeeded = result.restored_trash_paths ?? items.filter(item => result.restored.includes(item.original_path)).map(item => item.path);
+      if (!succeeded.length) throw new ApiClientError("图片未能恢复，请刷新回收站后重试。", "gallery_restore_failed");
+      setTrash(current => current ? {...current, items: current.items.filter(item => !succeeded.includes(item.path)), trash_count: Math.max(0, current.trash_count - succeeded.length)} : current);
+      preserveFailures(paths, succeeded); setActiveTrash(current => current && succeeded.includes(current.path) ? null : current);
+      setNotice(succeeded.length === paths.length ? "图片已恢复到原画廊目录。" : `已恢复 ${succeeded.length} 张，${paths.length - succeeded.length} 张未完成，已保留选择。`); await load(true);
     } catch (caught) { setError(caught as ApiClientError); } finally { setBusy(false); setActivity(""); }
   }
   async function deleteForever(items: GalleryTrashAsset[]) {
     if (!items.length || !window.confirm(`永久删除选中的 ${items.length} 张图片？此操作无法恢复。`)) return; setBusy(true); setActivity("正在永久删除图片…");
+    setError(null);
     try {
       const paths = items.map((item) => item.path);
       const result = await apiRequest<{deleted: string[]}>("/api/v3/gallery/trash/delete", {method: "POST", body: JSON.stringify({paths})});
       setTrash((current) => current ? {...current, items: current.items.filter((item) => !result.deleted.includes(item.path)), trash_count: Math.max(0, current.trash_count - result.deleted.length)} : current);
-      setSelected(new Set()); setActiveTrash(null); setNotice(`已永久删除 ${result.deleted.length} 张图片`);
+      preserveFailures(paths, result.deleted); setActiveTrash(current => current && result.deleted.includes(current.path) ? null : current); setNotice(`已永久删除 ${result.deleted.length} 张图片${paths.length > result.deleted.length ? `，${paths.length - result.deleted.length} 张未完成，已保留选择。` : ""}`);
     } catch (caught) { setError(caught as ApiClientError); } finally { setBusy(false); setActivity(""); }
   }
   async function deleteAssetsForever(items: GalleryAsset[]) {
@@ -207,38 +280,82 @@ export function GalleryPage({enabled = false}: {enabled?: boolean}) {
       const result = await apiRequest<{deleted: string[]; failed: Array<{path: string; error: string}>}>("/api/v3/gallery/assets/delete", {method: "POST", body: JSON.stringify({paths})});
       if (!result.deleted.length) throw new ApiClientError(result.failed[0]?.error || "没有图片被永久删除", "gallery_delete_failed");
       updateData((current) => ({...current, items: current.items.filter((item) => !result.deleted.includes(item.path))}));
-      setSelected(new Set()); setActive(null);
+      preserveFailures(paths, result.deleted); setActive(current => current && result.deleted.includes(current.path) ? null : current);
       setNotice(result.failed.length
-        ? `已从磁盘永久删除 ${result.deleted.length} 张图片，${result.failed.length} 张删除失败。`
+        ? `已从磁盘永久删除 ${result.deleted.length} 张图片，${result.failed.length} 张删除失败，已保留选择。`
         : `已从磁盘永久删除 ${result.deleted.length} 张图片，无法恢复。`);
     } catch (caught) { setError(caught as ApiClientError); } finally { setBusy(false); setActivity(""); }
   }
   async function submit(items: GalleryAsset[], operation: "regenerate" | "upscale") {
     const usable = operation === "regenerate" ? items.filter((item) => item.positive_prompt) : items;
-    if (!usable.length) return; setBusy(true); setActivity(operation === "regenerate" ? "正在加入再生成队列…" : "正在加入高清修复队列…");
+    if (!usable.length) return; setBusy(true); setError(null); setActivity(operation === "regenerate" ? "正在加入再生成队列…" : "正在加入图像放大队列…");
+    const body = JSON.stringify({paths: usable.map((item) => item.path), operation, count: operation === "regenerate" ? regenCount : 1});
+    if (processRequest.current?.body !== body) processRequest.current = {body, key: crypto.randomUUID()};
     try {
-      const result = await apiRequest<{jobs: GalleryProcessJob[]; failed: Array<{error: string}>}>("/api/v3/gallery/process", {method: "POST", body: JSON.stringify({paths: usable.map((item) => item.path), operation, count: operation === "regenerate" ? regenCount : 1})});
-      if (!result.jobs.length) throw new ApiClientError(result.failed[0]?.error || "任务未能加入队列", "gallery_process_rejected");
-      setJobs((current) => [...result.jobs, ...current]); setJobsOpen(true); setSelected(new Set()); setActive(null); setNotice(operation === "regenerate" ? `已加入 ${result.jobs.length} 项再生成任务。` : `已加入 ${result.jobs.length} 项 1.5× 修复任务。`);
-    } catch (caught) { setError(caught as ApiClientError); } finally { setBusy(false); setActivity(""); setProcessSelection(null); }
+      const result = await apiRequest<{jobs: GalleryProcessJob[]; failed: ProcessFailure[]}>("/api/v3/gallery/process", {method: "POST", headers: {"Idempotency-Key": processRequest.current.key}, body});
+      if (!result.jobs.length) throw new ApiClientError(processFailureMessage(result.failed) || "任务未能加入队列", "gallery_process_rejected");
+      processRequest.current = null;
+      setJobs((current) => [...result.jobs, ...current.filter((job) => !result.jobs.some((added) => added.id === job.id))]); setJobsOpen(true); setSelected(new Set(result.failed.map(item => item.path))); setActive(null); setNotice(operation === "regenerate" ? `已加入 ${result.jobs.length} 项再生成任务。` : `已加入 ${result.jobs.length} 项 1.5× 放大任务。`);
+      if (result.failed.length) setError(new ApiClientError(`${result.failed.length} 项未加入队列：${processFailureMessage(result.failed)}`, "gallery_process_partial"));
+    } catch (caught) {
+      const error = caught as ApiClientError;
+      const failed = error.details?.failed;
+      setError(error.code === "gallery_process_rejected" && Array.isArray(failed) && failed.length
+        ? new ApiClientError(processFailureMessage(failed), error.code, error.requestId) : error);
+    } finally { setBusy(false); setActivity(""); setProcessSelection(null); }
   }
   async function reveal(item: GalleryAsset) { setBusy(true); setActivity("正在打开文件夹…"); try { await apiRequest("/api/v3/gallery/assets/reveal", {method: "POST", body: JSON.stringify({paths: [item.path]})}); setNotice("已在文件夹中定位图片。"); } catch (caught) { setError(caught as ApiClientError); } finally { setBusy(false); setActivity(""); } }
 
   if (!enabled) return <section className="page gallery-page"><Header count="—" /><EmptyState title="画廊尚未连接" detail="使用 V2 数据库启动 V3 后，本地图片目录会显示在这里。" /></section>;
-  return <section ref={pageRef} aria-busy={busy || refreshing} className={`page gallery-page gallery-page--migrated${active || activeTrash ? " has-detail" : ""}`}><Header count={data ? (view === "trash" ? visibleTrash.length : filtered.length) : "—"} />{error && <ErrorState message={error.message} requestId={error.requestId} />}{!data ? <LoadingState label="正在读取画廊索引…" /> : <>
+  return <section ref={pageRef} aria-busy={busy || refreshing} className={`page gallery-page gallery-page--migrated${active || activeTrash ? " has-detail" : ""}`}><Header count={data ? (view === "trash" ? visibleTrash.length : filtered.length) : "—"} />{error && !data && <ErrorState message={error.message} requestId={error.requestId} />}{!data ? <LoadingState label="正在读取画廊索引…" /> : <>
     <nav className="legacy-gallery-tabs" aria-label="画廊视图">{views.map((item) => <button key={item.id} type="button" className={view === item.id ? "is-active" : ""} onClick={() => void openView(item.id)}>{item.label}{item.id === "trash" && <span>{trash?.trash_count ?? data.trash_count}</span>}</button>)}</nav>
-    <div className="legacy-gallery-topbar"><input aria-label="搜索画廊" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索项目、提示词、文件名…" />{view !== "trash" && <button type="button" className={filterOpen ? "is-active" : ""} onClick={() => setFilterOpen((value) => !value)}><Funnel size={17} />筛选</button>}<label><SortAscending size={16} />排序<select aria-label="排序" value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="newest">最新优先</option><option value="oldest">最早优先</option><option value="name">文件名</option></select></label><label title="缩略图大小"><SquaresFour size={16} /><input aria-label="缩略图大小" type="range" min="150" max="285" value={thumbSize} onChange={(event) => setThumbSize(Number(event.target.value))} /></label><button type="button" disabled={view === "trash" ? !visibleTrash.length : !filtered.length} onClick={() => selectGroup(view === "trash" ? visibleTrash : filtered)}><SelectionAll size={16} />全选当前结果</button><button type="button" disabled={refreshing} onClick={() => void refreshNow()}><ArrowClockwise size={16} className={refreshing ? "is-spinning" : ""} />{refreshing ? "正在刷新…" : "刷新画廊"}</button><button type="button" className={jobsOpen ? "is-active" : ""} onClick={() => jobsOpen ? setJobsOpen(false) : void loadJobs()}><ListChecks size={17} />任务</button></div>
-    {filterOpen && view !== "trash" && <section className="legacy-gallery-filters" aria-label="画廊筛选"><label>项目<select aria-label="筛选项目" value={project} onChange={(event) => setProject(event.target.value)}><option value="">全部项目</option>{data.projects.map((item) => <option key={item}>{item}</option>)}</select></label><label>模型<select aria-label="筛选模型" value={model} onChange={(event) => setModel(event.target.value)}><option value="">全部模型</option>{data.models.map((item) => <option key={item}>{item}</option>)}</select></label><label>批次<select aria-label="筛选批次" value={batch} onChange={(event) => setBatch(event.target.value)}><option value="">全部批次</option>{batches.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><button type="button" onClick={() => { setProject(""); setModel(""); setBatch(""); }}>清除筛选</button></section>}
-    {activity && <div className="legacy-gallery-activity" role="status" aria-live="polite"><ArrowClockwise size={15} className="is-spinning" />{activity}</div>}
-    {notice && <div className="workspace-notice workspace-notice--success" role="status" aria-live="polite">{notice}</div>}
-    {jobsOpen && <section className="legacy-process-panel" aria-label="画廊处理任务"><header><strong>画廊处理队列</strong><button type="button" onClick={() => setJobsOpen(false)} aria-label="关闭任务中心"><X size={17} /></button></header>{jobs.length ? jobs.map((job) => <article key={job.id}><div><strong>{job.operation === "gallery_txt2img_more" ? "再出图" : "1.5× 高清修复"}</strong><span>{job.sourceName}</span></div><progress max="1" value={job.progress} /><small>{job.error || job.message || job.state}</small></article>) : <p>当前没有画廊处理任务。</p>}</section>}
-    {view === "trash" ? <TrashGrid items={visibleTrash} selected={selected} onOpen={setActiveTrash} onToggle={toggle} /> : <div className="legacy-gallery-body">{groups.length ? groups.map((group) => <Group key={group.key} group={group} selected={selected} active={active} thumbSize={thumbSize} onOpen={setActive} onPreview={(item) => setLightboxIndex(filtered.findIndex((asset) => asset.path === item.path))} onToggle={toggle} onSelectGroup={selectGroup} />) : <EmptyState title="没有匹配的图片" detail="清除搜索或筛选条件后再试一次。" />}{visible.length < filtered.length && <button ref={loadMoreRef} type="button" className="legacy-load-more" onClick={() => setRenderLimit((value) => Math.min(value + 80, filtered.length))}>继续加载（剩余 {filtered.length - visible.length} 张）</button>}{groups.length > 1 && <aside className="legacy-date-rail" aria-label="日期导航">{groups.map((group) => <a key={group.key} href={`#date-${group.key}`}>{group.key.slice(-2)}</a>)}</aside>}</div>}
-    {(view === "trash" ? selectedTrash : selectedAssets).length > 0 && <Selection selectedCount={(view === "trash" ? selectedTrash : selectedAssets).length} isTrash={view === "trash"} busy={busy} canCompare={selectedAssets.length >= 2 && selectedAssets.length <= 4} onClear={() => setSelected(new Set())} onKeep={() => void changeState(selectedAssets, "kept")} onReject={() => void changeState(selectedAssets, "rejected")} onTrash={() => void move(selectedAssets)} onRestore={() => void restore(selectedTrash)} onDelete={() => void deleteForever(selectedTrash)} onDeleteDirect={() => void deleteAssetsForever(selectedAssets)} onRegen={() => { setRegenCount(1); setProcessSelection({items: selectedAssets, operation: "regenerate"}); }} onUpscale={() => setProcessSelection({items: selectedAssets, operation: "upscale"})} onCompare={() => setCompareOpen(true)} />}
-    {active && <div className="legacy-detail-layer"><div className="legacy-detail-backdrop" aria-hidden="true" onMouseDown={() => setActive(null)} /><Detail asset={active} busy={busy} docked={dockedDetail} processing={data.processing} onClose={() => setActive(null)} onPreview={() => setLightboxIndex(filtered.findIndex((item) => item.path === active.path))} onCopy={copy} onReveal={reveal} onState={(state) => void changeState([active], state)} onRegen={() => { setRegenCount(1); setProcessSelection({items: [active], operation: "regenerate"}); }} onUpscale={() => setProcessSelection({items: [active], operation: "upscale"})} onTrash={() => void move([active])} onDelete={() => void deleteAssetsForever([active])} /></div>}
-    {activeTrash && <div className="legacy-detail-layer"><div className="legacy-detail-backdrop" aria-hidden="true" onMouseDown={() => setActiveTrash(null)} /><TrashDetail asset={activeTrash} busy={busy} docked={dockedDetail} onClose={() => setActiveTrash(null)} onRestore={() => void restore([activeTrash])} onDelete={() => void deleteForever([activeTrash])} /></div>}
+    <div ref={controlsRef} className="gallery-controls">
+      <div className="legacy-gallery-topbar">
+        <input aria-label="搜索画廊" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索项目、提示词、文件名…" />
+        {view !== "trash" && <button type="button" aria-label="筛选" aria-expanded={filterOpen} aria-controls="gallery-filters" className={filterOpen || filterCount ? "is-active" : ""} onClick={() => {setFilterOpen(value => !value); setJobsOpen(false);}}><Funnel size={17} />筛选{filterCount > 0 && <span>{filterCount}</span>}</button>}
+        <label><SortAscending size={16} /><select aria-label="排序" value={sort} onChange={event => setSort(event.target.value as Sort)}><option value="newest">最新优先</option><option value="oldest">最早优先</option><option value="name">文件名</option></select></label>
+        <label className="gallery-size-control" title="缩略图大小"><SquaresFour size={16} /><input aria-label="缩略图大小" type="range" min="150" max="285" value={thumbSize} onChange={event => setThumbSize(Number(event.target.value))} /></label>
+        <button type="button" disabled={busy} aria-pressed={selection.selecting} className={selection.selecting ? "is-active" : ""} onClick={() => {selection.setSelecting(!selection.selecting); selection.clear(); setActive(null); setActiveTrash(null);}}><SelectionAll size={17} />{selection.selecting ? "退出多选" : "多选模式"}</button>
+        <button type="button" className="gallery-icon-button" aria-label={refreshing ? "正在刷新…" : "刷新画廊"} title="刷新画廊" disabled={refreshing} onClick={() => void refreshNow()}><ArrowClockwise size={18} className={refreshing ? "is-spinning" : ""} /></button>
+        <button type="button" aria-label="任务" title="处理任务" aria-expanded={jobsOpen} className={`gallery-icon-button${jobsOpen ? " is-active" : ""}`} onClick={() => {setJobsOpen(!jobsOpen); setFilterOpen(false); if (!jobsOpen) void loadJobs(false);}}><ListChecks size={18} /></button>
+      </div>
+      {filterOpen && view !== "trash" && <section id="gallery-filters" className="legacy-gallery-filters" aria-label="画廊筛选">
+        <label>项目<select aria-label="筛选项目" value={project} onChange={event => setProject(event.target.value)}><option value="">全部项目</option>{data.projects.map(item => <option key={item}>{item}</option>)}</select></label>
+        <label>模型<select aria-label="筛选模型" value={model} onChange={event => setModel(event.target.value)}><option value="">全部模型</option>{data.models.map(item => <option key={item}>{item}</option>)}</select></label>
+        <label>批次<select aria-label="筛选批次" value={batch} onChange={event => setBatch(event.target.value)}><option value="">全部批次</option>{batches.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+        <button type="button" onClick={() => {setProject(""); setModel(""); setBatch("");}}>清除筛选</button>
+        <button type="button" onClick={() => setFilterOpen(false)}>完成</button>
+      </section>}
+      {jobsOpen && <section className="legacy-process-panel" aria-label="画廊处理任务"><header><strong>处理任务</strong><button type="button" onClick={() => setJobsOpen(false)} aria-label="关闭任务中心"><X size={17} /></button></header>{jobs.length ? jobs.map(job => <article key={job.id}><div><strong>{job.operation === "gallery_txt2img_more" ? "再出图" : "1.5× 图像放大"}</strong><span>{job.sourceName}</span></div><progress max="1" value={job.progress} /><small>{job.error || job.message || job.state}</small></article>) : <p>当前没有画廊处理任务。</p>}</section>}
+    </div>
+    {filterCount > 0 && view !== "trash" && <div className="gallery-filter-chips" aria-label="已选筛选条件">
+      {project && <button type="button" onClick={() => setProject("")} aria-label={`清除项目 ${project}`}>{project}<X size={13} /></button>}
+      {model && <button type="button" onClick={() => setModel("")} aria-label={`清除模型 ${model}`}>{model}<X size={13} /></button>}
+      {batch && <button type="button" onClick={() => setBatch("")} aria-label="清除批次筛选">{batches.find(item => item.id === batch)?.title || batch}<X size={13} /></button>}
+    </div>}
+    {(activity || notice || (error && data)) && <div className={`gallery-feedback${selected.size ? " has-selection" : ""}`}>
+      {error && <div className="gallery-error-toast" role="alert"><span>{error.message}</span><button type="button" aria-label="关闭错误提示" onClick={() => setError(null)}><X size={16} /></button></div>}
+      {activity && <div role="status" aria-live="polite"><ArrowClockwise size={15} className="is-spinning" />{activity}</div>}
+      {notice && <div role="status" aria-live="polite"><Check size={15} />{notice}</div>}
+    </div>}
+    <div className="gallery-browse-status">
+      <span>{view === "trash" ? `回收站 ${visibleTrash.length} 张` : `已显示 ${visible.length} / ${filtered.length} 张`}{filtered.length >= 1000 && view !== "trash" && " · 仅显示最近 1000 张"}</span>
+      {selection.selecting && <button type="button" disabled={busy || !(view === "trash" ? visibleTrash.length : filtered.length)} onClick={selection.all}>全选当前结果</button>}
+      <details className="gallery-selection-tips"><summary><Question size={16} />操作提示</summary><p>单击查看详情，点击图片右上角放大。多选时可用 Shift 连选、Ctrl / ⌘ 追加或拖动框选；Esc 取消本次框选。全选包含当前筛选结果中尚未展示的图片。</p></details>
+    </div>
+    <div ref={selection.gridRef} className={`gallery-selection-surface${selection.selecting ? " is-selecting" : ""}`} aria-label="图片选择区域" tabIndex={0}
+      onPointerDown={selection.pointerDown} onDragStart={event => event.preventDefault()}
+      onClickCapture={event => {if (selection.suppressClick.current) {event.preventDefault(); event.stopPropagation();}}}
+      onKeyDown={event => {if (event.target !== event.currentTarget || busy) return; if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {event.preventDefault(); selection.all();} if (event.key === "Escape") selection.clear();}}>
+    {view === "trash" ? <TrashGrid items={visibleTrash} selected={selected} onOpen={(item, event) => {if (selection.isSelectionClick(event)) selection.toggle(item.path, event); else {detailTrigger.current = event.currentTarget as HTMLElement; setActiveTrash(item);}}} onToggle={toggle} /> : <div className="legacy-gallery-body">{groups.length ? groups.map((group) => <Group key={group.key} group={group} selected={selected} active={active} thumbSize={thumbSize} onOpen={selectImage} onPreview={item => !selection.selecting && openPreview(item)} onToggle={toggle} onSelectGroup={selectGroup} />) : <EmptyState title="没有匹配的图片" detail="清除搜索或筛选条件后再试一次。" />}{visible.length < filtered.length && <button ref={loadMoreRef} type="button" className="legacy-load-more" onClick={() => setRenderLimit((value) => Math.min(value + 80, filtered.length))}>继续加载（剩余 {filtered.length - visible.length} 张）</button>}{sort !== "name" && groups.length > 1 && <aside className="legacy-date-rail" aria-label="日期导航">{groups.map((group) => <a key={group.key} href={`#date-${group.key}`}>{group.key === "unknown" ? "未知" : group.key.slice(5).replace("-", "/")}</a>)}</aside>}</div>}
+    </div>
+    {selection.box && createPortal(<div className="gallery-selection-box" aria-hidden="true" style={selection.box} />, document.body)}
+    {(view === "trash" ? selectedTrash : selectedAssets).length > 0 && <Selection selectedCount={(view === "trash" ? selectedTrash : selectedAssets).length} isTrash={view === "trash"} processing={data.processing} busy={busy} canCompare={selectedAssets.length >= 2 && selectedAssets.length <= 4} onClear={() => {selection.clear(); selection.setSelecting(false);}} onKeep={() => void changeState(selectedAssets, "kept")} onReject={() => void changeState(selectedAssets, "rejected")} onTrash={() => void move(selectedAssets)} onRestore={() => void restore(selectedTrash)} onDelete={() => void deleteForever(selectedTrash)} onDeleteDirect={() => void deleteAssetsForever(selectedAssets)} onRegen={() => { setRegenCount(1); setProcessSelection({items: selectedAssets, operation: "regenerate"}); }} onUpscale={() => setProcessSelection({items: selectedAssets, operation: "upscale"})} onCompare={() => setCompareOpen(true)} />}
+    {active && <div className="legacy-detail-layer"><div className="legacy-detail-backdrop" aria-hidden="true" onMouseDown={() => setActive(null)} /><Detail asset={active} busy={busy} docked={dockedDetail} returnFocus={detailTrigger} position={activeIndex} total={filtered.length} onPrevious={() => setActive(filtered[activeIndex - 1])} onNext={() => setActive(filtered[activeIndex + 1])} processing={data.processing} onClose={() => setActive(null)} onPreview={() => openPreview(active)} onCopy={copy} onReveal={reveal} onState={(state) => void changeState([active], state)} onRegen={() => { setRegenCount(1); setProcessSelection({items: [active], operation: "regenerate"}); }} onUpscale={() => setProcessSelection({items: [active], operation: "upscale"})} onTrash={() => void move([active])} onDelete={() => void deleteAssetsForever([active])} /></div>}
+    {activeTrash && <div className="legacy-detail-layer"><div className="legacy-detail-backdrop" aria-hidden="true" onMouseDown={() => setActiveTrash(null)} /><TrashDetail asset={activeTrash} busy={busy} docked={dockedDetail} returnFocus={detailTrigger} onClose={() => setActiveTrash(null)} onRestore={() => void restore([activeTrash])} onDelete={() => void deleteForever([activeTrash])} /></div>}
     {processSelection && <ProcessDialog selection={processSelection} count={regenCount} busy={busy} onCount={setRegenCount} onCancel={() => setProcessSelection(null)} onSubmit={() => void submit(processSelection.items, processSelection.operation)} />}
-    {compareOpen && <Compare assets={selectedAssets} onClose={() => setCompareOpen(false)} />}
-    <Lightbox open={lightboxIndex >= 0} close={() => setLightboxIndex(-1)} index={lightboxIndex} slides={filtered.map((item) => ({src: item.content_url, alt: item.name}))} labels={{Close: "关闭", Previous: "上一张", Next: "下一张"}} />
+    {compareOpen && <GalleryCompare assets={selectedAssets} onClose={() => setCompareOpen(false)} />}
+    {preview && <ImagePreview index={preview.index} onClose={() => setPreview(null)} images={preview.images} />}
   </>}</section>;
 }
 
@@ -255,42 +372,112 @@ function useMediaQuery(query: string): boolean {
   return matches;
 }
 
-function useDetailFocus(onClose: () => void, docked: boolean) {
+function useDetailFocus(onClose: () => void, docked: boolean, returnFocus?: {current: HTMLElement | null}) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const closeHandler = useRef(onClose);
   closeHandler.current = onClose;
-  useEffect(() => {
+  useBodyScrollLock(!docked);
+  useLayoutEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeRef.current?.focus();
+    const panel = closeRef.current?.closest("aside");
+    const layer = panel?.closest(".legacy-detail-layer");
+    const page = layer?.parentElement;
+    const background = new Map<HTMLElement, boolean>();
+    if (!docked && page) {
+      const shell = page.closest(".app-shell");
+      const elements = [...page.children, ...(shell ? [...shell.children] : [])];
+      elements.forEach(child => {
+        if (child instanceof HTMLElement && !child.contains(panel || null)) {background.set(child, child.inert); child.inert = true;}
+      });
+    }
+    closeRef.current?.focus({preventScroll: true});
     const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); closeHandler.current(); return; }
+      if (document.querySelector(".yarl__root, .legacy-process-dialog, .gallery-compare-dialog")) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        const more = panel?.querySelector<HTMLDetailsElement>(".gallery-detail-more[open]");
+        if (more) {more.open = false; more.querySelector("summary")?.focus({preventScroll: true});}
+        else closeHandler.current();
+        return;
+      }
       if (docked || event.key !== "Tab") return;
-      const panel = closeRef.current?.closest("aside");
-      const focusable = [...(panel?.querySelectorAll<HTMLElement>("button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex='-1'])") || [])];
+      const focusable = [...(panel?.querySelectorAll<HTMLElement>("button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), summary, [tabindex]:not([tabindex='-1'])") || [])]
+        .filter(element => !element.closest("details:not([open])") || element.tagName === "SUMMARY");
       if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {event.preventDefault(); last.focus({preventScroll: true});}
+      else if (!event.shiftKey && document.activeElement === last) {event.preventDefault(); first.focus({preventScroll: true});}
     };
     document.addEventListener("keydown", handleKey);
-    return () => { document.removeEventListener("keydown", handleKey); if (previous?.isConnected) previous.focus(); };
-  }, [docked]);
+    return () => {
+      document.removeEventListener("keydown", handleKey);
+      background.forEach((inert, element) => {element.inert = inert;});
+      const target = returnFocus?.current || previous;
+      if (target?.isConnected) target.focus({preventScroll: true});
+    };
+  }, [docked, returnFocus]);
   return closeRef;
 }
 
-function Header({count}: {count: string | number}) { return <header className="page-header gallery-header"><div><span className="eyebrow">LOCAL ARCHIVE · V2 GALLERY</span><h1>生成画廊</h1><p>复用 V2 成熟的图片管理交互，并保留 V3 画师与数据追溯。</p></div><div className="header-stat"><strong>{count}</strong><span>{count === "—" ? "local assets" : `${count} 张`}</span></div></header>; }
-function Group({group, selected, active, thumbSize, onOpen, onPreview, onToggle, onSelectGroup}: {group: {key: string; label: string; items: GalleryAsset[]}; selected: Set<string>; active: GalleryAsset | null; thumbSize: number; onOpen: (item: GalleryAsset) => void; onPreview: (item: GalleryAsset) => void; onToggle: (path: string) => void; onSelectGroup: (items: GalleryAsset[]) => void}) {
-  const photos: AlbumPhoto[] = group.items.map((item) => ({...item, src: item.thumbnail_url, alt: `${item.project} · ${item.name}`}));
+function Header({count}: {count: string | number}) {
+  return <header className="page-header gallery-header"><div><h1>生成画廊 <span className="gallery-total">{count} 张</span></h1><p>浏览、挑选，或沿用喜欢的图片继续创作。</p></div></header>;
+}
+
+function Group({group, selected, active, thumbSize, onOpen, onPreview, onToggle, onSelectGroup}: {group: {key: string; label: string; items: GalleryAsset[]}; selected: Set<string>; active: GalleryAsset | null; thumbSize: number; onOpen: (item: GalleryAsset, event: MouseEvent) => void; onPreview: (item: GalleryAsset) => void; onToggle: (path: string, event: MouseEvent) => void; onSelectGroup: (items: GalleryAsset[]) => void}) {
+  const photos = useMemo(() => group.items.map(item => ({...item, key: item.path, src: item.thumbnail_url, alt: `${item.project} · ${item.name}`})), [group.items]);
   return <section id={`date-${group.key}`} className="legacy-date-group"><header><div><h2>{group.label}</h2><span>{group.items.length} 张图片</span></div><div><span>{new Set(group.items.map((item) => item.batch_id)).size} 个批次</span><button type="button" onClick={() => onSelectGroup(group.items)}><SelectionAll size={16} />选择本组</button></div></header><RowsAlbum layout="rows" photos={photos} defaultContainerWidth={1440} targetRowHeight={thumbSize} spacing={8} rowConstraints={(width: number) => ({maxPhotos: Math.min(12, Math.max(5, Math.round(width / thumbSize))), singleRowMaxHeight: Math.round(thumbSize * 1.25)})} render={{photo: (_props: unknown, context: {photo: AlbumPhoto; width: number; height: number}) => <Photo asset={context.photo} width={context.width} height={context.height} selected={selected.has(context.photo.path)} active={active?.path === context.photo.path} onOpen={onOpen} onPreview={onPreview} onToggle={onToggle} />}} /></section>;
 }
-function Photo({asset, width, height, selected, active, onOpen, onPreview, onToggle}: {asset: AlbumPhoto; width: number; height: number; selected: boolean; active: boolean; onOpen: (item: GalleryAsset) => void; onPreview: (item: GalleryAsset) => void; onToggle: (path: string) => void}) { const comparisonPosition = artistComparisonPosition(asset); return <article className={`legacy-photo-card${selected ? " is-selected" : ""}${active ? " is-active" : ""}`} style={{width, height}}><button type="button" className="legacy-photo-open" onClick={() => onOpen(asset)} onDoubleClick={() => onPreview(asset)} aria-label={`查看 ${asset.name}`}><img src={asset.thumbnail_url} alt={asset.name} loading="lazy" /></button><button type="button" className="legacy-selection-toggle" onClick={() => onToggle(asset.path)} aria-pressed={selected} aria-label={`${selected ? "取消选择" : "选择"} ${asset.name}`}>{selected && <Check size={16} weight="bold" />}</button>{asset.state === "kept" && <span className="legacy-state-badge kept"><Heart size={12} weight="fill" />保留</span>}{asset.state === "rejected" && <span className="legacy-state-badge rejected"><X size={12} />淘汰</span>}{asset.source === "external" && <span className="legacy-source-badge"><FolderOpen size={12} />外部图片</span>}{asset.artist_comparison && <span className="legacy-artist-badge">{asset.artist_comparison.rendered_artist}{comparisonPosition ? ` · ${comparisonPosition}` : ""}</span>}<span className="legacy-photo-name">{asset.name}</span></article>; }
-function TrashGrid({items, selected, onOpen, onToggle}: {items: GalleryTrashAsset[]; selected: Set<string>; onOpen: (item: GalleryTrashAsset) => void; onToggle: (path: string) => void}) { return !items.length ? <EmptyState title="画廊回收站是空的" detail="移入回收站的图片会出现在这里。" /> : <div className="legacy-trash-grid">{items.map((item) => <article key={item.path} className={`legacy-photo-card${selected.has(item.path) ? " is-selected" : ""}`}><button type="button" className="legacy-photo-open" onClick={() => onOpen(item)} aria-label={`查看 ${item.name}`}><img src={item.thumbnail_url} alt={item.name} /></button><button type="button" className="legacy-selection-toggle" onClick={() => onToggle(item.path)} aria-pressed={selected.has(item.path)} aria-label={`${selected.has(item.path) ? "取消选择" : "选择"} ${item.name}`}>{selected.has(item.path) && <Check size={16} />}</button><span className="legacy-photo-name">{item.name}</span></article>)}</div>; }
-function Detail({asset, busy, docked, processing, onClose, onPreview, onCopy, onReveal, onState, onRegen, onUpscale, onTrash, onDelete}: {asset: GalleryAsset; busy: boolean; docked: boolean; processing?: GalleryResponse["processing"]; onClose: () => void; onPreview: () => void; onCopy: (text: string, label: string) => Promise<void>; onReveal: (item: GalleryAsset) => Promise<void>; onState: (state: "" | "kept" | "rejected") => void; onRegen: () => void; onUpscale: () => void; onTrash: () => void; onDelete: () => void}) {
-  const params = Object.entries(asset.generation_params || {});
+function Photo({asset, width, height, selected, active, onOpen, onPreview, onToggle}: {asset: AlbumPhoto; width: number; height: number; selected: boolean; active: boolean; onOpen: (item: GalleryAsset, event: MouseEvent) => void; onPreview: (item: GalleryAsset) => void; onToggle: (path: string, event: MouseEvent) => void}) {
   const comparisonPosition = artistComparisonPosition(asset);
-  const closeRef = useDetailFocus(onClose, docked);
-  return <aside className="legacy-detail-drawer" role={docked ? "region" : "dialog"} aria-modal={docked ? undefined : "true"} aria-label="图片详情"><header><strong>图片详情</strong><button ref={closeRef} type="button" onClick={onClose} aria-label="关闭图片详情"><X size={20} /></button></header><div className="legacy-detail-body"><button type="button" className="legacy-detail-preview" onClick={onPreview} aria-label="查看原图"><img src={asset.thumbnail_url} alt={asset.name} /><ArrowsOutSimple size={18} /></button><h2>{asset.name}</h2><dl><div><dt>项目</dt><dd>{asset.project}</dd></div><div><dt>模型</dt><dd>{asset.model_profile || "未知"}</dd></div><div><dt>尺寸</dt><dd>{asset.width && asset.height ? `${asset.width} × ${asset.height}` : "未记录"}</dd></div><div><dt>来源</dt><dd>{asset.source === "external" ? "外部图片" : "ANIMA 生成"}</dd></div><div><dt>批次</dt><dd>{asset.batch_title}</dd></div><div><dt>时间</dt><dd>{dateTime(asset.created_at)}</dd></div><div><dt>文件大小</dt><dd>{bytes(asset.byte_size)}</dd></div>{params.map(([key, value]) => <div key={key}><dt>{key.replace("batch_size", "batch")}</dt><dd>{String(value)}</dd></div>)}{asset.artist_comparison && <><div><dt>{asset.artist_comparison.derived_from === "gallery_regenerate" ? "画师 Tag" : "画师对照"}</dt><dd>{asset.artist_comparison.rendered_artist}{comparisonPosition ? `（${comparisonPosition}）` : ""}</dd></div>{typeof asset.artist_comparison.seed === "number" && <div><dt>固定 Seed</dt><dd>{asset.artist_comparison.seed}</dd></div>}</>}{asset.candidate.versions.data_pack && <div><dt>数据包</dt><dd>{asset.candidate.versions.data_pack}</dd></div>}</dl><Prompt title="正向提示词" value={asset.positive_prompt} onCopy={() => void onCopy(asset.positive_prompt, "正向提示词")} />{asset.negative_prompt && <Prompt title="反向提示词" value={asset.negative_prompt} onCopy={() => void onCopy(asset.negative_prompt, "反向提示词")} negative />}</div><footer className="legacy-detail-actions"><button type="button" aria-label="再生成" disabled={busy || !processing?.regenAvailable || !asset.positive_prompt} onClick={onRegen}><Images size={16} />用同样提示词再出图</button><button type="button" disabled={busy || !processing?.available} onClick={onUpscale}><MagicWand size={16} />1.5× 高清修复</button><div><button type="button" disabled={busy} onClick={() => onState(asset.state === "kept" ? "" : "kept")}><Heart size={15} />保留</button><button type="button" disabled={busy} onClick={() => onState(asset.state === "rejected" ? "" : "rejected")}><X size={15} />淘汰</button></div><button type="button" disabled={busy} onClick={() => void onReveal(asset)}><FolderOpen size={16} />在文件夹中显示</button><button type="button" disabled={busy} className="is-danger" aria-label="移入回收站" onClick={onTrash}><Trash size={16} />移入画廊回收站</button><button type="button" disabled={busy} className="is-danger" aria-label="永久删除原图" onClick={onDelete}><Trash size={16} />永久删除原图</button></footer></aside>;
+  return <article data-selection-path={asset.path} className={`legacy-photo-card${selected ? " is-selected" : ""}${active ? " is-active" : ""}`} style={{width, height}}>
+    <button type="button" className="legacy-photo-open" onClick={event => onOpen(asset, event)} aria-label={`查看 ${asset.name}`}><img src={asset.thumbnail_url} alt={asset.name} loading="lazy" decoding="async" /></button>
+    <button type="button" className="legacy-selection-toggle" onClick={event => onToggle(asset.path, event)} aria-pressed={selected} aria-label={`${selected ? "取消选择" : "选择"} ${asset.name}`}>{selected && <Check size={16} weight="bold" />}</button>
+    <button type="button" className="gallery-photo-preview" onClick={() => onPreview(asset)} aria-label={`放大 ${asset.name}`} title="查看原图"><ArrowsOutSimple size={18} /></button>
+    <div className="gallery-photo-badges">
+      {asset.state === "kept" && <span className="legacy-state-badge kept"><Heart size={12} weight="fill" />保留</span>}
+      {asset.state === "rejected" && <span className="legacy-state-badge rejected"><X size={12} />淘汰</span>}
+      {asset.source === "external" && <span className="legacy-source-badge"><FolderOpen size={12} />外部</span>}
+      {asset.artist_comparison && <span className="legacy-artist-badge">{asset.artist_comparison.rendered_artist}{comparisonPosition ? ` · ${comparisonPosition}` : ""}</span>}
+    </div>
+    <span className="legacy-photo-name" title={asset.name}>{asset.name}</span>
+  </article>;
+}
+
+function TrashGrid({items, selected, onOpen, onToggle}: {items: GalleryTrashAsset[]; selected: Set<string>; onOpen: (item: GalleryTrashAsset, event: MouseEvent) => void; onToggle: (path: string, event: MouseEvent) => void}) { return !items.length ? <EmptyState title="画廊回收站是空的" detail="移入回收站的图片会出现在这里。" /> : <div className="legacy-trash-grid">{items.map((item) => <article key={item.path} data-selection-path={item.path} className={`legacy-photo-card${selected.has(item.path) ? " is-selected" : ""}`}><button type="button" className="legacy-photo-open" onClick={event => onOpen(item, event)} aria-label={`查看 ${item.name}`}><img src={item.thumbnail_url} alt={item.name} /></button><button type="button" className="legacy-selection-toggle" onClick={event => onToggle(item.path, event)} aria-pressed={selected.has(item.path)} aria-label={`${selected.has(item.path) ? "取消选择" : "选择"} ${item.name}`}>{selected.has(item.path) && <Check size={16} />}</button><span className="legacy-photo-name">{item.name}</span></article>)}</div>; }
+function Detail({asset, busy, docked, returnFocus, position, total, onPrevious, onNext, processing, onClose, onPreview, onCopy, onReveal, onState, onRegen, onUpscale, onTrash, onDelete}: {
+  asset: GalleryAsset; busy: boolean; docked: boolean; returnFocus: {current: HTMLElement | null}; position: number; total: number; onPrevious: () => void; onNext: () => void;
+  processing?: GalleryResponse["processing"]; onClose: () => void; onPreview: () => void; onCopy: (text: string, label: string) => Promise<void>; onReveal: (item: GalleryAsset) => Promise<void>; onState: (state: "" | "kept" | "rejected") => void; onRegen: () => void; onUpscale: () => void; onTrash: () => void; onDelete: () => void;
+}) {
+  const params = Object.entries(asset.generation_params || {}).filter(([key]) => !["width", "height"].includes(key));
+  const comparisonPosition = artistComparisonPosition(asset);
+  const closeRef = useDetailFocus(onClose, docked, returnFocus);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const moreRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {if (bodyRef.current) bodyRef.current.scrollTop = 0; if (moreRef.current) moreRef.current.open = false;}, [asset.path]);
+  return <aside className="legacy-detail-drawer" role={docked ? "region" : "dialog"} aria-modal={docked ? undefined : "true"} aria-label="图片详情">
+    <header><strong>图片详情</strong><nav className="gallery-detail-nav" aria-label="详情图片切换"><button type="button" onClick={onPrevious} disabled={busy || position <= 0} aria-label="上一张详情"><CaretLeft size={18} /></button><span>{position + 1} / {total}</span><button type="button" onClick={onNext} disabled={busy || position < 0 || position >= total - 1} aria-label="下一张详情"><CaretRight size={18} /></button></nav><button ref={closeRef} type="button" onClick={onClose} aria-label="关闭图片详情"><X size={20} /></button></header>
+    <div ref={bodyRef} className="legacy-detail-body">
+      <button type="button" className="legacy-detail-preview" onClick={onPreview} aria-label="查看原图"><img key={asset.path} src={asset.thumbnail_url} alt={asset.name} /><span><ArrowsOutSimple size={16} />查看原图</span></button>
+      <h2 title={asset.name}>{asset.name}</h2>
+      <dl className="gallery-detail-summary"><div><dt>模型</dt><dd>{asset.model_profile || "未知"}</dd></div><div><dt>尺寸</dt><dd>{asset.width && asset.height ? `${asset.width} × ${asset.height}` : "未记录"}</dd></div>{params.map(([key, value]) => <div key={key}><dt>{({steps: "步数", cfg: "CFG", seed: "Seed", sampler: "采样器", scheduler: "调度器", batch_size: "数量"} as Record<string, string>)[key] || key}</dt><dd>{String(value)}</dd></div>)}</dl>
+      <Prompt title="正向提示词" value={asset.positive_prompt} onCopy={() => void onCopy(asset.positive_prompt, "正向提示词")} />
+      {asset.negative_prompt && <Prompt title="反向提示词" value={asset.negative_prompt} onCopy={() => void onCopy(asset.negative_prompt, "反向提示词")} negative />}
+      <details className="gallery-file-details"><summary>文件与来源</summary><dl><div><dt>项目</dt><dd>{asset.project}</dd></div><div><dt>来源</dt><dd>{asset.source === "external" ? "外部图片" : "ANIMA 生成"}</dd></div><div><dt>批次</dt><dd>{asset.batch_title}</dd></div><div><dt>时间</dt><dd>{dateTime(asset.created_at)}</dd></div><div><dt>文件大小</dt><dd>{bytes(asset.byte_size)}</dd></div>{asset.artist_comparison && <><div><dt>{asset.artist_comparison.derived_from === "gallery_regenerate" ? "画师 Tag" : "画师对照"}</dt><dd>{asset.artist_comparison.rendered_artist}{comparisonPosition ? `（${comparisonPosition}）` : ""}</dd></div>{(typeof asset.artist_comparison.seed === "number" || typeof asset.artist_comparison.seed === "string") && <div><dt>固定 Seed</dt><dd>{asset.artist_comparison.seed}</dd></div>}</>}{asset.candidate.versions.data_pack && <div><dt>数据包</dt><dd>{asset.candidate.versions.data_pack}</dd></div>}</dl></details>
+    </div>
+    <footer className="legacy-detail-actions gallery-detail-actions">
+      <GalleryWorkspaceButton key={asset.path} path={asset.path} hasPrompt={Boolean(asset.positive_prompt?.trim())} disabled={busy} />
+      <button type="button" className="is-primary" aria-label="再生成" disabled={busy || !processing?.regenAvailable || !asset.positive_prompt} onClick={onRegen}><Images size={16} />沿用条件再出图</button>
+      <button type="button" disabled={busy} aria-pressed={asset.state === "kept"} onClick={() => onState(asset.state === "kept" ? "" : "kept")}><Heart size={16} weight={asset.state === "kept" ? "fill" : "regular"} />{asset.state === "kept" ? "已保留" : "保留"}</button>
+      <details ref={moreRef} className="gallery-detail-more"><summary aria-label="更多图片操作"><DotsThree size={22} /></summary><div className="gallery-detail-menu">
+        <GalleryReferenceButton key={asset.path} path={asset.path} disabled={busy} />
+        <UpscaleButton busy={busy} processing={processing} onClick={onUpscale} />
+        <button type="button" disabled={busy} aria-pressed={asset.state === "rejected"} onClick={() => onState(asset.state === "rejected" ? "" : "rejected")}><X size={15} />{asset.state === "rejected" ? "取消淘汰" : "淘汰"}</button>
+        <button type="button" disabled={busy} onClick={() => void onReveal(asset)}><FolderOpen size={16} />在文件夹中显示</button>
+        <button type="button" disabled={busy} className="is-danger" aria-label="移入回收站" onClick={onTrash}><Trash size={16} />移入画廊回收站</button>
+        <button type="button" disabled={busy} className="is-danger" aria-label="永久删除原图" onClick={onDelete}><Trash size={16} />永久删除原图</button>
+      </div></details>
+    </footer>
+  </aside>;
 }
 
 function artistComparisonPosition(asset: GalleryAsset): string {
@@ -300,7 +487,42 @@ function artistComparisonPosition(asset: GalleryAsset): string {
     : "";
 }
 function Prompt({title, value, negative = false, onCopy}: {title: string; value: string; negative?: boolean; onCopy: () => void}) { return <section className={`legacy-prompt${negative ? " is-negative" : ""}`}><header><h3>{title}</h3><button type="button" onClick={onCopy}><Copy size={14} />复制</button></header><p>{value || "此图片没有保存提示词。"}</p></section>; }
-function TrashDetail({asset, busy, docked, onClose, onRestore, onDelete}: {asset: GalleryTrashAsset; busy: boolean; docked: boolean; onClose: () => void; onRestore: () => void; onDelete: () => void}) { const closeRef = useDetailFocus(onClose, docked); return <aside className="legacy-detail-drawer" role={docked ? "region" : "dialog"} aria-modal={docked ? undefined : "true"} aria-label="回收站图片详情"><header><strong>回收站图片详情</strong><button ref={closeRef} type="button" onClick={onClose} aria-label="关闭图片详情"><X size={20} /></button></header><div className="legacy-detail-body"><img className="legacy-trash-image" src={asset.content_url} alt={asset.name} /><h2>{asset.name}</h2><dl><div><dt>原位置</dt><dd>{asset.original_path}</dd></div><div><dt>文件大小</dt><dd>{bytes(asset.byte_size)}</dd></div></dl></div><footer className="legacy-detail-actions"><button type="button" disabled={busy} onClick={onRestore}><ClockCounterClockwise size={16} />恢复到画廊</button><button type="button" disabled={busy} className="is-danger" onClick={onDelete}><Trash size={16} />永久删除</button></footer></aside>; }
-function Selection({selectedCount, isTrash, busy, canCompare, onClear, onKeep, onReject, onTrash, onRestore, onDelete, onDeleteDirect, onRegen, onUpscale, onCompare}: {selectedCount: number; isTrash: boolean; busy: boolean; canCompare: boolean; onClear: () => void; onKeep: () => void; onReject: () => void; onTrash: () => void; onRestore: () => void; onDelete: () => void; onDeleteDirect: () => void; onRegen: () => void; onUpscale: () => void; onCompare: () => void}) { return <section className="legacy-selection-bar" aria-label="批量操作"><div><strong>已选择 {selectedCount} 项</strong><button type="button" onClick={onClear}>清除</button></div>{isTrash ? <div><button type="button" disabled={busy} onClick={onRestore}><ClockCounterClockwise size={16} />恢复</button><button type="button" disabled={busy} className="is-danger" onClick={onDelete}><Trash size={16} />永久删除</button></div> : <div><button type="button" disabled={busy} onClick={onRegen}><Images size={16} />再出图</button><button type="button" disabled={busy} onClick={onUpscale}><MagicWand size={16} />1.5× 修复</button><button type="button" disabled={!canCompare} onClick={onCompare}><SlidersHorizontal size={16} />比较</button><button type="button" disabled={busy} onClick={onKeep}><Heart size={16} />保留</button><button type="button" disabled={busy} onClick={onReject}><X size={16} />淘汰</button><button type="button" disabled={busy} onClick={onTrash}><Trash size={16} />移入回收站</button><button type="button" disabled={busy} className="is-danger" onClick={onDeleteDirect}><Trash size={16} />彻底删除</button></div>}</section>; }
-function ProcessDialog({selection, count, busy, onCount, onCancel, onSubmit}: {selection: {items: GalleryAsset[]; operation: "regenerate" | "upscale"}; count: number; busy: boolean; onCount: (value: number) => void; onCancel: () => void; onSubmit: () => void}) { const regen = selection.operation === "regenerate"; return <div className="legacy-dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}><section className="legacy-process-dialog" role="dialog" aria-modal="true" aria-label={regen ? "用同样提示词再出图" : "加入 1.5× 高清修复队列"}><header>{regen ? <Images size={22} /> : <MagicWand size={22} />}<div><h2>{regen ? "用同样提示词再出图" : "加入 1.5× 高清修复队列"}</h2><p>将顺序处理 {selection.items.length} 张图片，结果不会覆盖原图。</p></div></header><div className="legacy-process-source"><img src={selection.items[0].thumbnail_url} alt="" /><span>{selection.items[0].name}</span></div>{regen && <label>每张再出<select value={count} onChange={(event) => onCount(Number(event.target.value))}>{[1, 2, 3, 4].map((item) => <option key={item} value={item}>{item} 张</option>)}</select></label>}<footer><button type="button" onClick={onCancel}>取消</button><button type="button" className="is-primary" disabled={busy} onClick={onSubmit}>{busy ? "正在加入…" : "加入队列"}</button></footer></section></div>; }
-function Compare({assets, onClose}: {assets: GalleryAsset[]; onClose: () => void}) { return <div className="legacy-compare" role="dialog" aria-modal="true" aria-label="图片比较"><header><div><SlidersHorizontal size={20} /><strong>比较候选</strong><span>{assets.length} 张</span></div><button type="button" onClick={onClose} aria-label="关闭比较"><X size={21} /></button></header><div>{assets.map((asset) => <figure key={asset.path}><img src={asset.content_url} alt={asset.name} /><figcaption>{asset.name}</figcaption></figure>)}</div></div>; }
+function TrashDetail({asset, busy, docked, returnFocus, onClose, onRestore, onDelete}: {asset: GalleryTrashAsset; busy: boolean; docked: boolean; returnFocus: {current: HTMLElement | null}; onClose: () => void; onRestore: () => void; onDelete: () => void}) { const closeRef = useDetailFocus(onClose, docked, returnFocus); return <aside className="legacy-detail-drawer" role={docked ? "region" : "dialog"} aria-modal={docked ? undefined : "true"} aria-label="回收站图片详情"><header><strong>回收站图片详情</strong><button ref={closeRef} type="button" onClick={onClose} aria-label="关闭图片详情"><X size={20} /></button></header><div className="legacy-detail-body"><img className="legacy-trash-image" src={asset.content_url} alt={asset.name} /><h2>{asset.name}</h2><dl><div><dt>原位置</dt><dd>{asset.original_path}</dd></div><div><dt>文件大小</dt><dd>{bytes(asset.byte_size)}</dd></div></dl></div><footer className="legacy-detail-actions"><button type="button" disabled={busy} onClick={onRestore}><ClockCounterClockwise size={16} />恢复到画廊</button><button type="button" disabled={busy} className="is-danger" onClick={onDelete}><Trash size={16} />永久删除</button></footer></aside>; }
+function Selection({selectedCount, isTrash, busy, processing, canCompare, onClear, onKeep, onReject, onTrash, onRestore, onDelete, onDeleteDirect, onRegen, onUpscale, onCompare}: {selectedCount: number; isTrash: boolean; busy: boolean; processing?: GalleryResponse["processing"]; canCompare: boolean; onClear: () => void; onKeep: () => void; onReject: () => void; onTrash: () => void; onRestore: () => void; onDelete: () => void; onDeleteDirect: () => void; onRegen: () => void; onUpscale: () => void; onCompare: () => void}) { return <section className="legacy-selection-bar" aria-label="批量操作"><div><strong>已选择 {selectedCount} 项</strong><button type="button" disabled={busy} onClick={onClear}>清除</button></div>{isTrash ? <div><button type="button" disabled={busy} onClick={onRestore}><ClockCounterClockwise size={16} />恢复</button><button type="button" disabled={busy} className="is-danger" onClick={onDelete}><Trash size={16} />永久删除</button></div> : <div><button type="button" disabled={busy} onClick={onRegen}><Images size={16} />再出图</button><UpscaleButton busy={busy} processing={processing} onClick={onUpscale} /><button type="button" disabled={busy || !canCompare} onClick={onCompare}><SlidersHorizontal size={16} />比较</button><button type="button" disabled={busy} onClick={onKeep}><Heart size={16} />保留</button><button type="button" disabled={busy} onClick={onReject}><X size={16} />淘汰</button><button type="button" disabled={busy} onClick={onTrash}><Trash size={16} />移入回收站</button><button type="button" disabled={busy} className="is-danger" onClick={onDeleteDirect}><Trash size={16} />彻底删除</button></div>}</section>; }
+function UpscaleButton({processing, busy, onClick}: {processing?: GalleryResponse["processing"]; busy: boolean; onClick: () => void}) {
+  const descriptionId = useId();
+  const reason = !processing ? "尚未获取放大配置，请刷新画廊。"
+    : !processing.available ? processing.reason || "放大暂不可用，请检查出图环境后刷新画廊。" : "";
+  return <><button type="button" disabled={busy || Boolean(reason)} aria-describedby={reason ? descriptionId : undefined} onClick={onClick}>
+    <MagicWand size={16} />1.5× 图像放大
+  </button>{reason && <small id={descriptionId} className="gallery-upscale-reason">{reason}</small>}</>;
+}
+function ProcessDialog({selection, count, busy, onCount, onCancel, onSubmit}: {selection: {items: GalleryAsset[]; operation: "regenerate" | "upscale"}; count: number; busy: boolean; onCount: (value: number) => void; onCancel: () => void; onSubmit: () => void}) {
+  const regen = selection.operation === "regenerate";
+  const layerRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const cancelHandler = useRef(onCancel);
+  cancelHandler.current = onCancel;
+  useBodyScrollLock();
+  useLayoutEffect(() => {
+    const layer = layerRef.current;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const background = [...document.body.children].filter((element): element is HTMLElement => element instanceof HTMLElement && element !== layer).map(element => ({element, inert: element.inert}));
+    background.forEach(({element}) => {element.inert = true;});
+    cancelRef.current?.focus({preventScroll: true});
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {event.preventDefault(); event.stopPropagation(); cancelHandler.current();}
+      if (event.key !== "Tab") return;
+      const focusable = [...(layer?.querySelectorAll<HTMLElement>("button:not(:disabled), select:not(:disabled)") || [])];
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {event.preventDefault(); last?.focus({preventScroll: true});}
+      else if (!event.shiftKey && document.activeElement === last) {event.preventDefault(); first?.focus({preventScroll: true});}
+    };
+    document.addEventListener("keydown", handleKey, true);
+    return () => {
+      document.removeEventListener("keydown", handleKey, true);
+      background.forEach(({element, inert}) => {element.inert = inert;});
+      if (previous?.isConnected) previous.focus({preventScroll: true});
+    };
+  }, []);
+  return createPortal(<div ref={layerRef} className="legacy-dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}><section className="legacy-process-dialog" role="dialog" aria-modal="true" aria-label={regen ? "沿用原条件再出图" : "加入 1.5× 图像放大队列"}><header>{regen ? <Images size={22} /> : <MagicWand size={22} />}<div><h2>{regen ? "沿用原条件再出图" : "加入 1.5× 图像放大队列"}</h2><p>将顺序处理 {selection.items.length} 张图片，结果不会覆盖原图。</p><p>{regen ? "沿用原图模型、工作流、正负提示词和资源，使用新的随机种子。缺少完整记录的图片需到会话工作台重新选择生成条件。" : "使用当前出图环境的超分辨率模型放大原图，按原图宽高的 1.5 倍保存新图。"}</p></div></header><div className="legacy-process-source"><img src={selection.items[0].thumbnail_url} alt="" /><span>{selection.items[0].name}</span></div>{regen && <label>每张再出<select value={count} onChange={(event) => onCount(Number(event.target.value))}>{[1, 2, 3, 4].map((item) => <option key={item} value={item}>{item} 张</option>)}</select></label>}<footer><button ref={cancelRef} type="button" onClick={onCancel}>取消</button><button type="button" className="is-primary" disabled={busy} onClick={onSubmit}>{busy ? "正在加入…" : "加入队列"}</button></footer></section></div>, document.body); }

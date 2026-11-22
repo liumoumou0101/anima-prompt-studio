@@ -1,0 +1,11 @@
+{
+  "id": "anima_2_9b_preview_v1",
+  "display_name": "Anima 2.9B Preview v1",
+  "family": "anima",
+  "variant": "community",
+  "positive_prefix": [],
+  "negative_prompt": [],
+  "negative_prompt_mode": "enabled",
+  "tag_separator": ", ",
+  "renderer_version": "anima-renderer-v1"
+}

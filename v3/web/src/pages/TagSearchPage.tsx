@@ -1,4 +1,5 @@
 import {FormEvent, useEffect, useMemo, useState} from "react";
+import "./libraryPages.css";
 import {ArrowRight, Check, Info, MagnifyingGlass, Plus, X} from "@phosphor-icons/react";
 import {Link, useSearchParams} from "react-router-dom";
 import {ApiClientError, apiRequest} from "../lib/api";
@@ -108,9 +109,9 @@ export function TagSearchPage() {
   const showPreview = previewLoading || preview || previewError;
 
   return (
-    <div className={`page tag-search-page${basket.selected.length ? " has-selection" : ""}`}>
+    <div className={`page library-page tag-search-page${basket.selected.length ? " has-selection" : ""}`}>
       <header className="page-header tag-market-header">
-        <div><span className="eyebrow">REFERENCE MARKET</span><h1>标签超市</h1><p>按主题逛本地 Danbooru 标签，预览含义后把需要的标签一起带走。</p></div>
+        <div><h1>标签超市</h1><p>搜索名称或按主题浏览，预览含义后加入当前会话。</p></div>
         <div className="header-stat"><strong>{basket.selected.length || "—"}</strong><span>已挑选标签</span></div>
       </header>
 
@@ -162,7 +163,7 @@ function BrowseMarket({browse, selected, onToggle, onPreview}: {browse: TagBrows
 
   return <div className="tag-market">
     <section className="featured-shelf">
-      <header><div><span>POPULAR PICKS</span><h2>高频标签</h2><p>从数据包中按使用量排序，适合快速建立画面的基础骨架。</p></div><strong>{browse.featured.length}</strong></header>
+      <header><div><h2>高频标签</h2><p>按历史使用量排序，先挑选画面中需要的内容。</p></div><strong>{browse.featured.length}</strong></header>
       <div className="market-tag-grid">{browse.featured.map((item) => <MarketTag key={item.id} item={item} selected={selected.has(item.name)} onToggle={onToggle} onPreview={onPreview} />)}</div>
     </section>
 
@@ -172,14 +173,14 @@ function BrowseMarket({browse, selected, onToggle, onPreview}: {browse: TagBrows
     </nav>
 
     <div className="market-shelves">{browse.groups.map((group, index) => <section className="market-shelf" id={`shelf-${group.name}`} key={group.id}>
-      <header><span className="shelf-number">{String(index + 1).padStart(2, "0")}</span><div><h2>{group.title}</h2><p>{group.description}</p></div><Link className="shelf-open-link" to={`/tags/groups/${encodeURIComponent(group.name)}`}><strong>{formatCount(group.tag_count)}<small> TAGS</small></strong><span>查看全部 <ArrowRight /></span></Link></header>
+      <header><span className="shelf-number">{String(index + 1).padStart(2, "0")}</span><div><h2>{group.title}</h2><p>{group.description}</p></div><Link className="shelf-open-link" to={`/tags/groups/${encodeURIComponent(group.name)}`}><strong>{formatCount(group.tag_count)}<small> 标签</small></strong><span>查看全部 <ArrowRight /></span></Link></header>
       <div className="market-tag-grid">{group.items.map((item) => <MarketTag key={item.id} item={item} selected={selected.has(item.name)} onToggle={onToggle} onPreview={onPreview} />)}</div>
     </section>)}</div>
 
     {browse.other_groups.length > 0 && <section className="group-directory" id="more-groups">
       <header className="group-directory-header">
-        <div><span>GROUP DIRECTORY</span><h2>更多标签分组</h2><p>这些标签已有可靠分组，但不属于首页的 18 个核心货架。选择分组后继续浏览完整标签。</p></div>
-        <strong>{browse.other_groups.length}<small> GROUPS</small></strong>
+        <div><h2>更多标签分组</h2><p>按名称查找其他分组，继续浏览完整标签。</p></div>
+        <strong>{browse.other_groups.length}<small> 个分组</small></strong>
       </header>
       <div className="group-directory-toolbar">
         <label className="group-directory-search"><MagnifyingGlass aria-hidden="true" /><input value={groupQuery} onChange={(event) => setGroupQuery(event.target.value)} placeholder="筛选分组名称…" aria-label="筛选更多标签分组" /></label>
@@ -225,7 +226,7 @@ function TagCard({item, selected, onToggle, onPreview}: {item: TagSearchItem; se
 
 function TagPreviewPanel({detail, loading, error, selected, onClose, onToggle}: {detail: TagDetail | null; loading: boolean; error: string | null; selected: boolean; onClose: () => void; onToggle: () => void}) {
   return <><button type="button" className="tag-preview-scrim" aria-label="关闭标签预览" onClick={onClose} /><aside className="tag-preview-panel" aria-label="标签快速预览">
-    <header><span>QUICK PREVIEW</span><button type="button" onClick={onClose} aria-label="关闭"><X /></button></header>
+    <header><span>标签预览</span><button type="button" onClick={onClose} aria-label="关闭"><X /></button></header>
     {loading && <LoadingState label="正在读取本地标签详情…" />}
     {error && <p className="preview-error">{error}</p>}
     {!loading && detail && <>

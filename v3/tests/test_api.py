@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from anima_prompt_studio.domain.execution_models import GenerationRun, GenerationRunState
-from anima_prompt_studio.repositories import SQLiteRepository
+from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
 
 from anima_prompt_studio_v3.adapters.v2 import (
     V2GalleryReadService,
@@ -120,17 +120,23 @@ def test_health_session_exchange_is_one_time_and_bootstrap_is_protected(referenc
         "cutoff_mode": "approximate",
     }
     assert bootstrap.json()["model_profiles"] == [
-        "anima_aesthetic_v1",
+        "anima_2_9b_preview_v1",
+        "anima_aesthetic_v1_0",
+        "anima_aesthetic_v1_1",
         "anima_base_v1",
         "anima_turbo_v1",
         "anima_turbo_v1_1",
         "animayume_v1_0_final",
+        "animayume_v1_5_base",
         "miaomiao_harem_anima_v1_6",
+        "moss_image_sft_int8",
+        "wai_anima_v1_0",
     ]
     assert bootstrap.json()["model_profile_options"][-1] == {
-        "id": "miaomiao_harem_anima_v1_6",
-        "display_name": "MiaoMiao Harem ANIMA v1.6",
+        "id": "wai_anima_v1_0",
+        "display_name": "WAI ANIMA v1.0",
         "variant": "community",
+        "family": "anima",
     }
     assert "access-control-allow-origin" not in bootstrap.headers
 
@@ -376,6 +382,182 @@ def test_v3_settings_reuses_v2_remote_profile_store_without_exposing_credentials
         repository.close()
 
 
+def test_delete_remote_profile_removes_owned_settings_and_secret_but_preserves_history(
+    reference_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
+    from anima_prompt_studio_v3.remote import credential_store as credential_module
+
+    database = tmp_path / "runtime.db"
+    repository = SQLiteRepository(database)
+    target = RemoteProfile(id="server-a", display_name="A", ssh_host="a.example", ssh_user="root",
+                           auth_type=RemoteAuthType.AGENT, known_host_fingerprint="SHA256:a")
+    other = target.model_copy(update={"id": "server-b", "display_name": "B", "ssh_host": "b.example"})
+    try:
+        repository.save_remote_profile(target)
+        repository.save_remote_profile(other)
+        for key, value in {
+            "last_remote_profile_id": target.id,
+            f"remember_remote_password:{target.id}": True,
+            f"workflow_capabilities:{target.id}": {"ready": True},
+            f"workflow_mapping:{target.id}:workflow-1": {"mapping": {}},
+            'workflow_lora_bindings:["server-a","workflow-1"]': {"bindings": []},
+            f"workflow_capabilities:{other.id}": {"ready": True},
+            'workflow_lora_bindings:["server-b","workflow-1"]': {"bindings": []},
+        }.items():
+            repository.set_setting(key, value)
+        with repository.connection:
+            repository.connection.execute(
+                "INSERT INTO generation_runs VALUES(?,?,?,?,?,?,?,?)",
+                ("history-1", "job", target.id, "workflow-1", "prompt", "completed", "2026-01-01", "{}"),
+            )
+            repository.connection.execute(
+                "INSERT INTO generation_artifacts VALUES(?,?,?,?)",
+                ("artifact-1", "history-1", "kept.png", "{}"),
+            )
+    finally:
+        repository.close()
+
+    deleted_secrets: list[str] = []
+
+    class FakeCredentials:
+        def delete_password(self, profile_id: str) -> None:
+            deleted_secrets.append(profile_id)
+
+    monkeypatch.setattr(credential_module, "CredentialStore", FakeCredentials)
+    queue = StubGenerationQueue()
+    queue.passphrases[target.id] = "secret"
+    runtime = create_api_runtime(reference_db, v2_database=database, generation_queue=queue)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchanged = client.post("/api/v3/session/exchange", json={"bootstrap_token": runtime.bootstrap_token},
+                            headers={"Origin": ORIGIN})
+    headers = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.request("DELETE", f"/api/v3/settings/remote-profiles/{target.id}", json={}, headers=headers)
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert deleted_secrets == [target.id]
+    assert target.id not in queue.passphrases
+    repository = SQLiteRepository(database)
+    try:
+        with pytest.raises(KeyError):
+            repository.get_remote_profile(target.id)
+        assert repository.get_remote_profile(other.id).display_name == "B"
+        assert repository.get_setting("last_remote_profile_id") is None
+        assert repository.get_setting(f"remember_remote_password:{target.id}") is None
+        assert repository.get_setting(f"workflow_capabilities:{target.id}") is None
+        assert repository.get_setting(f"workflow_mapping:{target.id}:workflow-1") is None
+        assert repository.get_setting('workflow_lora_bindings:["server-a","workflow-1"]') is None
+        assert repository.get_setting(f"workflow_capabilities:{other.id}") == {"ready": True}
+        assert repository.get_setting('workflow_lora_bindings:["server-b","workflow-1"]') == {"bindings": []}
+        assert repository.connection.execute("SELECT count(*) FROM generation_runs WHERE id='history-1'").fetchone()[0] == 1
+        assert repository.connection.execute("SELECT count(*) FROM generation_artifacts WHERE id='artifact-1'").fetchone()[0] == 1
+    finally:
+        repository.close()
+
+
+def test_delete_remote_profile_rejects_active_run_without_mutation(
+    reference_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
+    from anima_prompt_studio_v3.remote import credential_store as credential_module
+
+    database = tmp_path / "runtime.db"
+    repository = SQLiteRepository(database)
+    profile = RemoteProfile(id="busy", display_name="Busy", ssh_host="busy.example", ssh_user="root",
+                            auth_type=RemoteAuthType.AGENT, known_host_fingerprint="SHA256:busy")
+    try:
+        repository.save_remote_profile(profile)
+        repository.set_setting("last_remote_profile_id", profile.id)
+        with repository.connection:
+            repository.connection.execute(
+                "INSERT INTO generation_runs VALUES(?,?,?,?,?,?,?,?)",
+                ("active-1", "job", profile.id, "workflow", "prompt", "queued", "2026-01-01", "{}"),
+            )
+    finally:
+        repository.close()
+
+    calls: list[str] = []
+
+    class FakeCredentials:
+        def delete_password(self, profile_id: str) -> None:
+            calls.append(profile_id)
+
+    monkeypatch.setattr(credential_module, "CredentialStore", FakeCredentials)
+    runtime = create_api_runtime(reference_db, v2_database=database)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchanged = client.post("/api/v3/session/exchange", json={"bootstrap_token": runtime.bootstrap_token},
+                            headers={"Origin": ORIGIN})
+    headers = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
+
+    response = client.request("DELETE", f"/api/v3/settings/remote-profiles/{profile.id}", json={}, headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "remote_profile_in_use"
+    assert calls == []
+    repository = SQLiteRepository(database)
+    try:
+        assert repository.get_remote_profile(profile.id).id == profile.id
+        assert repository.get_setting("last_remote_profile_id") == profile.id
+    finally:
+        repository.close()
+
+
+def test_delete_remote_profile_validates_request_missing_and_credential_failure(
+    reference_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
+    from anima_prompt_studio_v3.remote import credential_store as credential_module
+
+    database = tmp_path / "runtime.db"
+    repository = SQLiteRepository(database)
+    profile = RemoteProfile(id="kept", display_name="Kept", ssh_host="kept.example", ssh_user="root",
+                            auth_type=RemoteAuthType.AGENT, known_host_fingerprint="SHA256:kept")
+    try:
+        repository.save_remote_profile(profile)
+    finally:
+        repository.close()
+
+    class FailingCredentials:
+        def delete_password(self, _profile_id: str) -> None:
+            raise credential_module.CredentialStoreError("secret backend detail")
+
+    monkeypatch.setattr(credential_module, "CredentialStore", FailingCredentials)
+    runtime = create_api_runtime(reference_db, v2_database=database)
+    client = TestClient(runtime.app, base_url=ORIGIN, raise_server_exceptions=False)
+    exchanged = client.post("/api/v3/session/exchange", json={"bootstrap_token": runtime.bootstrap_token},
+                            headers={"Origin": ORIGIN})
+    auth = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
+
+    assert client.request("DELETE", f"/api/v3/settings/remote-profiles/{profile.id}", json={},
+                          headers={"Origin": ORIGIN}).status_code == 401
+    assert client.request("DELETE", f"/api/v3/settings/remote-profiles/{profile.id}", json={},
+                          headers={"X-Anima-Session": auth["X-Anima-Session"]}).status_code == 403
+    assert client.request("DELETE", f"/api/v3/settings/remote-profiles/{profile.id}", json={"extra": True}, headers=auth).status_code == 422
+    assert client.request("DELETE", "/api/v3/settings/remote-profiles/missing", json={}, headers=auth).status_code == 404
+    runtime.app.state.workflow_jobs.jobs[profile.id] = {"state": "running", "error": None}
+    inspecting = client.request("DELETE", f"/api/v3/settings/remote-profiles/{profile.id}", json={}, headers=auth)
+    assert inspecting.status_code == 409
+    assert inspecting.json()["error"]["code"] == "remote_profile_in_use"
+    runtime.app.state.workflow_jobs.jobs.pop(profile.id)
+    failed = client.request("DELETE", f"/api/v3/settings/remote-profiles/{profile.id}", json={}, headers=auth)
+    assert failed.status_code == 503
+    assert failed.json()["error"]["code"] == "credential_store_unavailable"
+    assert "secret backend detail" not in failed.json()["error"]["message"]
+    repository = SQLiteRepository(database)
+    try:
+        assert repository.get_remote_profile(profile.id).id == profile.id
+    finally:
+        repository.close()
+
+
 def test_artist_ranking_setting_changes_workbench_suggestions(
     reference_db: Path,
     tmp_path: Path,
@@ -433,7 +615,7 @@ def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from anima_prompt_studio.domain.execution_models import RemoteAuthType, RemoteProfile
-    from anima_prompt_studio.services.remote import comfy_client, ssh_tunnel
+    from anima_prompt_studio_v3.remote import comfy_client, ssh_tunnel
 
     v2_database = tmp_path / "v2.db"
     repository = SQLiteRepository(v2_database)
@@ -474,6 +656,7 @@ def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
                 "devices": ["NVIDIA Test GPU"],
                 "queue_running": 1,
                 "queue_pending": 2,
+                "system_stats": {"system": {"comfyui_version": "0.35.0"}},
             })()
 
     monkeypatch.setattr(ssh_tunnel, "SshTunnel", FakeTunnel)
@@ -500,6 +683,57 @@ def test_v3_settings_can_test_ssh_tunnel_and_comfyui_without_v2_ui(
         "comfy_endpoint": "127.0.0.1:8188",
     }
     assert events == ["ssh", "comfy", "close"]
+
+    monkeypatch.setattr(FakeComfyClient, "validate_workflow_nodes", lambda self, graph: ["MissingNode"], raising=False)
+    monkeypatch.setattr(FakeComfyClient, "validate_workflow_inputs", lambda self, graph: [], raising=False)
+    inspected = client.post(
+        "/api/v3/settings/remote-profiles/v3-ready/test-connection?inspect_templates=true",
+        json={},
+        headers={"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN},
+    )
+    assert inspected.status_code == 200
+    report = inspected.json()["workflow_inspection"]
+    assert report["remote_profile_id"] == "v3-ready"
+    assert len(report["items"]) == 13
+    assert all(item["state"] == "missing_nodes" for item in report["items"])
+    assert events[-1] == "close"
+
+
+def test_workflow_management_requires_session_and_imports_copies(reference_db, tmp_path):
+    database = tmp_path / "workflows.db"
+    from anima_prompt_studio.domain.execution_models import RemoteProfile
+    from anima_prompt_studio_v3.adapters.v2.workflow_catalog import catalog
+    repo = SQLiteRepository(database)
+    repo.save_remote_profile(RemoteProfile(id="workflow-server", display_name="server", ssh_host="example.invalid", ssh_user="tester", known_host_fingerprint="SHA256:test"))
+    repo.close()
+    runtime = create_api_runtime(reference_db, v2_database=database)
+    client = TestClient(runtime.app, base_url=ORIGIN)
+    path = "/api/v3/workflows/servers/workflow-server"
+    assert client.get(path).status_code == 401
+    assert client.get("/api/v3/workflows/catalog").status_code == 401
+    assert client.post("/api/v3/workflows/preview", json={}, headers={"Origin": ORIGIN}).status_code == 401
+    exchanged = client.post("/api/v3/session/exchange", json={"bootstrap_token": runtime.bootstrap_token}, headers={"Origin": ORIGIN})
+    headers = {"X-Anima-Session": exchanged.json()["session_token"], "Origin": ORIGIN}
+    report = client.get(path, headers=headers)
+    assert report.status_code == 200
+    assert len(report.json()["items"]) == 13
+    assert all(i["state"] == "unchecked" for i in report.json()["items"])
+    exported = client.get("/api/v3/workflows/export/23_Turbo_v1.1", headers=headers)
+    library = client.get("/api/v3/workflows/catalog", headers=headers)
+    assert library.status_code == 200
+    assert len(library.json()["items"]) == 13
+    preview = client.post("/api/v3/workflows/preview", json=exported.json(), headers=headers)
+    assert preview.status_code == 200
+    assert len(catalog(database)) == 13
+    imported = client.post("/api/v3/workflows/import", json=exported.json(), headers=headers)
+    assert imported.status_code == 200
+    assert imported.json()["id"].startswith("user:")
+    assert len(catalog(database)) == 14
+    disabled = client.put("/api/v3/workflows/23_Turbo_v1.1/enabled", json={"enabled": False}, headers=headers)
+    assert disabled.status_code == 200
+    diagnostics = client.get(path + "/diagnostics", headers=headers).text
+    assert "example.invalid" not in diagnostics
+    assert "safetensors" not in diagnostics
 
 
 def test_v3_settings_opens_managed_comfy_browser_access(
@@ -603,10 +837,12 @@ def test_local_api_server_owns_comfy_access_lifecycle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import anima_prompt_studio_v3.adapters.v2 as adapters
+    import anima_prompt_studio_v3.runtime as runtime
 
     events: list[str] = []
     v2_database = tmp_path / "v2.db"
-    v2_database.write_bytes(b"placeholder")
+    from anima_prompt_studio_v3.storage.runtime_repository import SQLiteRepository
+    SQLiteRepository(v2_database).close()
 
     class FakeQueue:
         def shutdown(self, **_kwargs) -> None:
@@ -629,11 +865,11 @@ def test_local_api_server_owns_comfy_access_lifecycle(
         def status(self):
             return {"state": "stopped", "ready": False, "local_url": "http://127.0.0.1:18188"}
 
-    monkeypatch.setattr(adapters, "build_v2_generation_queue", lambda _database: FakeQueue())
+    monkeypatch.setattr(runtime, "build_generation_queue", lambda _database: FakeQueue())
     monkeypatch.setattr(adapters, "build_v2_gallery_service", lambda _database: FakeGallery())
     monkeypatch.setattr(adapters, "build_v2_intent_parser", lambda _database: object())
     monkeypatch.setattr(adapters, "build_v2_local_translation_adapter", lambda: object())
-    monkeypatch.setattr(adapters, "ManagedComfyAccess", FakeComfyAccess)
+    monkeypatch.setattr(runtime, "ManagedComfyAccess", FakeComfyAccess)
 
     with LocalApiServer(reference_db, v2_database=v2_database):
         assert "comfy-start" in events
@@ -1016,7 +1252,7 @@ def test_local_natural_candidate_requires_user_confirmation_for_fact_ownership(
     literal = next(item for item in third_payload["candidates"] if item["lane"] == "literal")
     hybrid = next(item for item in third_payload["candidates"] if item["lane"] == "hybrid")
     assert literal["positive_prompt"] == selected_payload["candidates"][0]["positive_prompt"]
-    assert "hakurei reimu" in literal["positive_prompt"]
+    assert "hakurei reimu" in literal["positive_prompt"].lower()
     assert "hakurei reimu wearing maid" in hybrid["positive_prompt"]
 
 
@@ -1163,7 +1399,9 @@ def test_local_natural_does_not_auto_confirm_character_identity(
     identity = [item["canonical_tag"] for item in payload["scene_draft"]["suggestions"] if item["source"] == "identity_candidate"]
     assert confirmed == ["maid"]
     assert identity == ["hakurei_reimu"]
-    assert "hakurei reimu" not in payload["candidates"][0]["positive_prompt"]
+    # Explicit source name may be faithfully translated; it is still not an
+    # automatically confirmed character tag/entity (asserted above).
+    assert "hakurei_reimu" not in {tag["name"] for tag in payload["candidates"][0]["tags"]}
     assert any("疑似角色或作品" in note for note in payload["scene_draft"]["risk_notes"])
 
     typed = client.post(
@@ -1449,7 +1687,7 @@ def test_structured_workbench_reuses_scene_draft_translation_when_selecting_tags
     assert response.status_code == 200
     payload = response.json()
     assert payload["local_translation"]["engine"] == "当前工作台译文"
-    assert payload["candidates"][0]["positive_prompt"] == "maid"
+    assert payload["candidates"][0]["positive_prompt"] == "unmapped prose baseline, maid"
 
 
 def test_local_natural_candidate_keeps_a_prose_baseline_when_no_tag_is_confirmed(
@@ -1511,7 +1749,7 @@ def test_local_natural_candidate_applies_only_explicitly_selected_suggestions(
     assert response.status_code == 200
     payload = response.json()
     assert payload["local_translation"]["engine"] == "当前工作台译文"
-    assert payload["candidates"][0]["positive_prompt"] == "maid"
+    assert payload["candidates"][0]["positive_prompt"] == "unmapped prose baseline, maid"
     assert [item["canonical_tag"] for item in payload["scene_draft"]["confirmed"]] == ["maid"]
     assert payload["scene_draft"]["confirmed"][0]["source"] == "user_selected"
     assert payload["intent"]["scene_plan_en"]
@@ -1736,14 +1974,18 @@ def test_workspace_crud_persists_separately_and_rejects_stale_revision(
         "aspect": "portrait",
         "width": 896,
         "height": 1152,
-        "steps": 30,
-        "cfg": 4.0,
-        "sampler": "er_sde",
-        "scheduler": "simple",
+        "steps": 35,
+        "cfg": 4.5,
+        "sampler": "euler",
+        "scheduler": "normal",
         "seed": -1,
         "batch_size": 1,
         "remote_profile_id": None,
         "workflow_profile_id": None,
+        "creation_configuration": None,
+        "execution_policy": None,
+        "parameter_schema": None,
+        "workflow_parameter_overrides": {},
     }
     assert workspace["candidate_snapshot"]["candidates"][0]["positive_prompt"] == "score_7, maid, twintails"
     assert workspace["candidate_snapshot"]["artist_suggestions"][0]["name"] == "sample_artist_a"
@@ -2140,6 +2382,11 @@ class StubGenerationQueue:
             self.passphrases[remote_profile_id] = passphrase
         else:
             self.passphrases.pop(remote_profile_id, None)
+
+    def with_profile_deletion(self, remote_profile_id, delete):
+        result = delete()
+        self.set_private_key_passphrase(remote_profile_id, "")
+        return result
 
     def submit(self, prepared, *, remote_profile_id, workflow_profile_id, idempotency_key):
         if idempotency_key in self.keys:

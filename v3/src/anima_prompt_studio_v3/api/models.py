@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, StringConstraints, field_validator, model_validator
 
+from anima_prompt_studio.domain.models import LoRAStackFields
 from ..core.validation import CandidateSetValidationReport
+from ..core.requirements import ConversationWriteFields
+from ..core.seeds import Seed
 from ..domain import IntentDocument, IntentElementType, IntentState, PromptCandidate, RelationKind
 
 
@@ -62,7 +65,16 @@ class WorkbenchRelationInput(ApiModel):
     reason: str = Field(default="用户明确指定关系", min_length=1, max_length=500)
 
 
-class WorkbenchCandidateRequest(ApiModel):
+class AnimaCandidateRequest(ApiModel):
+    @model_validator(mode="before")
+    @classmethod
+    def reject_other_families(cls, data):
+        if isinstance(data, dict) and data.get("model_profile") == "moss_image_sft_int8":
+            raise ValueError("MOSS 不支持 ANIMA 标签候选，请使用独立工作台。")
+        return data
+
+
+class WorkbenchCandidateRequest(AnimaCandidateRequest):
     source_text: str = Field(min_length=1, max_length=10_000)
     source_language: str = Field(default="mixed", pattern=r"^(zh|en|mixed)$")
     model_profile: str = Field(default="anima_base_v1", min_length=1, max_length=100)
@@ -93,6 +105,26 @@ class TranslationRequest(ApiModel):
     direction: Literal["zh_en", "en_zh"] = "zh_en"
 
 
+class PromptGenerateRequest(ApiModel):
+    source_text: str = Field(min_length=1, max_length=10_000)
+    excluded_text: str = Field(default="", max_length=10_000)
+    mode: Literal["faithful", "expand"] = "faithful"
+    rule_id: str | None = Field(default=None, min_length=1, max_length=200)
+    source_language: str = Field(default="mixed", pattern=r"^(zh|en|mixed)$")
+
+
+class LlmSettingsUpdateRequest(ApiModel):
+    service_id: str = Field(min_length=1, max_length=100)
+    model_name: str | None = Field(default=None, min_length=1, max_length=200)
+    api_key: SecretStr | None = Field(default=None, max_length=500)
+    base_url: str | None = Field(default=None, max_length=2000)
+    service_type: Literal["openai_compatible", "ollama"] = "openai_compatible"
+    clear_api_key: bool = False
+    supports_vision: bool | None = None
+    ingest_enable_thinking: bool | None = None
+    workbench_enable_thinking: bool | None = None
+
+
 class DirectPromptPreviewRequest(ApiModel):
     positive_prompt: str = Field(min_length=1, max_length=20_000)
     negative_prompt: str = Field(default="", max_length=20_000)
@@ -104,10 +136,10 @@ class LocalNaturalRelationInput(ApiModel):
     relation: Literal["wearing"]
 
 
-class LocalNaturalCandidateRequest(ApiModel):
+class LocalNaturalCandidateRequest(AnimaCandidateRequest):
     source_text: str = Field(min_length=1, max_length=10_000)
     excluded_text: str = Field(default="", max_length=10_000)
-    model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)
+    model_profile: str = Field(default="anima_aesthetic_v1_1", min_length=1, max_length=100)
     translated_text: str | None = Field(default=None, min_length=1, max_length=20_000)
     selected_tags: list[str] = Field(default_factory=list, max_length=40)
     suppressed_tags: list[str] = Field(default_factory=list, max_length=80)
@@ -135,30 +167,70 @@ class LocalNaturalCandidateRequest(ApiModel):
         return values
 
 
-class IntentCandidateRequest(ApiModel):
+class IntentCandidateRequest(AnimaCandidateRequest):
     intent: IntentDocument
     model_profile: str = Field(default="anima_base_v1", min_length=1, max_length=100)
 
 
+class WorkflowIdentity(ApiModel):
+    id: str = Field(max_length=512)
+    revision: str = Field(default="", max_length=128)
+
+
+class CreationConfiguration(ApiModel):
+    modelProfile: str = Field(min_length=1, max_length=100)
+    workflow: WorkflowIdentity
+    baseRecipeId: str = Field(min_length=1, max_length=100)
+    recipeValues: dict[str, int | float | str] = Field(default_factory=dict)
+    parameterOverrides: dict[str, int | float | str] = Field(default_factory=dict)
+    resourceRequirements: list[dict] = Field(default_factory=list)
+    seedMode: Literal["random", "fixed"] = "random"
+
+
+class AutomaticExecutionPolicy(ApiModel):
+    mode: Literal["auto"] = "auto"
+    preferredEnvironmentIds: list[str] = Field(default_factory=list)
+
+
+class PinnedExecutionPolicy(ApiModel):
+    mode: Literal["pinned"] = "pinned"
+    environmentId: str = Field(min_length=1, max_length=200)
+
+
+ExecutionPolicy = Annotated[AutomaticExecutionPolicy | PinnedExecutionPolicy, Field(discriminator="mode")]
+
+
 class WorkbenchGenerationSettings(ApiModel):
+    creation_configuration: CreationConfiguration | None = None
+    model_configurations: dict[str, CreationConfiguration] = Field(default_factory=dict, max_length=128)
+    execution_policy: ExecutionPolicy | None = None
+    workflow_parameter_overrides: dict[str, int | float | str] = Field(default_factory=dict)
+    parameter_schema: dict | None = None
     preset_id: str = Field(default="stable_baseline", min_length=1, max_length=100)
     aspect: Literal["portrait", "landscape", "square", "custom", "model_default"] = "portrait"
     width: int | None = Field(default=896, ge=64, le=8192)
     height: int | None = Field(default=1152, ge=64, le=8192)
-    steps: int | None = Field(default=30, ge=1, le=200)
-    cfg: float | None = Field(default=4.0, ge=0, le=30)
-    sampler: str | None = Field(default="er_sde", min_length=1, max_length=100)
-    scheduler: str | None = Field(default="simple", min_length=1, max_length=100)
-    seed: int = Field(default=-1, ge=-1)
+    steps: int | None = Field(default=35, ge=1, le=200)
+    cfg: float | None = Field(default=4.5, ge=0, le=30)
+    sampler: str | None = Field(default="euler", min_length=1, max_length=100)
+    scheduler: str | None = Field(default="normal", min_length=1, max_length=100)
+    seed: Seed = -1
     batch_size: int = Field(default=1, ge=1, le=100)
     remote_profile_id: str | None = Field(default=None, max_length=200)
     workflow_profile_id: str | None = Field(default=None, max_length=200)
 
+    @field_validator("model_configurations")
+    @classmethod
+    def configurations_match_model_ids(cls, configurations: dict[str, CreationConfiguration]) -> dict[str, CreationConfiguration]:
+        if any(model != configuration.modelProfile for model, configuration in configurations.items()):
+            raise ValueError("保存配置的模型 ID 必须与其所属模型一致。")
+        return configurations
 
-class WorkspaceDraft(ApiModel):
+
+class WorkspaceDraft(ApiModel, ConversationWriteFields):
     positive_text: str = Field(default="", max_length=10_000)
     excluded_text: str = Field(default="", max_length=10_000)
-    model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)
+    model_profile: str = Field(default="anima_aesthetic_v1_1", min_length=1, max_length=100)
     input_mode: Literal["concepts", "natural"] = "concepts"
     natural_text: str = Field(default="", max_length=50_000)
     selected_tags: list[str] = Field(default_factory=list, max_length=40)
@@ -169,6 +241,21 @@ class WorkspaceDraft(ApiModel):
     @classmethod
     def workspace_tag_lists_are_canonical(cls, values: list[str]) -> list[str]:
         return _canonical_tag_list(values, field_name="tags")
+
+    def persistence_payload(self) -> dict:
+        # Legacy fields retain their whole-object/default behavior. New fields
+        # must distinguish omission from explicit values inside the store CAS.
+        values = self.model_dump(mode="json", by_alias=True)
+        if "model_configurations" not in self.generation_settings.model_fields_set:
+            values["generation_settings"].pop("model_configurations")
+        for key in ConversationWriteFields.model_fields:
+            if key not in self.model_fields_set:
+                values.pop(key, None)
+        if self.requirements_edit is not None and "prompt_locks" not in self.requirements_edit.model_fields_set:
+            # An older client's omitted field must reach the store as omitted,
+            # so its CAS merge preserves locks instead of treating [] as unlock.
+            values["requirements_edit"].pop("prompt_locks", None)
+        return values
 
 
 class SceneEntitySnapshot(ApiModel):
@@ -341,6 +428,8 @@ class WorkspaceDeleteRequest(ApiModel):
 
 
 class GenerationBridgeSettings(ApiModel):
+    workflow_parameter_overrides: dict[str, int | float | str] = Field(default_factory=dict)
+    parameter_schema: dict | None = None
     preset_id: str = Field(default="balanced", min_length=1, max_length=100)
     width: int | None = Field(default=None, ge=64, le=8192)
     height: int | None = Field(default=None, ge=64, le=8192)
@@ -348,7 +437,7 @@ class GenerationBridgeSettings(ApiModel):
     cfg: float | None = Field(default=None, ge=0, le=30)
     sampler: str | None = Field(default=None, min_length=1, max_length=100)
     scheduler: str | None = Field(default=None, min_length=1, max_length=100)
-    seed: int = Field(default=-1, ge=-1)
+    seed: Seed = -1
     batch_size: int = Field(default=1, ge=1, le=100)
 
 
@@ -361,19 +450,62 @@ class GenerationBridgePreviewRequest(ApiModel):
     workspace_revision: int | None = Field(default=None, ge=1)
 
 
-class GenerationSubmitRequest(GenerationBridgePreviewRequest):
+class SubmissionLora(ApiModel, LoRAStackFields):
+    logical_id: str = Field(min_length=1, max_length=200)
+    file_name: str = Field(min_length=1, max_length=1000)
+    weight: float = Field(default=0.8, ge=-2, le=2, allow_inf_nan=False)
+    trigger_words: list[str] = Field(default_factory=list, max_length=32)
+
+
+class SubmissionFields(ApiModel):
+    submission_kind: Literal["legacy", "conversational", "reference"] = "legacy"
+    compiled_token: str | None = Field(default=None, min_length=1, max_length=200)
+    reference_preset_id: str | None = Field(default=None, min_length=1, max_length=200)
+    source_version: str | None = Field(default=None, min_length=1, max_length=200)
+    lora_selection: list[SubmissionLora] = Field(default_factory=list, max_length=16)
+    workflow_snapshot_run_id: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_submission(self):
+        if self.submission_kind == "conversational":
+            if not self.workspace_id or self.workspace_revision is None or not self.compiled_token:
+                raise ValueError("对话提交必须携带工作台 ID、修订号和编译令牌。")
+            if "lora_selection" in self.model_fields_set or self.reference_preset_id or self.source_version:
+                raise ValueError("对话提交的资源只能来自工作台要求。")
+        elif self.compiled_token:
+            raise ValueError("编译令牌仅用于对话提交。")
+        if self.submission_kind == "reference":
+            if self.workspace_id or self.workspace_revision is not None or not self.reference_preset_id or not self.source_version:
+                raise ValueError("参考提交必须携带来源版本且不能携带工作台。")
+        elif self.reference_preset_id or self.source_version:
+            raise ValueError("参考来源字段仅用于参考提交。")
+        return self
+
+
+class GenerationSubmitRequest(GenerationBridgePreviewRequest, SubmissionFields):
     remote_profile_id: str = Field(min_length=1, max_length=200)
     workflow_profile_id: str = Field(min_length=1, max_length=200)
 
 
-class DirectPromptSubmitRequest(ApiModel):
-    positive_prompt: str = Field(min_length=1, max_length=20_000)
-    negative_prompt: str = Field(default="", max_length=20_000)
-    model_profile: str = Field(default="anima_aesthetic_v1", min_length=1, max_length=100)
+class DirectPromptSubmitRequest(SubmissionFields):
+    use_current_prompt: bool = False
+    workspace_id: str | None = Field(default=None, pattern=r"^workspace_[A-Za-z0-9]+$")
+    workspace_revision: int | None = Field(default=None, ge=1)
+    positive_prompt: Annotated[str, StringConstraints(strip_whitespace=False, min_length=1, max_length=20_000)]
+    negative_prompt: Annotated[str, StringConstraints(strip_whitespace=False, max_length=20_000)] = ""
+    model_profile: str = Field(default="anima_aesthetic_v1_1", min_length=1, max_length=100)
     project_name: str = Field(default="英文提示词直出", min_length=1, max_length=200)
     settings: GenerationBridgeSettings = Field(default_factory=GenerationBridgeSettings)
     remote_profile_id: str = Field(min_length=1, max_length=200)
     workflow_profile_id: str = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_current_prompt(self):
+        if not self.positive_prompt.strip():
+            raise ValueError("正向提示词不能只有空白。")
+        if self.use_current_prompt and self.submission_kind != "conversational":
+            raise ValueError("使用当前提示词需要绑定对话工作台。")
+        return self
 
 
 class ArtistComparisonRequest(GenerationBridgePreviewRequest):
@@ -420,6 +552,17 @@ class PreferredRemoteProfileRequest(ApiModel):
     remote_profile_id: str = Field(min_length=1, max_length=200)
 
 
+class EmptyRequest(ApiModel):
+    pass
+
+
+class TemporaryConnectionImportRequest(ApiModel):
+    connection_text: SecretStr
+    api_key: SecretStr | None = None
+    display_name: str = Field(default="", max_length=200)
+    target_profile_id: str | None = Field(default=None, max_length=100)
+
+
 class RemoteProfileSettingsRequest(ApiModel):
     """The editable, non-secret part of a V2 remote profile.
 
@@ -428,7 +571,10 @@ class RemoteProfileSettingsRequest(ApiModel):
     """
 
     display_name: str = Field(min_length=1, max_length=200)
-    ssh_host: str = Field(min_length=1, max_length=253)
+    connection_type: Literal["ssh", "local", "http"] = "ssh"
+    comfy_host: str = Field(default="127.0.0.1", max_length=253)
+    comfy_port: int = Field(default=8188, ge=1, le=65535)
+    ssh_host: str = Field(default="", max_length=253)
     ssh_port: int = Field(default=22, ge=1, le=65535)
     ssh_user: str = Field(default="root", min_length=1, max_length=128)
     auth_type: Literal["password", "private_key", "agent"] = "password"
@@ -438,6 +584,16 @@ class RemoteProfileSettingsRequest(ApiModel):
     remember_password: bool = True
 
 
+    @model_validator(mode="after")
+    def validate_connection(self):
+        if self.connection_type == "local":
+            if self.comfy_host not in {"127.0.0.1", "localhost", "::1"}:
+                raise ValueError("本地地址必须为 127.0.0.1、localhost 或 ::1。")
+        elif self.connection_type == "ssh" and not self.ssh_host:
+            raise ValueError("SSH 地址不能为空。")
+        return self
+
+
 class RemoteHostFingerprintRequest(ApiModel):
     fingerprint: str = Field(min_length=8, max_length=512)
 
@@ -445,6 +601,10 @@ class RemoteHostFingerprintRequest(ApiModel):
 class RemoteConnectionTestRequest(ApiModel):
     password: SecretStr | None = Field(default=None, max_length=4096)
     passphrase: SecretStr | None = Field(default=None, max_length=4096)
+
+
+class GalleryClipboardRequest(ApiModel):
+    path: str = Field(min_length=1, max_length=2000)
 
 
 class GalleryPathsRequest(ApiModel):

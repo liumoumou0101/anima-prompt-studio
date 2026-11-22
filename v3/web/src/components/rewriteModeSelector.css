@@ -1,0 +1,24 @@
+.rewrite-mode { display:flex; flex-wrap:wrap; align-items:center; gap:10px 18px; margin:4px 0 6px; text-align:left; }
+.rewrite-mode__heading { display:grid; gap:4px; }
+.rewrite-mode__heading > strong { font-size:13px; font-weight:600; }
+.rewrite-mode__heading > span { color:var(--muted); font-size:11px; }
+.rewrite-mode__options { display:flex; flex-wrap:wrap; gap:8px; }
+.conversation-workbench .rewrite-mode__choice { display:flex; align-items:center; gap:9px; margin:0; padding:8px 14px; min-height:50px; border:1px solid var(--line-bright); border-radius:6px; background:var(--input-bg); cursor:pointer; }
+.conversation-workbench .rewrite-mode__choice:has(input:checked) { border-color:var(--accent); background:var(--accent-soft); }
+.conversation-workbench .rewrite-mode__choice:has(input:checked) strong { color:var(--accent); }
+.conversation-workbench .rewrite-mode__choice:hover:not(:has(input:disabled)) { border-color:var(--accent); }
+.conversation-workbench .rewrite-mode__choice:has(input:focus-visible) { outline:2px solid var(--accent); outline-offset:2px; }
+.conversation-workbench .rewrite-mode__choice:has(input:disabled) { cursor:not-allowed; opacity:.65; }
+.conversation-workbench .rewrite-mode__choice input { flex:none; width:15px; height:15px; margin:0; padding:0; accent-color:var(--accent); }
+.rewrite-mode__copy { display:grid; gap:3px; line-height:1.4; }
+.rewrite-mode__copy > strong { font-size:13px; font-weight:600; }
+.rewrite-mode__copy > span { font-size:11px; color:var(--muted); }
+.conversation-empty .rewrite-mode { margin:0 0 22px; }
+.conversation-empty .rewrite-mode__heading { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+.conversation-empty .rewrite-mode__options { width:100%; }
+.conversation-empty .rewrite-mode__choice { flex:1; }
+@media (max-width:700px) {
+  .rewrite-mode__heading { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+  .rewrite-mode__options { width:100%; }
+  .conversation-workbench .rewrite-mode__choice { flex:1; padding:8px 10px; }
+}

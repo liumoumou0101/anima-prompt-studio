@@ -63,7 +63,7 @@ class WorkflowRenderer:
                 continue
             inputs = node.get("inputs", {})
             for input_name in (slot.name_input, slot.model_strength_input, slot.clip_strength_input):
-                if input_name not in inputs:
+                if input_name is not None and input_name not in inputs:
                     errors.append(f"LoRA 插槽 {index} 的输入不存在：{slot.node_id}.{input_name}")
         return errors
 
@@ -107,6 +107,8 @@ class WorkflowRenderer:
             checkpoint_logical_name,
             template_checkpoint or checkpoint_logical_name,
         )
+        if workflow_profile.runtime_assets.get("server_binding") == "v1":
+            checkpoint = template_checkpoint
         params = job.generation_params
         common_values: dict[str, Any] = {
             "positive_prompt": job.positive_prompt,
@@ -158,23 +160,26 @@ class WorkflowRenderer:
                 "refiner_sampler": self._sampler_snapshot(workflow, refiner_seed_binding),
             })
 
-        if len(job.lora_selection) > len(workflow_profile.lora_slots):
+        active_loras = [selection for selection in job.lora_selection if selection.enabled]
+        if len(active_loras) > len(workflow_profile.lora_slots):
             raise WorkflowRenderError(
-                f"当前任务选择了 {len(job.lora_selection)} 个 LoRA，但工作流只有 "
+                f"当前任务选择了 {len(active_loras)} 个 LoRA，但工作流只有 "
                 f"{len(workflow_profile.lora_slots)} 个 LoRA 插槽。"
             )
         for index, slot in enumerate(workflow_profile.lora_slots):
             node_inputs = workflow[slot.node_id]["inputs"]
-            if index < len(job.lora_selection):
-                selection = job.lora_selection[index]
+            if index < len(active_loras):
+                selection = active_loras[index]
                 lora_name = selection.file_name or selection.logical_id
                 node_inputs[slot.name_input] = remote_profile.model_aliases.get(lora_name, lora_name)
                 node_inputs[slot.model_strength_input] = selection.weight
-                node_inputs[slot.clip_strength_input] = selection.weight
+                if slot.clip_strength_input is not None:
+                    node_inputs[slot.clip_strength_input] = selection.weight if selection.clip_weight is None else selection.clip_weight
             else:
                 # Keep the template's valid filename but neutralize an unused fixed slot.
                 node_inputs[slot.model_strength_input] = 0.0
-                node_inputs[slot.clip_strength_input] = 0.0
+                if slot.clip_strength_input is not None:
+                    node_inputs[slot.clip_strength_input] = 0.0
 
         return WorkflowRenderResult(
             workflow=workflow,

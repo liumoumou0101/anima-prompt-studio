@@ -1,0 +1,7 @@
+.moss-negative { flex: 0 0 auto; min-width: 0; border-top: 1px solid var(--line); }
+.moss-negative-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 8px 0; border: 0; color: var(--text); background: transparent; text-align: left; font-size: 13px; }
+.moss-negative-toggle small { margin-left: auto; color: var(--muted); font-size: 11px; }
+.moss-negative-content { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.moss-negative-content label { font-size: 12px; color: var(--muted); }
+.moss-negative-content > textarea { min-height: 64px; max-height: 180px; resize: vertical; font-size: 13px; line-height: 1.65; }
+.moss-negative-content p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }

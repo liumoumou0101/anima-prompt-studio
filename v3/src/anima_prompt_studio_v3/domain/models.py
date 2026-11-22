@@ -255,6 +255,7 @@ class IntentDocument(DomainModel):
     translated_text: str | None = None
     scene_plan_en: str | None = Field(default=None, max_length=2400)
     scene_negative_en: list[str] = Field(default_factory=list, max_length=100)
+    scene_suppressed_en: list[str] = Field(default_factory=list, max_length=200)
     graph: ConstraintGraph
     warnings: list[IntentWarning] = Field(default_factory=list)
 

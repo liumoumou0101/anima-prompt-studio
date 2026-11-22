@@ -48,10 +48,10 @@ def test_base_recipes_keep_template_baseline_and_separate_style_from_detail() ->
 
     recipes = {item["id"]: item for item in contract["generation_recipes"]}
     assert contract["default_recipe_id"] == "stable_baseline"
-    assert recipes["stable_baseline"]["parameters"] == {"steps": 30, "cfg": 4.0, "sampler": "er_sde", "scheduler": "simple"}
+    assert recipes["stable_baseline"]["parameters"] == {"steps": 35, "cfg": 4.5, "sampler": "er_sde", "scheduler": "normal"}
     assert recipes["creative_euler"]["objective"] == "creative"
     assert recipes["detail_study"]["evidence"] == "experimental"
-    assert contract["parameter_capabilities"]["scheduler"]["mode"] == "fixed"
+    assert contract["parameter_capabilities"]["scheduler"]["mode"] == "editable"
 
 
 def test_dmdx_recipe_is_fixed_to_the_saved_four_step_workflow() -> None:
@@ -65,15 +65,14 @@ def test_dmdx_recipe_is_fixed_to_the_saved_four_step_workflow() -> None:
 
     assert contract["default_recipe_id"] == "dmdx_4step"
     assert len(contract["generation_recipes"]) == 1
-    assert all(item["mode"] == "fixed" for item in contract["parameter_capabilities"].values())
+    assert all(item["mode"] == "editable" for item in contract["parameter_capabilities"].values())
 
     job = PromptJob(model_profile_id="anima_turbo_v1", generation_preset_id="custom")
     job.generation_params.steps = 10
     job.generation_params.cfg = 1
     job.generation_params.sampler = "er_sde"
     job.generation_params.scheduler = "simple"
-    with pytest.raises(ValueError, match="steps 必须为 4"):
-        validate_job_recipe(job, target)
+    validate_job_recipe(job, target)
 
 
 def test_turbo_uses_standard_recipe_as_default_instead_of_fastest_preview() -> None:

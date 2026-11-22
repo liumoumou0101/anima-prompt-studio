@@ -42,6 +42,12 @@ class ConfigService:
         return {item.id: item for item in map(CompositionPreset.model_validate, raw)}
 
     def get_model(self, profile_id: str) -> ModelProfile:
+        if profile_id in {"anima_aesthetic_v1_0", "anima_aesthetic_v1_1"} and profile_id not in self.model_profiles:
+            # Legacy gallery DTO reconstruction understands V3's explicit IDs.
+            return self.model_profiles["anima_aesthetic_v1"].model_copy(update={
+                "id": profile_id, "checkpoint_logical_name": profile_id,
+                "display_name": "ANIMA Aesthetic v1." + profile_id[-1],
+            })
         try:
             return self.model_profiles[profile_id]
         except KeyError as exc:
@@ -54,6 +60,8 @@ class ConfigService:
             raise ValueError(f"未知质量预设：{profile_id}") from exc
 
     def get_generation_preset(self, model_id: str, preset_id: str) -> GenerationPreset:
+        if model_id in {"anima_aesthetic_v1_0", "anima_aesthetic_v1_1"} and model_id not in self.generation_presets:
+            model_id = "anima_aesthetic_v1"
         try:
             return self.generation_presets[model_id][preset_id]
         except KeyError as exc:

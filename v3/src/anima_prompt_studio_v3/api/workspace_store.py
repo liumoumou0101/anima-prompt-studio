@@ -1,14 +1,28 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hashlib
 import json
 from pathlib import Path
+import re
 import sqlite3
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
+
+from pydantic import ValidationError
+
+from ..core.requirements import PromptEdit, WorkbenchError, apply_workspace_edit, project_conversation
 
 
 class WorkspaceNotFoundError(LookupError):
+    pass
+
+
+class WorkspaceVersionNotFoundError(LookupError):
+    pass
+
+
+class WorkspaceProposalNotFoundError(LookupError):
     pass
 
 
@@ -18,11 +32,22 @@ class WorkspaceRevisionConflictError(RuntimeError):
         super().__init__(f"工作台版本冲突；当前 revision={current_revision}。")
 
 
+class WorkspaceIdempotencyKeyError(ValueError):
+    pass
+
+
+class WorkspaceCreateConflictError(ValueError):
+    def __init__(self, message: str, *, code: str = "idempotency_conflict") -> None:
+        self.code = code
+        super().__init__(message)
+
+
 class WorkspaceStore:
     """Small independent SQLite store for mutable user workspace state."""
 
     def __init__(self, path: Path) -> None:
         self.path = path.resolve()
+        self.prepare_personal_prompt_write: Callable[[str], Callable[[sqlite3.Connection], None]] | None = None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.executescript(
@@ -39,19 +64,179 @@ class WorkspaceStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_workspaces_active_updated
                 ON workspaces(deleted_at, updated_at DESC);
+                CREATE TABLE IF NOT EXISTS workspace_creations (
+                    idempotency_key TEXT PRIMARY KEY,
+                    payload_hash TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL UNIQUE REFERENCES workspaces(id)
+                );
+                CREATE TABLE IF NOT EXISTS workspace_prompt_transfers (
+                    transfer_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+                    payload_hash TEXT NOT NULL,
+                    before_compiled_json TEXT NOT NULL,
+                    after_positive TEXT NOT NULL,
+                    after_negative TEXT NOT NULL,
+                    result_revision INTEGER NOT NULL,
+                    state TEXT NOT NULL CHECK (state IN ('applied', 'undone')),
+                    undo_revision INTEGER,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workspace_versions (
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+                    revision INTEGER NOT NULL CHECK (revision >= 1),
+                    title TEXT NOT NULL,
+                    draft_json TEXT NOT NULL,
+                    candidate_snapshot_json TEXT,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (workspace_id, revision)
+                );
+                CREATE TABLE IF NOT EXISTS workspace_proposals (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL UNIQUE REFERENCES workspaces(id),
+                    base_revision INTEGER NOT NULL CHECK (base_revision >= 1),
+                    draft_json TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workspace_proposal_decisions (
+                    proposal_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+                    base_revision INTEGER NOT NULL,
+                    decision TEXT NOT NULL CHECK (decision IN ('accepted', 'discarded')),
+                    result_revision INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workspace_editor_contexts (
+                    workspace_id TEXT NOT NULL, document_id TEXT NOT NULL, token TEXT NOT NULL,
+                    request_id TEXT NOT NULL, editor_epoch INTEGER NOT NULL,
+                    PRIMARY KEY (workspace_id, document_id)
+                );
+                CREATE TABLE IF NOT EXISTS workspace_checkpoints (
+                    id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, operation_id TEXT NOT NULL,
+                    version_number INTEGER NOT NULL, payload_hash TEXT NOT NULL, payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL, UNIQUE(workspace_id, operation_id), UNIQUE(workspace_id, version_number)
+                );
+                CREATE TABLE IF NOT EXISTS workspace_editor_restores (
+                    workspace_id TEXT NOT NULL, operation_id TEXT NOT NULL, payload_hash TEXT NOT NULL,
+                    result_json TEXT NOT NULL, PRIMARY KEY(workspace_id, operation_id)
+                );
                 """
             )
             columns = {row[1] for row in connection.execute("PRAGMA table_info(workspaces)")}
             if "candidate_snapshot_json" not in columns:
                 connection.execute("ALTER TABLE workspaces ADD COLUMN candidate_snapshot_json TEXT")
 
-    def list(self, *, limit: int = 50) -> list[dict[str, Any]]:
+    def editor_context(self, workspace_id: str, document_id: str, *, request_id: str,
+                       editor_epoch: int) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._require_row(connection, workspace_id)
+            token = uuid4().hex
+            previous = connection.execute("SELECT * FROM workspace_editor_contexts WHERE workspace_id=? AND document_id=?",
+                                          (workspace_id, document_id)).fetchone()
+            if previous is not None and editor_epoch < previous['editor_epoch']:
+                raise WorkbenchError('editor_context_stale','本窗口的改写基点已变化，旧请求已失效。')
+            if previous is not None and previous['request_id'] == request_id and previous['editor_epoch'] == editor_epoch:
+                token = previous['token']
+            else:
+                connection.execute("""INSERT INTO workspace_editor_contexts VALUES(?,?,?,?,?)
+                    ON CONFLICT(workspace_id,document_id) DO UPDATE SET token=excluded.token,
+                    request_id=excluded.request_id,editor_epoch=excluded.editor_epoch""",
+                    (workspace_id, document_id, token, request_id, editor_epoch))
+            return {'workspace_id':workspace_id, 'document_id':document_id, 'token':token,
+                    'request_id':request_id, 'editor_epoch':editor_epoch}
+
+    def invalidate_editor_context(self, workspace_id: str, document_id: str,
+                                  expected_token: str | None = None) -> bool:
+        with self._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            self._require_row(connection, workspace_id)
+            if expected_token is not None:
+                row=connection.execute('SELECT token FROM workspace_editor_contexts WHERE workspace_id=? AND document_id=?',
+                                       (workspace_id,document_id)).fetchone()
+                if row is None or row['token'] != expected_token:
+                    return False
+            self._invalidate_editor_context(connection,workspace_id,document_id)
+            return True
+
+    @staticmethod
+    def _invalidate_editor_context(connection:sqlite3.Connection,workspace_id:str,document_id:str)->None:
+        connection.execute("""UPDATE workspace_editor_contexts SET token=?,request_id='__invalidated__',
+            editor_epoch=editor_epoch+CASE WHEN request_id='__invalidated__' THEN 0 ELSE 1 END
+            WHERE workspace_id=? AND document_id=?""",(uuid4().hex,workspace_id,document_id))
+
+    @staticmethod
+    def _check_editor_context(connection: sqlite3.Connection, workspace_id: str,
+                              document_id: str, token: str) -> None:
+        row=connection.execute('SELECT token FROM workspace_editor_contexts WHERE workspace_id=? AND document_id=?',
+                               (workspace_id,document_id)).fetchone()
+        if row is None or row['token'] != token:
+            raise WorkbenchError('editor_context_stale', '本窗口的改写基点已变化，旧请求已失效。')
+
+    def check_editor_context(self, workspace_id: str, document_id: str, token: str) -> None:
+        with self._connect() as connection:
+            self._check_editor_context(connection,workspace_id,document_id,token)
+
+    def create_checkpoint(self, workspace_id: str, *, operation_id: str, base_revision: int,
+                          kind: str, label: str, snapshot: dict[str, Any],
+                          source: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload={'operation_id':operation_id,'base_revision':base_revision,'kind':kind,'label':label,
+                 'snapshot':snapshot,'source':source}
+        raw=_serialize_draft(payload); fingerprint=hashlib.sha256(raw.encode()).hexdigest()
+        with self._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE'); self._require_row(connection,workspace_id)
+            previous=connection.execute('SELECT * FROM workspace_checkpoints WHERE workspace_id=? AND operation_id=?',
+                                        (workspace_id,operation_id)).fetchone()
+            if previous is not None:
+                if previous['payload_hash'] != fingerprint:
+                    raise WorkbenchError('checkpoint_operation_conflict','同一操作标识不能保存不同版本。')
+                return self._checkpoint_record(previous)
+            number=connection.execute('SELECT COALESCE(MAX(version_number),0)+1 FROM workspace_checkpoints WHERE workspace_id=?',(workspace_id,)).fetchone()[0]
+            checkpoint_id='checkpoint_'+uuid4().hex
+            connection.execute('INSERT INTO workspace_checkpoints VALUES(?,?,?,?,?,?,?)',
+                               (checkpoint_id,workspace_id,operation_id,number,fingerprint,raw,_utc_now()))
+            return self._checkpoint_record(connection.execute('SELECT * FROM workspace_checkpoints WHERE id=?',(checkpoint_id,)).fetchone())
+
+    @staticmethod
+    def _checkpoint_record(row: sqlite3.Row) -> dict[str, Any]:
+        return {**json.loads(row['payload_json']),'id':row['id'],'workspace_id':row['workspace_id'],
+                'version_number':row['version_number'],'created_at':row['created_at']}
+
+    def list_checkpoints(self, workspace_id: str, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            self._require_row(connection,workspace_id)
+            rows=connection.execute('SELECT * FROM workspace_checkpoints WHERE workspace_id=? ORDER BY version_number DESC LIMIT ? OFFSET ?',
+                                    (workspace_id,limit,offset)).fetchall()
+            return [self._checkpoint_record(row) for row in rows]
+
+    def restore_editor(self, workspace_id: str, *, document_id: str, operation_id: str,
+                       expected_revision: int, title: str, draft: dict[str, Any]) -> dict[str, Any]:
+        raw=_serialize_draft({'document_id':document_id,'revision':expected_revision,'title':title,'draft':draft})
+        fingerprint=hashlib.sha256(raw.encode()).hexdigest()
+        with self._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            previous=connection.execute('SELECT * FROM workspace_editor_restores WHERE workspace_id=? AND operation_id=?',(workspace_id,operation_id)).fetchone()
+            if previous is not None:
+                if previous['payload_hash'] != fingerprint:
+                    raise WorkbenchError('restore_operation_conflict','同一恢复标识不能用于不同请求。')
+                return json.loads(previous['result_json'])
+            row=self._require_row(connection,workspace_id,expected_revision)
+            serialized=_serialize_draft(apply_workspace_edit(json.loads(row['draft_json']),draft))
+            self._invalidate_editor_context(connection,workspace_id,document_id)
+            result=self._save_revision(connection,row,title=title,draft_json=serialized,candidate_snapshot_json=row['candidate_snapshot_json'])
+            connection.execute('INSERT INTO workspace_editor_restores VALUES(?,?,?,?)',(workspace_id,operation_id,fingerprint,_serialize_draft(result)))
+            return result
+
+    def list(self, *, limit: int = 50, offset: int = 0, q: str = "",
+             archived: bool = False) -> list[dict[str, Any]]:
+        search = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         with self._connect() as connection:
             rows = connection.execute(
                 """SELECT id,title,draft_json,candidate_snapshot_json,revision,created_at,updated_at
-                   FROM workspaces WHERE deleted_at IS NULL
-                   ORDER BY updated_at DESC LIMIT ?""",
-                (limit,),
+                   FROM workspaces WHERE (deleted_at IS NOT NULL)=?
+                   AND title LIKE ? ESCAPE char(92)
+                   ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?""",
+                (archived, f"%{search}%", limit, offset),
             ).fetchall()
         return [self._record(row) for row in rows]
 
@@ -60,18 +245,46 @@ class WorkspaceStore:
         title: str,
         draft: dict[str, Any],
         candidate_snapshot: dict[str, Any] | None = None,
+        *,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        now = _utc_now()
-        workspace_id = f"workspace_{uuid4().hex}"
-        serialized = _serialize_draft(draft)
-        serialized_snapshot = _serialize_snapshot(candidate_snapshot)
+        if idempotency_key is not None and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", idempotency_key) is None:
+            raise WorkspaceIdempotencyKeyError("Idempotency-Key 须为 1–128 个字母、数字或 . _ : -，并以字母或数字开头。")
+        # Hash the caller's input, not the projected record containing server
+        # defaults or generated fields. Equivalent JSON key order is harmless.
+        payload_hash = hashlib.sha256(_serialize_draft({
+            "title": title, "draft": draft, "candidate_snapshot": candidate_snapshot,
+        }).encode("utf-8")).hexdigest() if idempotency_key is not None else None
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if idempotency_key is not None:
+                previous = connection.execute(
+                    "SELECT payload_hash,workspace_id FROM workspace_creations WHERE idempotency_key=?",
+                    (idempotency_key,),
+                ).fetchone()
+                if previous is not None:
+                    if previous["payload_hash"] != payload_hash:
+                        raise WorkspaceCreateConflictError("同一幂等键不能用于不同的新建会话请求。")
+                    existing = connection.execute("SELECT * FROM workspaces WHERE id=?", (previous["workspace_id"],)).fetchone()
+                    if existing is None or existing["deleted_at"] is not None:
+                        raise WorkspaceCreateConflictError("原请求创建的工作台已删除，不能重放；请重新发起操作。",
+                                                           code="workspace_idempotency_target_deleted")
+                    return self._record(existing)
+            now = _utc_now()
+            workspace_id = f"workspace_{uuid4().hex}"
+            serialized = _serialize_draft(apply_workspace_edit(None, draft))
+            serialized_snapshot = _serialize_snapshot(candidate_snapshot)
             connection.execute(
                 """INSERT INTO workspaces(id,title,draft_json,candidate_snapshot_json,revision,created_at,updated_at)
                    VALUES(?,?,?,?,?,?,?)""",
                 (workspace_id, title, serialized, serialized_snapshot, 1, now, now),
             )
-        return self.get(workspace_id)
+            if idempotency_key is not None:
+                connection.execute("INSERT INTO workspace_creations(idempotency_key,payload_hash,workspace_id) VALUES(?,?,?)",
+                                   (idempotency_key, payload_hash, workspace_id))
+            created = connection.execute("SELECT * FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+            self._snapshot(connection, created)
+            return self._record(created)
 
     def get(self, workspace_id: str) -> dict[str, Any]:
         with self._connect() as connection:
@@ -93,12 +306,11 @@ class WorkspaceStore:
         draft: dict[str, Any],
         candidate_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        serialized = _serialize_draft(draft)
         serialized_snapshot = _serialize_snapshot(candidate_snapshot)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT revision FROM workspaces WHERE id=? AND deleted_at IS NULL",
+                "SELECT * FROM workspaces WHERE id=? AND deleted_at IS NULL",
                 (workspace_id,),
             ).fetchone()
             if row is None:
@@ -106,31 +318,402 @@ class WorkspaceStore:
             current_revision = int(row["revision"])
             if current_revision != expected_revision:
                 raise WorkspaceRevisionConflictError(current_revision)
-            connection.execute(
-                """UPDATE workspaces SET title=?,draft_json=?,candidate_snapshot_json=?,revision=?,updated_at=?
-                   WHERE id=? AND revision=? AND deleted_at IS NULL""",
-                (title, serialized, serialized_snapshot, current_revision + 1, _utc_now(), workspace_id, current_revision),
-            )
-        return self.get(workspace_id)
+            serialized = _serialize_draft(apply_workspace_edit(json.loads(row["draft_json"]), draft))
+            result = self._save_revision(connection, row, title=title, draft_json=serialized,
+                                         candidate_snapshot_json=serialized_snapshot)
+        return result
+
+    def append_personal_prompt(self, workspace_id: str, *, transfer_id: str,
+                               expected_revision: int, positive: str, negative: str) -> dict[str, Any]:
+        if not isinstance(transfer_id, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", transfer_id) is None:
+            raise WorkbenchError("invalid_request", "传递标识格式不正确。")
+        if (not isinstance(positive, str) or not isinstance(negative, str)
+                or len(positive) > 20_000 or len(negative) > 20_000
+                or not (positive.strip() or negative.strip())):
+            raise WorkbenchError("invalid_request", "正负内容不能都为空，每段最多 20,000 字符。")
+        payload_hash = hashlib.sha256(_serialize_draft({"positive": positive, "negative": negative}).encode("utf-8")).hexdigest()
+        guard = self.prepare_personal_prompt_write(workspace_id) if self.prepare_personal_prompt_write else None
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = connection.execute("SELECT * FROM workspace_prompt_transfers WHERE transfer_id=?", (transfer_id,)).fetchone()
+            if previous is not None:
+                if previous["workspace_id"] != workspace_id or previous["payload_hash"] != payload_hash:
+                    raise WorkbenchError("personal_prompt_transfer_conflict", "同一传递标识不能用于不同内容或工作台。")
+                return self._prompt_transfer_result(connection, previous, replayed=True)
+            row = self._require_row(connection, workspace_id, expected_revision)
+            self._require_personal_prompt_writable(connection, workspace_id, guard)
+            current = project_conversation(json.loads(row["draft_json"]))
+            before = current.get("compiled")
+            old = before or {"positive": "", "negative": ""}
+            # A newline is the only inserted text. Even whitespace-only sides
+            # retain their original bytes when the other side has content.
+            after = {key: old[key] + ("\n" if old[key] and addition else "") + addition
+                     for key, addition in (("positive", positive), ("negative", negative))}
+            if not after["positive"].strip():
+                raise WorkbenchError("personal_prompt_positive_required", "请先在工作台填写正向提示词，再追加这段负向内容")
+            try:
+                PromptEdit.model_validate(after)
+            except ValidationError:
+                raise WorkbenchError("invalid_request", "追加后的正负提示词每段最多 20,000 字符。") from None
+            # Full current input preserves model, generation settings and
+            # arbitrary persistent fields under apply_workspace_edit's contract.
+            draft = apply_workspace_edit(current, {**current, "prompt_edit": after})
+            result = self._save_revision(connection, row, title=row["title"],
+                draft_json=_serialize_draft(_persistent_draft(draft)), candidate_snapshot_json=row["candidate_snapshot_json"])
+            connection.execute("""INSERT INTO workspace_prompt_transfers
+                (transfer_id,workspace_id,payload_hash,before_compiled_json,after_positive,after_negative,result_revision,state,created_at)
+                VALUES(?,?,?,?,?,?,?,'applied',?)""", (transfer_id, workspace_id, payload_hash,
+                    json.dumps(before, ensure_ascii=False, allow_nan=False), after["positive"], after["negative"], result["revision"], _utc_now()))
+            receipt = connection.execute("SELECT * FROM workspace_prompt_transfers WHERE transfer_id=?", (transfer_id,)).fetchone()
+            return self._prompt_transfer_result(connection, receipt, replayed=False)
+
+    def undo_personal_prompt(self, workspace_id: str, *, transfer_id: str,
+                             expected_revision: int) -> dict[str, Any]:
+        guard = self.prepare_personal_prompt_write(workspace_id) if self.prepare_personal_prompt_write else None
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            receipt = self._require_prompt_transfer(connection, workspace_id, transfer_id)
+            if receipt["state"] == "undone":
+                return self._prompt_transfer_result(connection, receipt, replayed=True)
+            row = self._require_row(connection, workspace_id, expected_revision)
+            self._require_personal_prompt_writable(connection, workspace_id, guard)
+            draft = json.loads(row["draft_json"])
+            if not self._prompt_transfer_matches(receipt, draft):
+                raise WorkbenchError("personal_prompt_undo_conflict", "追加后已继续编辑，请在提示词中手动移除")
+            draft["compiled"] = json.loads(receipt["before_compiled_json"])
+            result = self._save_revision(connection, row, title=row["title"],
+                draft_json=_serialize_draft(_persistent_draft(draft)), candidate_snapshot_json=row["candidate_snapshot_json"])
+            connection.execute("UPDATE workspace_prompt_transfers SET state='undone',undo_revision=? WHERE transfer_id=?",
+                               (result["revision"], transfer_id))
+            return self._prompt_transfer_result(connection, self._require_prompt_transfer(connection, workspace_id, transfer_id), replayed=False)
+
+    def get_personal_prompt_transfer(self, workspace_id: str, transfer_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            return self._prompt_transfer_result(connection, self._require_prompt_transfer(connection, workspace_id, transfer_id), replayed=True)
+
+    def _require_personal_prompt_writable(self, connection: sqlite3.Connection, workspace_id: str,
+                                         guard: Callable[[sqlite3.Connection], None] | None) -> None:
+        if connection.execute("SELECT 1 FROM workspace_proposals WHERE workspace_id=?", (workspace_id,)).fetchone():
+            raise WorkbenchError("workspace_proposal_pending", "请先接受或放弃工作台中待处理的建议。")
+        if guard is not None:
+            guard(connection)
+
+    def _require_prompt_transfer(self, connection: sqlite3.Connection, workspace_id: str, transfer_id: str) -> sqlite3.Row:
+        self._require_row(connection, workspace_id)
+        receipt = connection.execute("SELECT * FROM workspace_prompt_transfers WHERE transfer_id=?", (transfer_id,)).fetchone()
+        if receipt is None:
+            raise WorkbenchError("personal_prompt_transfer_not_found", "追加回执不存在。")
+        if receipt["workspace_id"] != workspace_id:
+            raise WorkbenchError("personal_prompt_transfer_conflict", "传递标识属于另一个工作台。")
+        return receipt
+
+    @staticmethod
+    def _prompt_transfer_matches(receipt: sqlite3.Row, draft: dict[str, Any]) -> bool:
+        compiled = draft.get("compiled") or {}
+        return all(compiled.get(key) == receipt[f"after_{key}"] for key in ("positive", "negative"))
+
+    def _prompt_transfer_result(self, connection: sqlite3.Connection, receipt: sqlite3.Row, *, replayed: bool) -> dict[str, Any]:
+        workspace = self._record(self._require_row(connection, receipt["workspace_id"]))
+        return {"workspace": workspace, "replayed": replayed, "receipt": {
+            "id": receipt["transfer_id"], "workspace_id": receipt["workspace_id"],
+            "result_revision": receipt["result_revision"], "state": receipt["state"],
+            "undo_revision": receipt["undo_revision"], "created_at": receipt["created_at"],
+            "can_undo": receipt["state"] == "applied" and self._prompt_transfer_matches(receipt, workspace["draft"])}}
+
+    def transform(
+        self, workspace_id: str, *, expected_revision: int,
+        operation: Callable[[dict[str, Any]], dict[str, Any]],
+        editor_context: tuple[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Internal short CAS. The callback MUST NOT perform network or slow IO."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM workspaces WHERE id=? AND deleted_at IS NULL", (workspace_id,),
+            ).fetchone()
+            if row is None:
+                raise WorkspaceNotFoundError(workspace_id)
+            if row["revision"] != expected_revision:
+                raise WorkspaceRevisionConflictError(row["revision"])
+            if editor_context is not None:
+                self._check_editor_context(connection, workspace_id, *editor_context)
+            draft = operation(json.loads(row["draft_json"]))
+            # Validate internal transitions as well as public input before commit.
+            result = self._save_revision(connection, row, title=row["title"],
+                draft_json=_serialize_draft(_persistent_draft(draft)),
+                candidate_snapshot_json=row["candidate_snapshot_json"])
+        return result
+
+    def rename(self, workspace_id: str, *, expected_revision: int, title: str) -> dict[str, Any]:
+        """Change only the title; do not project default-valued edit fields."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._require_row(connection, workspace_id, expected_revision)
+            return self._save_revision(connection, row, title=title, draft_json=row["draft_json"],
+                candidate_snapshot_json=row["candidate_snapshot_json"])
 
     def delete(self, workspace_id: str, *, expected_revision: int) -> None:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                "SELECT revision FROM workspaces WHERE id=? AND deleted_at IS NULL",
-                (workspace_id,),
-            ).fetchone()
-            if row is None:
-                raise WorkspaceNotFoundError(workspace_id)
-            current_revision = int(row["revision"])
-            if current_revision != expected_revision:
-                raise WorkspaceRevisionConflictError(current_revision)
-            now = _utc_now()
-            connection.execute(
-                """UPDATE workspaces SET revision=?,updated_at=?,deleted_at=?
-                   WHERE id=? AND revision=? AND deleted_at IS NULL""",
-                (current_revision + 1, now, now, workspace_id, current_revision),
-            )
+            row = self._require_row(connection, workspace_id, expected_revision)
+            self._save_revision(connection, row, title=row["title"], draft_json=row["draft_json"],
+                candidate_snapshot_json=row["candidate_snapshot_json"], deleted_at=_utc_now())
+
+    def unarchive(self, workspace_id: str, *, expected_revision: int) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._require_row(connection, workspace_id, expected_revision, archived=True)
+            return self._save_revision(connection, row, title=row["title"], draft_json=row["draft_json"],
+                candidate_snapshot_json=row["candidate_snapshot_json"])
+
+    def list_versions(self, workspace_id: str, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            self._require_row(connection, workspace_id)
+            # An older database has only its current draft. Offer that actual
+            # baseline without pretending event summaries contain old drafts.
+            rows = connection.execute("""
+                SELECT revision,title,draft_json,created_at FROM workspace_versions WHERE workspace_id=?
+                UNION ALL
+                SELECT revision,title,draft_json,updated_at FROM workspaces WHERE id=?
+                    AND NOT EXISTS (SELECT 1 FROM workspace_versions
+                        WHERE workspace_id=workspaces.id AND revision=workspaces.revision)
+                ORDER BY revision DESC LIMIT ? OFFSET ?
+            """, (workspace_id, workspace_id, limit, offset)).fetchall()
+            return [{"revision": row["revision"], "title": row["title"],
+                     "draft": project_conversation(json.loads(row["draft_json"])),
+                     "created_at": row["created_at"]} for row in rows]
+
+    def restore(self, workspace_id: str, *, expected_revision: int, source_revision: int) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = self._require_row(connection, workspace_id, expected_revision)
+            self._snapshot(connection, current)
+            source = connection.execute("SELECT * FROM workspace_versions WHERE workspace_id=? AND revision=?",
+                                        (workspace_id, source_revision)).fetchone()
+            if source is None:
+                raise WorkspaceVersionNotFoundError(source_revision)
+            draft = _persistent_draft(json.loads(source["draft_json"]))
+            # Historical tokens cannot become active credentials again. The
+            # restored prompt retains its original fresh/stale fingerprint.
+            if draft.get("compiled"):
+                draft["compiled"]["compiled_token"] = f"cmp_{uuid4().hex}"
+            return self._save_revision(connection, current, title=source["title"],
+                draft_json=_serialize_draft(draft), candidate_snapshot_json=source["candidate_snapshot_json"])
+
+    def get_version(self, workspace_id: str, revision: int, *, include_archived: bool = False) -> dict[str, Any]:
+        """Read an actual saved version, including a pre-history current baseline."""
+        with self._connect() as connection:
+            row = self._version_row(connection, workspace_id, revision, include_archived=include_archived)
+            return {"revision": row["revision"], "title": row["title"],
+                    "draft": project_conversation(json.loads(row["draft_json"]))}
+
+    def fork_version(self, workspace_id: str, *, source_revision: int, idempotency_key: str,
+                     title: str | None = None) -> dict[str, Any]:
+        identity = {"kind": "workspace_version", "workspace_id": workspace_id,
+                    "revision": source_revision, "title": title}
+        payload_hash = self._snapshot_creation_hash(identity, idempotency_key)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = self._replay_snapshot_creation(connection, idempotency_key, payload_hash)
+            if previous is not None:
+                return previous
+            source = self._version_row(connection, workspace_id, source_revision)
+            draft = _persistent_draft(json.loads(source["draft_json"]))
+            draft["workspace_origin"] = {"workspace_id": workspace_id, "revision": source_revision, "run_id": None}
+            draft["conversation_events"] = []
+            if draft.get("compiled"):
+                # New workspace credentials must not revive the parent's token.
+                # Keep its fingerprint, including stale state, unchanged.
+                draft["compiled"]["compiled_token"] = f"cmp_{uuid4().hex}"
+            return self._insert_snapshot_workspace(connection,
+                title=title or f"{source['title']} · 版本 {source_revision} 分支"[:200], draft=draft,
+                candidate_snapshot_json=source["candidate_snapshot_json"],
+                idempotency_key=idempotency_key, payload_hash=payload_hash)
+
+    def create_snapshot(self, title: str, draft: dict[str, Any], *, request_identity: dict[str, Any],
+                        idempotency_key: str | None = None) -> dict[str, Any]:
+        """Internal creation from trusted, validated state in one transaction."""
+        payload_hash = self._snapshot_creation_hash(request_identity, idempotency_key)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = self._replay_snapshot_creation(connection, idempotency_key, payload_hash)
+            if previous is not None:
+                return previous
+            return self._insert_snapshot_workspace(connection, title=title, draft=draft,
+                candidate_snapshot_json=None, idempotency_key=idempotency_key, payload_hash=payload_hash)
+
+    @staticmethod
+    def _snapshot_creation_hash(identity: dict[str, Any], key: str | None) -> str:
+        if key is not None and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", key) is None:
+            raise WorkspaceIdempotencyKeyError("Idempotency-Key 须为 1–128 个字母、数字或 . _ : -，并以字母或数字开头。")
+        return hashlib.sha256(_serialize_draft({"internal_creation": identity}).encode("utf-8")).hexdigest()
+
+    def _replay_snapshot_creation(self, connection: sqlite3.Connection, key: str | None,
+                                  payload_hash: str) -> dict[str, Any] | None:
+        if key is None:
+            return None
+        previous = connection.execute("SELECT payload_hash,workspace_id FROM workspace_creations WHERE idempotency_key=?",
+                                      (key,)).fetchone()
+        if previous is None:
+            return None
+        if previous["payload_hash"] != payload_hash:
+            raise WorkspaceCreateConflictError("同一幂等键不能用于不同的新建会话请求。")
+        row = connection.execute("SELECT * FROM workspaces WHERE id=?", (previous["workspace_id"],)).fetchone()
+        if row is None or row["deleted_at"] is not None:
+            raise WorkspaceCreateConflictError("原请求创建的工作台已归档，不能重放；请恢复该会话或重新发起操作。",
+                                               code="workspace_idempotency_target_deleted")
+        return self._record(row)
+
+    def _insert_snapshot_workspace(self, connection: sqlite3.Connection, *, title: str, draft: dict[str, Any],
+                                   candidate_snapshot_json: str | None, idempotency_key: str | None,
+                                   payload_hash: str) -> dict[str, Any]:
+        now = _utc_now()
+        workspace_id = f"workspace_{uuid4().hex}"
+        serialized = _serialize_draft(_persistent_draft(draft))
+        connection.execute("""INSERT INTO workspaces(id,title,draft_json,candidate_snapshot_json,revision,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,?)""", (workspace_id, title, serialized, candidate_snapshot_json, 1, now, now))
+        if idempotency_key is not None:
+            connection.execute("INSERT INTO workspace_creations(idempotency_key,payload_hash,workspace_id) VALUES(?,?,?)",
+                               (idempotency_key, payload_hash, workspace_id))
+        row = connection.execute("SELECT * FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+        self._snapshot(connection, row)
+        return self._record(row)
+
+    @staticmethod
+    def _version_row(connection: sqlite3.Connection, workspace_id: str, revision: int,
+                     *, include_archived: bool = False) -> sqlite3.Row:
+        current = connection.execute("SELECT * FROM workspaces WHERE id=?", (workspace_id,)).fetchone()
+        if current is None or (current["deleted_at"] is not None and not include_archived):
+            raise WorkspaceNotFoundError(workspace_id)
+        source = connection.execute("SELECT * FROM workspace_versions WHERE workspace_id=? AND revision=?",
+                                    (workspace_id, revision)).fetchone()
+        if source is not None:
+            return source
+        if current["revision"] == revision:
+            return current
+        raise WorkspaceVersionNotFoundError(revision)
+
+    def create_proposal(self, workspace_id: str, *, expected_revision: int,
+                        draft: dict[str, Any], metadata: dict[str, Any],
+                        editor_context: tuple[str, str] | None = None) -> dict[str, Any]:
+        serialized = _serialize_draft(_persistent_draft(draft))
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._require_row(connection, workspace_id, expected_revision)
+            if editor_context is not None:
+                self._check_editor_context(connection, workspace_id, *editor_context)
+            proposal_id = f"proposal_{uuid4().hex}"
+            connection.execute("""INSERT INTO workspace_proposals
+                (id,workspace_id,base_revision,draft_json,metadata_json,created_at) VALUES(?,?,?,?,?,?)
+                ON CONFLICT(workspace_id) DO UPDATE SET id=excluded.id,base_revision=excluded.base_revision,
+                    draft_json=excluded.draft_json,metadata_json=excluded.metadata_json,created_at=excluded.created_at""",
+                (proposal_id, workspace_id, expected_revision, serialized, _serialize_draft(metadata), _utc_now()))
+            row = connection.execute("SELECT * FROM workspace_proposals WHERE id=?", (proposal_id,)).fetchone()
+            return self._proposal_record(row)
+
+    def get_proposal(self, workspace_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            current = self._require_row(connection, workspace_id)
+            row = connection.execute("SELECT * FROM workspace_proposals WHERE workspace_id=? AND base_revision=?",
+                                     (workspace_id, current["revision"])).fetchone()
+            return self._proposal_record(row) if row is not None else None
+
+    def accept_proposal(self, workspace_id: str, proposal_id: str, *, expected_revision: int) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if self._replay_proposal_decision(connection, workspace_id, proposal_id, expected_revision, "accepted"):
+                return self._record(self._require_row(connection, workspace_id))
+            current = self._require_row(connection, workspace_id, expected_revision)
+            proposal = self._require_proposal(connection, workspace_id, proposal_id, expected_revision)
+            result = self._save_revision(connection, current, title=current["title"],
+                draft_json=_serialize_draft(_persistent_draft(json.loads(proposal["draft_json"]))),
+                candidate_snapshot_json=current["candidate_snapshot_json"])
+            self._save_proposal_decision(connection, workspace_id, proposal_id, expected_revision, "accepted", result["revision"])
+            return result
+
+    def discard_proposal(self, workspace_id: str, proposal_id: str, *, expected_revision: int) -> None:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if self._replay_proposal_decision(connection, workspace_id, proposal_id, expected_revision, "discarded"):
+                return
+            self._require_row(connection, workspace_id, expected_revision)
+            self._require_proposal(connection, workspace_id, proposal_id, expected_revision)
+            connection.execute("DELETE FROM workspace_proposals WHERE workspace_id=? AND id=?", (workspace_id, proposal_id))
+            self._save_proposal_decision(connection, workspace_id, proposal_id, expected_revision, "discarded", expected_revision)
+
+    def _replay_proposal_decision(self, connection: sqlite3.Connection, workspace_id: str, proposal_id: str,
+                                  expected_revision: int, decision: str) -> bool:
+        previous = connection.execute("SELECT * FROM workspace_proposal_decisions WHERE workspace_id=? AND proposal_id=?",
+                                      (workspace_id, proposal_id)).fetchone()
+        if previous is None:
+            return False
+        current = self._require_row(connection, workspace_id)
+        if previous["decision"] != decision:
+            raise WorkspaceProposalNotFoundError(proposal_id)
+        if previous["base_revision"] != expected_revision or previous["result_revision"] != current["revision"]:
+            raise WorkspaceRevisionConflictError(current["revision"])
+        # Replaying an old receipt must never return an older draft over a
+        # later user edit, or mutate a newer proposal at the same revision.
+        return True
+
+    @staticmethod
+    def _save_proposal_decision(connection: sqlite3.Connection, workspace_id: str, proposal_id: str,
+                                base_revision: int, decision: str, result_revision: int) -> None:
+        connection.execute("""INSERT INTO workspace_proposal_decisions
+            (proposal_id,workspace_id,base_revision,decision,result_revision,created_at) VALUES(?,?,?,?,?,?)""",
+            (proposal_id, workspace_id, base_revision, decision, result_revision, _utc_now()))
+
+    @staticmethod
+    def _require_row(connection: sqlite3.Connection, workspace_id: str, expected_revision: int | None = None,
+                     *, archived: bool = False) -> sqlite3.Row:
+        row = connection.execute("SELECT * FROM workspaces WHERE id=? AND (deleted_at IS NOT NULL)=?",
+                                 (workspace_id, archived)).fetchone()
+        if row is None:
+            raise WorkspaceNotFoundError(workspace_id)
+        if expected_revision is not None and row["revision"] != expected_revision:
+            raise WorkspaceRevisionConflictError(row["revision"])
+        return row
+
+    @staticmethod
+    def _require_proposal(connection: sqlite3.Connection, workspace_id: str, proposal_id: str,
+                          expected_revision: int) -> sqlite3.Row:
+        row = connection.execute("SELECT * FROM workspace_proposals WHERE workspace_id=? AND id=?",
+                                 (workspace_id, proposal_id)).fetchone()
+        if row is None:
+            raise WorkspaceProposalNotFoundError(proposal_id)
+        if row["base_revision"] != expected_revision:
+            raise WorkspaceRevisionConflictError(expected_revision)
+        return row
+
+    @staticmethod
+    def _snapshot(connection: sqlite3.Connection, row: sqlite3.Row) -> None:
+        connection.execute("""INSERT OR IGNORE INTO workspace_versions
+            (workspace_id,revision,title,draft_json,candidate_snapshot_json,created_at) VALUES(?,?,?,?,?,?)""",
+            (row["id"], row["revision"], row["title"], row["draft_json"], row["candidate_snapshot_json"], row["updated_at"]))
+
+    def _save_revision(self, connection: sqlite3.Connection, row: sqlite3.Row, *, title: str,
+                       draft_json: str, candidate_snapshot_json: str | None,
+                       deleted_at: str | None = None) -> dict[str, Any]:
+        self._snapshot(connection, row)
+        connection.execute("""UPDATE workspaces SET title=?,draft_json=?,candidate_snapshot_json=?,
+            revision=?,updated_at=?,deleted_at=? WHERE id=? AND revision=?""",
+            (title, draft_json, candidate_snapshot_json, row["revision"] + 1, _utc_now(), deleted_at,
+             row["id"], row["revision"]))
+        updated = connection.execute("SELECT * FROM workspaces WHERE id=?", (row["id"],)).fetchone()
+        self._snapshot(connection, updated)
+        connection.execute("DELETE FROM workspace_proposals WHERE workspace_id=?", (row["id"],))
+        return self._record(updated)
+
+    @staticmethod
+    def _proposal_record(row: sqlite3.Row) -> dict[str, Any]:
+        metadata = json.loads(row["metadata_json"])
+        return {"id": row["id"], "workspace_id": row["workspace_id"], "base_revision": row["base_revision"],
+                "draft": project_conversation(json.loads(row["draft_json"])),
+                "changed_layers": metadata.get("changed_layers", []), "warnings": metadata.get("warnings", []),
+                **({"task": metadata["task"]} if "task" in metadata else {}),
+                **({"review_status": "needs_review"} if metadata.get("review_status") == "needs_review" else {}),
+                "created_at": row["created_at"]}
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=5)
@@ -144,7 +727,7 @@ class WorkspaceStore:
         return {
             "id": row["id"],
             "title": row["title"],
-            "draft": json.loads(row["draft_json"]),
+            "draft": project_conversation(json.loads(row["draft_json"])),
             "candidate_snapshot": (
                 json.loads(row["candidate_snapshot_json"])
                 if row["candidate_snapshot_json"] else None
@@ -156,7 +739,14 @@ class WorkspaceStore:
 
 
 def _serialize_draft(draft: dict[str, Any]) -> str:
-    return json.dumps(draft, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return json.dumps(draft, ensure_ascii=False, separators=(",", ":"), sort_keys=True, allow_nan=False)
+
+
+def _persistent_draft(draft: dict[str, Any]) -> dict[str, Any]:
+    projected = project_conversation(draft)
+    for key in ("reference_preset_id", "session_previews", "compile_state"):
+        projected.pop(key, None)
+    return projected
 
 
 def _serialize_snapshot(snapshot: dict[str, Any] | None) -> str | None:

@@ -9,8 +9,10 @@ export default defineConfig(({mode}) => {
     server: {
       host: "127.0.0.1",
       proxy: {
-        "/api": {target, changeOrigin: true},
-        "/health": {target, changeOrigin: true},
+        // Preserve the browser's loopback Host so the API can enforce exact
+        // Origin (including the dev port) just as it does in packaged mode.
+        "/api": {target, changeOrigin: false},
+        "/health": {target, changeOrigin: false},
       },
     },
     test: {

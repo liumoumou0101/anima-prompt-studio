@@ -1,0 +1,232 @@
+/* Shared navigation and controls for the single workbench. */
+.app-shell[data-navigation] {
+  --navigation-width: 76px;
+  grid-template-columns: var(--navigation-width) minmax(0, 1fr);
+}
+.app-shell[data-navigation="expanded"] { --navigation-width: 196px; }
+.app-shell[data-navigation] > .sidebar {
+  overflow: visible;
+  padding: 16px 10px 12px;
+  gap: 6px;
+}
+.app-shell[data-navigation] .brand { min-height: 44px; margin-bottom: 6px; padding-inline: 6px; }
+.app-shell[data-navigation] .navigation-toggle {
+  min-height: 32px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--soft);
+  background: var(--panel);
+  font-size: 12px;
+}
+.app-shell[data-navigation] .navigation-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.app-shell[data-navigation] .primary-nav { gap: 4px; }
+.app-shell[data-navigation] .nav-item { min-height: 40px; }
+.app-shell[data-navigation] .shell-appearance { padding-top: 14px; }
+.app-shell[data-navigation] .sidebar-status { padding-top: 10px; }
+.app-shell[data-navigation="compact"] .brand { justify-content: center; padding: 0; }
+.app-shell[data-navigation="compact"] .brand-copy,
+.app-shell[data-navigation="compact"] .primary-nav > .nav-item > span:not(.nav-glyph),
+.app-shell[data-navigation="compact"] .nav-more > summary > span:not(.nav-glyph),
+.app-shell[data-navigation="compact"] .nav-item--settings > span:not(.nav-glyph),
+.app-shell[data-navigation="compact"] .sidebar-status > div {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.app-shell[data-navigation="compact"] :is(.primary-nav > .nav-item, .nav-more > summary, .nav-item--settings) {
+  justify-content: center;
+  padding-inline: 8px;
+}
+.app-shell[data-navigation="compact"] .nav-more > summary > svg { display: none; }
+.app-shell[data-navigation="compact"] .nav-more-items {
+  position: absolute;
+  inset: auto auto 0 calc(100% + 8px);
+  min-width: 174px;
+  padding: 6px;
+  border: 1px solid var(--line-bright);
+  border-radius: 7px;
+  background: var(--panel);
+  box-shadow: 0 10px 28px var(--shadow-color);
+  z-index: 50;
+}
+.app-shell[data-navigation="compact"] .nav-more-items .nav-item { justify-content: flex-start; gap: 9px; }
+.app-shell[data-navigation="compact"] .appearance-controls--compact { padding: 0; }
+.app-shell[data-navigation="compact"] .appearance-controls--compact label > span { justify-content: center; font-size: 0; }
+.app-shell[data-navigation="compact"] .appearance-controls--compact label > span svg { display: block; }
+.app-shell[data-navigation="compact"] .appearance-controls--compact select {
+  min-height: 34px;
+  padding: 5px 1px;
+  font-size: 12px;
+}
+.app-shell[data-navigation="compact"] .sidebar-status { justify-content: center; min-height: 22px; }
+.app-shell[data-navigation] :is(button, a, summary, select, input):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+.app-shell[data-navigation] .main-stage > :not(.conversation-workbench) .page-header { margin-bottom: 22px; }
+.app-shell[data-navigation] .main-stage > :not(.conversation-workbench) .page-header h1 {
+  font-size: clamp(28px, 2.8vw, 40px);
+  line-height: 1.15;
+}
+
+/* The same controls fit the side inspector and a full-width narrow panel. */
+.generation-settings-panel { display: grid; gap: 18px; min-width: 0; }
+.generation-settings-panel > p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.generation-settings-panel > p[role="alert"] { color: var(--danger); }
+.generation-settings-panel > fieldset,
+.conversation-studio .generation-settings-panel > fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.generation-settings-panel > fieldset > legend { padding: 0 8px 0 0; color: var(--text); font-size: 14px; font-weight: 600; }
+.generation-settings-panel > fieldset.generation-lora-section,
+.conversation-studio .generation-settings-panel > fieldset.generation-lora-section {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr);
+}
+.generation-settings-panel > fieldset > :is(label, ul, button, p, div:not(.generation-parameter-field)) { grid-column: 1 / -1; }
+.generation-settings-panel > fieldset > label,
+.generation-settings-panel .generation-parameter-field > label { display: grid; gap: 6px; margin: 0; min-width: 0; font-size: 13px; }
+.generation-settings-panel :is(input, select) {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-bright);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--input-bg);
+  font-size: 14px;
+}
+.generation-settings-panel :is(input, select)[aria-invalid="true"] { border-color: var(--danger); }
+.generation-settings-panel .generation-parameter-field { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 8px; }
+.generation-settings-panel .generation-parameter-field > label { width: 100%; }
+.generation-settings-panel .generation-parameter-field :is(small, span) { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.generation-settings-panel .generation-parameter-field [role="alert"] { color: var(--danger); }
+.generation-settings-panel .generation-parameter-field > span { color: var(--accent); }
+.generation-settings-panel .generation-parameter-field > button { padding: 3px 6px; min-height: 28px; font-size: 12px; }
+.generation-settings-panel .generation-parameter-field:has(input[aria-label="Seed"]) { grid-column: 1 / -1; max-width: 360px; }
+.generation-settings-panel .generation-size-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.generation-settings-panel .generation-size-presets > button { flex: 1 1 72px; }
+.generation-settings-panel ul { margin: 0; padding-left: 20px; color: var(--soft); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.generation-settings-panel > fieldset > button { justify-self: start; }
+.generation-settings-panel :is(button, select, input):disabled { color: var(--disabled-text); background: var(--disabled-bg); cursor: not-allowed; }
+
+.studio-context-controls { display: flex; flex-wrap: wrap; align-items: start; gap: 10px 18px; min-width: 0; }
+.studio-context-controls > label { flex: 1 1 160px; }
+.studio-context-controls > :is(label, .execution-environment-control) { min-width: 0; margin: 0; }
+.studio-context-controls > label > select { width: 100%; }
+.studio-context-controls > p { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
+.execution-environment-control { display: grid; gap: 6px; min-width: 0; }
+.studio-context-controls > .execution-environment-control { flex: 1.3 1 220px; }
+.execution-environment-control > label { margin: 0; font-size: 13px; }
+.execution-environment-control > select { width: 100%; min-width: 0; min-height: 38px; }
+.execution-environment-control :is(p, small, li) { color: var(--muted); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.execution-environment-control p { margin: 0 0 6px; }
+.execution-environment-control [role="alert"] { color: var(--danger); }
+.execution-environment-control ul { margin: 8px 0; padding-left: 18px; }
+.execution-environment-control li + li { margin-top: 7px; }
+.execution-environment-control li strong { color: var(--text); font-weight: 600; }
+.execution-environment-control :is(button, a) { font-size: 12px; }
+.execution-environment-control button { margin-right: 6px; margin-top: 4px; }
+.execution-environment-control > button { justify-self: start; }
+.execution-environment-control > div:empty { display: none; }
+
+.studio-generation-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 18px; width: 100%; min-width: 0; }
+.studio-generation-bar > :is(div, .conversation-actions) { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+.studio-generation-bar > p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.studio-generation-bar label { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; }
+.studio-generation-bar :is(select, input) { min-height: 36px; max-width: 180px; }
+.studio-generation-bar button { min-height: 40px; }
+.studio-generation-bar .conversation-generate { padding-inline: 22px; background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+
+@media (min-width: 1600px) {
+  .generation-settings-panel > fieldset,
+  .conversation-studio .generation-settings-panel > fieldset {
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  }
+  .generation-settings-panel > fieldset > label:has(> select) {
+    max-width: 320px;
+  }
+}
+@media (min-width: 1800px) {
+  .app-shell[data-navigation] > .sidebar { padding-top: 22px; }
+  .studio-context-controls { gap: 12px 24px; }
+  .generation-settings-panel { gap: 20px; }
+  .generation-settings-panel > fieldset { gap: 14px 18px; }
+}
+@media (min-width: 861px) and (max-height: 720px) {
+  .app-shell[data-navigation] > .sidebar { padding-top: 8px; gap: 3px; }
+  .app-shell[data-navigation] .brand { min-height: 34px; margin-bottom: 0; }
+  .app-shell[data-navigation] .primary-nav { gap: 2px; }
+  .app-shell[data-navigation] .nav-item { min-height: 36px; }
+  .app-shell[data-navigation] .shell-appearance { padding-top: 8px; }
+  .app-shell[data-navigation] .sidebar-status { padding-top: 6px; }
+}
+@media (max-width: 1023px) {
+  .studio-context-controls { gap: 10px 12px; }
+  .studio-context-controls > label { flex-basis: 140px; }
+  .studio-generation-bar > :is(div, .conversation-actions) { flex: 1 1 auto; }
+}
+@media (max-width: 860px) {
+  .app-shell[data-navigation] { display: block; }
+  .app-shell[data-navigation] > .sidebar {
+    position: relative;
+    height: auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 6px 10px;
+    padding: 8px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .app-shell[data-navigation] .brand { grid-area: 1 / 1; justify-content: flex-start; min-height: 34px; margin: 0; padding: 0; }
+  .app-shell[data-navigation] .brand-copy strong { font-size: 18px; }
+  .app-shell[data-navigation] .brand-copy small { display: none; }
+  .app-shell[data-navigation] .navigation-toggle { grid-area: 1 / 2; width: auto; min-height: 34px; }
+  .app-shell[data-navigation] .nav-item--settings { grid-area: 1 / 3; margin: 0; min-height: 34px; padding: 6px; }
+  .app-shell[data-navigation] .primary-nav { grid-area: 2 / 1 / auto / -1; flex-direction: row; flex-wrap: wrap; gap: 3px; }
+  .app-shell[data-navigation] .primary-nav > .nav-item,
+  .app-shell[data-navigation] .nav-more > summary { min-height: 36px; padding: 7px 9px; }
+  .app-shell[data-navigation] .nav-more { position: static; margin: 0; padding: 0; border: 0; }
+  .app-shell[data-navigation] .nav-more-items { top: calc(100% + 5px); right: 12px; bottom: auto; left: 12px; min-width: 0; }
+  .app-shell[data-navigation] .shell-appearance { grid-area: 3 / 1 / auto / -1; margin: 0; padding: 0; }
+  .app-shell[data-navigation] .appearance-controls--compact { display: block; padding: 0; }
+  .app-shell[data-navigation] .appearance-controls--compact label { display: flex; align-items: center; gap: 8px; margin: 0; }
+  .app-shell[data-navigation] .appearance-controls--compact label > span { display: flex; align-items: center; font-size: 12px; }
+  .app-shell[data-navigation] .appearance-controls--compact select { width: auto; min-height: 30px; padding: 4px 8px; font-size: 12px; }
+  .app-shell[data-navigation] .sidebar-status { display: none; }
+  .app-shell[data-navigation="compact"] .brand-copy { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip-path: none; }
+}
+@media (max-width: 480px) {
+  .app-shell[data-navigation] > .sidebar { padding-inline: 10px; }
+  .app-shell[data-navigation="expanded"] .primary-nav > .nav-item { gap: 5px; padding-inline: 7px; font-size: 12px; }
+  .studio-context-controls > label,
+  .studio-context-controls > .execution-environment-control { flex-basis: 100%; }
+  .generation-settings-panel > fieldset { gap: 12px; }
+  .studio-generation-bar > :is(div, .conversation-actions) { width: 100%; }
+  .studio-generation-bar :is(select, input) { max-width: 155px; }
+  .studio-generation-bar .conversation-generate { flex: 1 1 100%; }
+}
+@media (pointer: coarse) {
+  .app-shell[data-navigation] :is(.nav-item, .navigation-toggle) { min-height: 44px; }
+  .generation-settings-panel :is(button, input, select),
+  .execution-environment-control :is(button, select),
+  .studio-generation-bar :is(button, input, select) { min-height: 44px; }
+}

@@ -116,16 +116,73 @@ def intent() -> IntentDocument:
     )
 
 
+def faithful_intent(scene="a maid holding a camera, watercolor"):
+    return IntentDocument(source_text="女仆举起相机，水彩", source_language="zh", scene_plan_en=scene,
+        graph=ConstraintGraph(elements=[element("e_maid", "女仆", canonical="maid"),
+            element("e_scene", "未映射的画面关系", fact_type=IntentElementType.SCENE).model_copy(
+                update={"notes": ["local_partial_prose_evidence"]})]))
+
+
+def test_partial_index_matches_never_replace_the_scene(store):
+    profile = ModelProfileRegistry.built_in().get("anima_aesthetic_v1")
+    bundle = LiteralCandidateGenerator(store).generate(faithful_intent(), profile)
+    bundle = HybridLaneGenerator(store).add_hybrid(bundle, profile)
+    assert len(bundle.candidates) == 1
+    assert bundle.candidates[0].positive_prompt == "a maid holding a camera, watercolor"
+    assert "e_scene" in bundle.candidates[0].unresolved_element_ids
+    assert CandidateValidator(store).validate(bundle, profile).valid
+    broken = bundle.model_copy(deep=True)
+    broken.candidates[0].positive_prompt = "maid"
+    assert not CandidateValidator(store).validate(broken, profile).valid
+
+
+def test_scene_user_additions_and_suppression_are_effective(store):
+    profile = ModelProfileRegistry.built_in().get("anima_aesthetic_v1")
+    draft = faithful_intent("a maid holding a camera")
+    draft.graph.elements.append(element("e_hair", "双马尾", state=IntentState.USER_SELECTED))
+    draft.scene_suppressed_en = ["camera"]
+    bundle = LiteralCandidateGenerator(store).generate(draft, profile)
+    text = bundle.candidates[0].positive_prompt
+    assert "camera" not in text
+    assert text.endswith("twintails")
+    assert CandidateValidator(store).validate(bundle, profile).valid
+
+
+def test_style_negative_defaults_and_user_exclusions(store):
+    profile = ModelProfileRegistry.built_in().get("anima_aesthetic_v1")
+    draft = faithful_intent("maid, shallow depth of field, chromatic aberration")
+    bundle = LiteralCandidateGenerator(store).generate(draft, profile)
+    negative = bundle.candidates[0].negative_prompt
+    assert "blurry" not in negative
+    assert "chromatic aberration" not in negative
+    assert "worst quality" in negative
+    assert CandidateValidator(store).validate(bundle, profile).valid
+
+
+def test_user_score_tokens_are_advisory_not_internal_server_errors(store):
+    profile = ModelProfileRegistry.built_in().get("anima_aesthetic_v1")
+    bundle = LiteralCandidateGenerator(store).generate(faithful_intent("score_9, a maid holding a camera"), profile)
+    report = CandidateValidator(store).validate(bundle, profile)
+    assert report.valid
+    assert any(issue.code == "aesthetic_score_token" and issue.severity.value == "warning"
+               for issue in report.candidate_reports[0].issues)
+
+
 def test_builtin_profiles_are_packaged_and_variant_safe() -> None:
     registry = ModelProfileRegistry.built_in()
 
     assert [profile.id for profile in registry.all()] == [
-        "anima_aesthetic_v1",
+        "anima_2_9b_preview_v1",
+        "anima_aesthetic_v1_0",
+        "anima_aesthetic_v1_1",
         "anima_base_v1",
         "anima_turbo_v1",
         "anima_turbo_v1_1",
         "animayume_v1_0_final",
+        "animayume_v1_5_base",
         "miaomiao_harem_anima_v1_6",
+        "moss_image_sft_int8",
+        "wai_anima_v1_0",
     ]
     assert registry.get("anima_base_v1").positive_prefix == ("score_7",)
     assert registry.get("anima_aesthetic_v1").positive_prefix == ()
@@ -170,6 +227,18 @@ def test_base_literal_candidate_is_deterministic_and_traceable(store: ReferenceD
     assert candidate.unresolved_element_ids == ["e_relation"]
     assert candidate.warnings[0].code == "required_tag_unresolved"
     assert candidate.versions.data_pack == store.pack_id
+
+
+def test_community_defaults_do_not_add_unrequested_content_or_unverified_scores(store):
+    registry = ModelProfileRegistry.built_in()
+    generator = LiteralCandidateGenerator(store)
+    yume = generator.generate(intent(), registry.get("animayume_v1_0_final")).candidates[0]
+    assert "score_" not in yume.negative_prompt
+    assert "blonde hair" in yume.negative_prompt  # Explicit exclusions still work.
+    miaomiao = generator.generate(intent(), registry.get("miaomiao_harem_anima_v1_6")).candidates[0]
+    tokens = set(miaomiao.positive_prompt.split(", "))
+    assert not tokens & {"sensitive", "fair skin", "high contrast"}
+    assert "shiny skin" in miaomiao.negative_prompt  # Keep the model's negative guidance.
 
 
 def test_literal_orders_reviewed_fact_layers_without_adding_content(store: ReferenceDataStore) -> None:
@@ -401,3 +470,16 @@ def test_static_benchmark_hard_gates_pass_fixture(store: ReferenceDataStore) -> 
     assert report.protected_category_leak_count == 0
     assert report.validation_error_count == 0
     assert len(report.cases) == 4
+
+
+def test_static_benchmark_allows_no_eligible_cooccurrence(store: ReferenceDataStore, monkeypatch) -> None:
+    # No eligible suggestions is a valid result; never force unrelated additions
+    # merely to create a conservative lane. Artist recommendations are independent.
+    monkeypatch.setattr(store, "related_tags", lambda *args, **kwargs: [])
+    suite = StaticBenchmarkSuite.load(BENCHMARKS / "static_v1.json")
+    report = StaticBenchmarkRunner(store).run(suite)
+    assert report.passed
+    assert report.required_retention == 1.0
+    assert report.excluded_leak_count == 0
+    assert report.protected_category_leak_count == 0
+    assert all("conservative" not in case.lanes for case in report.cases)

@@ -1,5 +1,6 @@
+import {MossWorkbenchPage} from "./pages/MossWorkbenchPage";
 import {useEffect, useState} from "react";
-import {BrowserRouter, Navigate, Route, Routes} from "react-router-dom";
+import {Navigate, Route, Routes} from "react-router-dom";
 import {apiRequest, ApiClientError, initializeApp} from "./lib/api";
 import {loadGallery, primeGallery} from "./lib/galleryStore";
 import type {BootstrapResponse, GalleryProcessJob, GenerationRunListResponse} from "./lib/types";
@@ -9,21 +10,27 @@ import {TagDetailPage} from "./pages/TagDetailPage";
 import {TagSearchPage} from "./pages/TagSearchPage";
 import {TagGroupPage} from "./pages/TagGroupPage";
 import {TagUngroupedPage} from "./pages/TagUngroupedPage";
-import {WorkbenchPage} from "./pages/WorkbenchPage";
-import {DirectPromptPage} from "./pages/DirectPromptPage";
+import {ConversationWorkbenchPage} from "./pages/ConversationWorkbenchPage";
+import {DirectWorkbenchEntry} from "./pages/DirectWorkbenchEntry";
 import {GenerationPage} from "./pages/GenerationPage";
 import {GalleryPage} from "./pages/GalleryPage";
 import {SettingsPage} from "./pages/SettingsPage";
+import {WorkflowsPage} from "./pages/WorkflowsPage";
+import {ReferencesPage} from "./pages/ReferencesPage";
 import {ArtistSearchPage} from "./pages/ArtistSearchPage";
+import {ArtistPresetsPage} from "./pages/ArtistPresetsPage";
 import {ArtistDetailPage} from "./pages/ArtistDetailPage";
+import {PersonalTagsPage} from "./pages/PersonalTagsPage";
+import {LoraLibraryPage} from "./pages/LoraLibraryPage";
 
 export default function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapResponse | null>(null);
   const [error, setError] = useState<ApiClientError | null>(null);
+  const [startupAttempt, setStartupAttempt] = useState(0);
 
   useEffect(() => {
     initializeApp().then(setBootstrap).catch((caught) => setError(caught as ApiClientError));
-  }, []);
+  }, [startupAttempt]);
 
   useEffect(() => {
     if (!bootstrap?.features.gallery) return;
@@ -72,28 +79,36 @@ export default function App() {
     return () => { canceled = true; window.clearTimeout(timer); };
   }, [bootstrap]);
 
-  if (error) return <StartupFrame><ErrorState message={error.message} requestId={error.requestId} /></StartupFrame>;
+  if (error) return <StartupFrame><ErrorState message={error.message} requestId={error.requestId} onRetry={() => {
+    setError(null);
+    setStartupAttempt(value => value + 1);
+  }} /></StartupFrame>;
   if (!bootstrap) return <StartupFrame><LoadingState label="正在建立本地安全会话…" /></StartupFrame>;
   return (
-    <BrowserRouter>
       <Routes>
         <Route element={<AppShell bootstrap={bootstrap} />}>
           <Route index element={<Navigate to="/workbench" replace />} />
-          <Route path="workbench" element={<WorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} naturalLanguageEnabled={Boolean(bootstrap.features.local_translation)} localTranslationEnabled={Boolean(bootstrap.features.local_translation)} />} />
-          <Route path="direct" element={<DirectPromptPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
+          <Route path="workbench" element={<ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
+          <Route path="workbench/conversation" element={<ConversationWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
+          <Route path="moss" element={<MossWorkbenchPage modelProfiles={bootstrap.model_profile_options} remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
+          <Route path="direct" element={<DirectWorkbenchEntry />} />
           <Route path="tags" element={<TagSearchPage />} />
+          <Route path="personal-tags" element={<PersonalTagsPage />} />
           <Route path="tags/groups/:groupName" element={<TagGroupPage />} />
           <Route path="tags/ungrouped" element={<TagUngroupedPage />} />
           <Route path="tags/:name" element={<TagDetailPage />} />
           <Route path="artists" element={<ArtistSearchPage />} />
+          <Route path="loras" element={<LoraLibraryPage profiles={bootstrap.model_profile_options}/>} />
+          <Route path="artists/presets" element={<ArtistPresetsPage />} />
           <Route path="artists/:name" element={<ArtistDetailPage />} />
           <Route path="generate" element={<GenerationPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
           <Route path="gallery" element={<GalleryPage enabled={Boolean(bootstrap.features.gallery)} />} />
           <Route path="settings" element={<SettingsPage remoteEnabled={Boolean(bootstrap.features.remote_generation)} />} />
+          <Route path="workflows" element={<WorkflowsPage enabled={Boolean(bootstrap.features.remote_generation)} modelProfiles={bootstrap.model_profile_options} />} />
+          <Route path="references" element={<ReferencesPage />} />
           <Route path="*" element={<Navigate to="/workbench" replace />} />
         </Route>
       </Routes>
-    </BrowserRouter>
   );
 }
 

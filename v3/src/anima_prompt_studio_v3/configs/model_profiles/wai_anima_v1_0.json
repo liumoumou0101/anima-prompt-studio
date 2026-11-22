@@ -1,0 +1,11 @@
+{
+  "id": "wai_anima_v1_0",
+  "display_name": "WAI ANIMA v1.0",
+  "family": "anima",
+  "variant": "community",
+  "positive_prefix": [],
+  "negative_prompt": [],
+  "negative_prompt_mode": "enabled",
+  "tag_separator": ", ",
+  "renderer_version": "anima-renderer-v1"
+}

@@ -1,4 +1,5 @@
-import {fireEvent, render, screen} from "@testing-library/react";
+import {fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {MemoryRouter, Route, Routes, useLocation} from "react-router-dom";
 import type {ReactNode} from "react";
 import {beforeEach, expect, it, vi} from "vitest";
 import {resetGalleryStoreForTests} from "../lib/galleryStore";
@@ -27,11 +28,97 @@ const assets = [
     thumbnail_url: "/api/v3/gallery/assets/thumbnail?path=two.jpg&size=640",
   },
 ];
+const galleryResponse = {root: "D:/gallery", items: assets, projects: ["雨夜项目", "外部图片"],
+  models: ["anima_base_v1"], trash_count: 0};
 
 beforeEach(() => {
   resetGalleryStoreForTests();
+  for (const key of Object.keys(sessionStorage)) if (key.startsWith("anima-gallery-workspace:")) sessionStorage.removeItem(key);
   sessionStorage.setItem("anima-v3-session", "session-token");
   vi.restoreAllMocks();
+});
+
+function WorkspaceDestination() {
+  const location=useLocation();return <h1>工作台地址：{location.pathname}{location.search}</h1>;
+}
+
+it.each([["anima_base_v1","/workbench"],["moss_image_sft_int8","/moss"]])("opens a gallery transfer in the confirmed %s workspace", async (model,pathname) => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input).startsWith("/api/v3/gallery/assets?")) return new Response(JSON.stringify(galleryResponse));
+    expect(String(input)).toBe("/api/v3/gallery/assets/workspace");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({path: "项目/batch/one.png"});
+    return new Response(JSON.stringify({id: "workspace_gallery",revision:1,draft:{model_profile:model}}), {status: 201});
+  });
+  render(<MemoryRouter initialEntries={["/gallery"]}><Routes>
+    <Route path="/gallery" element={<GalleryPage enabled />} />
+    <Route path="/workbench" element={<WorkspaceDestination />} />
+    <Route path="/moss" element={<WorkspaceDestination />} />
+  </Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole("button", {name: "查看 one.png"}));
+  fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
+  expect(await screen.findByRole("heading", {name:`工作台地址：${pathname}?workspace=workspace_gallery`})).toBeInTheDocument();
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+});
+
+it("keeps the same creation key on retry and blocks duplicate gallery transfers", async () => {
+  let rejectRequest!: (error: Error) => void;
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (String(input).startsWith("/api/v3/gallery/assets?")) return new Response(JSON.stringify(galleryResponse));
+    return new Promise<Response>((_, reject) => {rejectRequest = reject;});
+  });
+  render(<GalleryPage enabled />);
+  fireEvent.click(await screen.findByRole("button", {name: "查看 one.png"}));
+  fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
+  const pendingButton = screen.getByRole("button", {name: "正在转入…"});
+  expect(pendingButton).toBeDisabled();
+  fireEvent.click(pendingButton);
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  rejectRequest(new Error("网络中断"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("无法连接本地服务");
+  fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
+  await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2));
+  const requests = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+  const firstKey = new Headers(requests[0][1]?.headers).get("Idempotency-Key");
+  expect(firstKey).toBeTruthy();
+  expect(new Headers(requests[1][1]?.headers).get("Idempotency-Key")).toBe(firstKey);
+  rejectRequest(new Error("网络中断"));
+  await screen.findByRole("alert");
+});
+
+it("explains why a gallery image without saved prompts cannot be transferred directly", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(galleryResponse)));
+  render(<GalleryPage enabled />);
+  fireEvent.click(await screen.findByRole("button", {name: "查看 two.jpg"}));
+  expect(screen.getByRole("button", {name: "转入工作台"})).toBeDisabled();
+  expect(screen.getByText(/没有保存提示词，无法直接转入/)).toBeInTheDocument();
+  expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+});
+
+it("recovers the same gallery creation request after its detail was closed mid-request", async () => {
+  let finishFirst!: (response: Response) => void;
+  let posts = 0;
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (init?.method !== "POST") return new Response(JSON.stringify(galleryResponse));
+    expect(String(input)).toBe("/api/v3/gallery/assets/workspace");
+    if (++posts === 1) return new Promise<Response>(resolve => {finishFirst = resolve;});
+    return new Response(JSON.stringify({id: "workspace_recovered",revision:1,draft:{model_profile:"anima_base_v1"}}), {status: 201});
+  });
+  render(<MemoryRouter initialEntries={["/gallery"]}><Routes>
+    <Route path="/gallery" element={<GalleryPage enabled />} />
+    <Route path="/workbench" element={<WorkspaceDestination />} />
+  </Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole("button", {name: "查看 one.png"}));
+  fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
+  fireEvent.click(screen.getByRole("button", {name: "关闭图片详情"}));
+  finishFirst(new Response(JSON.stringify({id: "workspace_recovered",revision:1,draft:{model_profile:"anima_base_v1"}}), {status: 201}));
+  fireEvent.click(screen.getByRole("button", {name: "查看 one.png"}));
+  fireEvent.click(screen.getByRole("button", {name: "转入工作台"}));
+  await screen.findByRole("heading", {name: "工作台地址：/workbench?workspace=workspace_recovered"});
+  const requests = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+  expect(new Headers(requests[1][1]?.headers).get("Idempotency-Key"))
+    .toBe(new Headers(requests[0][1]?.headers).get("Idempotency-Key"));
+  expect(Object.keys(sessionStorage).some(key => key.startsWith("anima-gallery-workspace:"))).toBe(false);
 });
 
 it("filters local assets and opens traceable image details", async () => {
@@ -45,6 +132,7 @@ it("filters local assets and opens traceable image details", async () => {
 
   render(<GalleryPage enabled />);
   expect(await screen.findByText("2 张")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "筛选"}));
   fireEvent.change(screen.getByLabelText("筛选项目"), {target: {value: "雨夜项目"}});
   expect(screen.getByText("1 张")).toBeInTheDocument();
   expect(screen.queryByAltText("two.jpg")).not.toBeInTheDocument();
@@ -109,6 +197,7 @@ it("moves an image to recoverable trash and restores it", async () => {
 
   render(<GalleryPage enabled />);
   fireEvent.click(await screen.findByAltText("one.png"));
+  fireEvent.click(screen.getByLabelText("更多图片操作"));
   fireEvent.click(screen.getByRole("button", {name: "移入回收站"}));
   expect(await screen.findByText("图片已移入画廊回收站，可随时恢复。")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: /回收站/}));
@@ -124,7 +213,109 @@ it("moves an image to recoverable trash and restores it", async () => {
   ]);
 });
 
-it("queues regeneration through the reused gallery process API", async () => {
+it("uses trash identities for renamed restores and keeps failed items selected", async () => {
+  const trashItems = assets.map(asset => ({...asset, path: `trash-batch/${asset.path}`, original_path: asset.path}));
+  const payload = {root: "D:/gallery", items: assets, projects: [], models: [], trash_count: 2};
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify(payload)))
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: trashItems, trash_count: 2})))
+    .mockResolvedValueOnce(new Response(JSON.stringify({restored: ["renamed-restored.png"], restored_trash_paths: [trashItems[0].path], failed: [{path: trashItems[1].path, error: "locked"}]})))
+    .mockResolvedValueOnce(new Response(JSON.stringify({...payload, trash_count: 1})));
+  render(<GalleryPage enabled />);
+  await screen.findByAltText("one.png");
+  fireEvent.click(screen.getByRole("button", {name: /画廊回收站/}));
+  await screen.findByAltText("two.jpg");
+  fireEvent.click(screen.getByRole("button", {name: "多选模式"}));
+  fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
+  fireEvent.click(screen.getByRole("button", {name: /^恢复$/}));
+  expect(await screen.findByText("已恢复 1 张，1 张未完成，已保留选择。")).toBeInTheDocument();
+  expect(screen.queryByAltText("one.png")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("取消选择 two.jpg")).toHaveAttribute("aria-pressed", "true");
+});
+
+it.each([
+  [{available: false, reason: "请在设置中连接可用的出图环境。"}, "请在设置中连接可用的出图环境。"],
+  [undefined, "尚未获取放大配置，请刷新画廊。"],
+] as const)("shows the same upscale availability in image details and batch selection", async (processing, reason) => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+    new Response(JSON.stringify({...galleryResponse, processing})));
+  render(<GalleryPage enabled />);
+  fireEvent.click(await screen.findByAltText("one.png"));
+  fireEvent.click(screen.getByLabelText("更多图片操作"));
+  const single = screen.getByRole("button", {name: "1.5× 图像放大"});
+  expect(single).toBeDisabled();
+  expect(single).toHaveAccessibleDescription(reason);
+  expect(screen.getByText(reason)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", {name: "关闭图片详情"}));
+  fireEvent.click(screen.getByRole("button", {name: "多选模式"}));
+  fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
+  const batch = screen.getByRole("button", {name: "1.5× 图像放大"});
+  expect(batch).toBeDisabled();
+  expect(batch).toHaveAccessibleDescription(reason);
+  expect(screen.getByText(reason)).toBeVisible();
+  fireEvent.click(batch);
+  expect(screen.queryByRole("button", {name: "加入队列"})).not.toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+});
+
+it.each(["single", "batch"])("queues a %s upscale and identifies any rejected file", async entrance => {
+  const paths = entrance === "single" ? [assets[0].path] : assets.map(item => item.path);
+  const posts: RequestInit[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input).startsWith("/api/v3/gallery/assets?"))
+      return new Response(JSON.stringify({...galleryResponse, processing: {available: true, scale: 1.5}}));
+    if (String(input) === "/api/v3/gallery/process" && init?.method === "POST") {
+      posts.push(init);
+      return new Response(JSON.stringify({jobs: [{id: "up-1", state: "queued", operation: "gallery_upscale_1_5x", progress: 0, sourceName: assets[0].name}],
+        failed: entrance === "batch" ? [{path: assets[1].path, error: "源文件已移除。"}] : []}), {status: 202});
+    }
+    return new Response(JSON.stringify({jobs: []}));
+  });
+  render(<GalleryPage enabled />);
+  await screen.findByAltText("one.png");
+  if (entrance === "single") {
+    fireEvent.click(screen.getByAltText("one.png"));
+    fireEvent.click(screen.getByLabelText("更多图片操作"));
+  } else {
+    fireEvent.click(screen.getByRole("button", {name: "多选模式"}));
+    fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
+  }
+  fireEvent.click(screen.getByRole("button", {name: "1.5× 图像放大"}));
+  const dialog = screen.getByRole("dialog", {name: "加入 1.5× 图像放大队列"});
+  expect(dialog).toHaveTextContent("超分辨率模型");
+  fireEvent.click(screen.getByRole("button", {name: "加入队列"}));
+  expect(await screen.findByText("已加入 1 项 1.5× 放大任务。")).toBeInTheDocument();
+  expect(posts).toHaveLength(1);
+  const body = JSON.parse(String(posts[0].body));
+  expect(body).toMatchObject({operation: "upscale", count: 1});
+  expect(body.paths.sort()).toEqual([...paths].sort());
+  if (entrance === "batch") {
+    expect(screen.getByText(new RegExp(assets[1].path + ".*源文件已移除"))).toBeVisible();
+    expect(screen.getByLabelText("取消选择 two.jpg")).toHaveAttribute("aria-pressed", "true");
+  }
+});
+
+it("shows per-file server errors when the entire upscale batch is rejected", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input).startsWith("/api/v3/gallery/assets?"))
+      return new Response(JSON.stringify({...galleryResponse, processing: {available: true}}));
+    expect(init?.method).toBe("POST");
+    return new Response(JSON.stringify({error: {code: "gallery_process_rejected", message: "一项未能处理",
+      details: {failed: [{path: assets[0].path, error: "图片缺失"}, {path: assets[1].path, error: "已有放大任务"}]}}}), {status: 422});
+  });
+  render(<GalleryPage enabled />);
+  await screen.findByAltText("one.png");
+  fireEvent.click(screen.getByRole("button", {name: "多选模式"}));
+  fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
+  fireEvent.click(screen.getByRole("button", {name: "1.5× 图像放大"}));
+  fireEvent.click(screen.getByRole("button", {name: "加入队列"}));
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent(`${assets[0].path}（图片缺失）`);
+  expect(alert).toHaveTextContent(`${assets[1].path}（已有放大任务）`);
+  expect(screen.getByLabelText("取消选择 two.jpg")).toHaveAttribute("aria-pressed", "true");
+});
+
+it("queues regeneration with an idempotency key through the gallery API", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch")
     .mockResolvedValueOnce(new Response(JSON.stringify({
       root: "D:/gallery", items: [assets[0]], projects: ["雨夜项目"], models: ["anima_base_v1"], trash_count: 0,
@@ -144,6 +335,53 @@ it("queues regeneration through the reused gallery process API", async () => {
   expect(screen.getByRole("region", {name: "画廊处理任务"})).toBeInTheDocument();
   const request = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
   expect(request).toEqual({paths: [assets[0].path], operation: "regenerate", count: 1});
+  expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get("Idempotency-Key")).toBeTruthy();
+});
+
+it("refreshes task progress and new images after a durable gallery run finishes", async () => {
+  const added = {...assets[0], id: "new.png", path: "new.png", name: "new.png"};
+  const job = {id: "durable-run", operation: "gallery_txt2img_more", state: "draft", progress: 0,
+    message: "已接受，等待入队", sourceName: "one.png"};
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
+    if (String(url).includes("/gallery/process")) return new Response(JSON.stringify({
+      jobs: [options?.method === "POST" ? job : {...job, state: "completed", progress: 1, message: "已下载测试图片"}], failed: [],
+    }), {status: 200});
+    return new Response(JSON.stringify({root: "D:/gallery", projects: ["雨夜项目"], models: ["anima_base_v1"], trash_count: 0,
+      items: String(url).includes("refresh=true") ? [added, assets[0]] : [assets[0]],
+      processing: {available: true, regenAvailable: true, scale: 1.5}}), {status: 200});
+  });
+  render(<GalleryPage enabled />);
+  fireEvent.click(await screen.findByAltText("one.png"));
+  fireEvent.click(screen.getByRole("button", {name: "再生成"}));
+  fireEvent.click(screen.getByRole("button", {name: "加入队列"}));
+  expect(await screen.findByText("已下载测试图片", {}, {timeout: 4000})).toBeInTheDocument();
+  expect(await screen.findByAltText("new.png")).toBeInTheDocument();
+  expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+});
+
+it("reuses the request key after an uncertain network failure", async () => {
+  let attempts = 0;
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+    if (options?.method === "POST") {
+      attempts++;
+      if (attempts === 1) throw new TypeError("network failed");
+      return new Response(JSON.stringify({jobs: [{id: "one-run", operation: "gallery_txt2img_more",
+        state: "draft", progress: 0, message: "已接受", sourceName: "one.png"}], failed: []}), {status: 202});
+    }
+    return new Response(JSON.stringify({root: "D:/gallery", items: [assets[0]], projects: [], models: [], trash_count: 0,
+      processing: {available: true, regenAvailable: true}}), {status: 200});
+  });
+  render(<GalleryPage enabled />);
+  fireEvent.click(await screen.findByAltText("one.png"));
+  fireEvent.click(screen.getByRole("button", {name: "再生成"}));
+  fireEvent.click(screen.getByRole("button", {name: "加入队列"}));
+  await screen.findByText("无法连接本地服务。请确认应用仍在运行。");
+  fireEvent.click(screen.getByRole("button", {name: "再生成"}));
+  fireEvent.click(screen.getByRole("button", {name: "加入队列"}));
+  await screen.findByText("已加入 1 项再生成任务。");
+  const posts = fetchMock.mock.calls.filter(([, options]) => options?.method === "POST");
+  expect(posts).toHaveLength(2);
+  expect(new Headers(posts[0][1]?.headers).get("Idempotency-Key")).toBe(new Headers(posts[1][1]?.headers).get("Idempotency-Key"));
 });
 
 it("shows an inherited artist tag on gallery-regenerated images without stale comparison positions", async () => {
@@ -182,6 +420,7 @@ it("selects the current result set and permanently deletes the original image fi
 
   render(<GalleryPage enabled />);
   expect(await screen.findByText("2 张")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "多选模式"}));
   fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
   expect(screen.getByText("已选择 2 项")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", {name: "彻底删除"}));
@@ -190,4 +429,58 @@ it("selects the current result set and permanently deletes the original image fi
   expect(fetchMock.mock.calls[1][0]).toBe("/api/v3/gallery/assets/delete");
   expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({paths: assets.map((item) => item.path)});
   expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("直接从磁盘删除"));
+});
+
+it("selects an inclusive Shift range across date groups and allows individual deselection", async () => {
+  const items = Array.from({length: 5}, (_, i) => ({...assets[0], path: `range-${i}.png`, name: `range-${i}.png`, created_at: `2026-08-${26-i}T12:00:00+08:00`}));
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({items, projects: [], models: [], trash_count: 0})));
+  render(<GalleryPage enabled />);
+  fireEvent.click(await screen.findByRole("button", {name: "选择 range-1.png"}));
+  fireEvent.click(screen.getByRole("button", {name: "查看 range-4.png"}), {shiftKey: true});
+  expect(screen.getByText("已选择 4 项")).toBeInTheDocument();
+  expect(screen.queryByRole("dialog", {name: "图片详情"})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "取消选择 range-2.png"}));
+  expect(screen.getByText("已选择 3 项")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("排序"), {target: {value: "oldest"}});
+  expect(screen.queryByRole("region", {name: "批量操作"})).not.toBeInTheDocument();
+});
+
+it("keeps only failed trash items selected and retries only those items", async () => {
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(JSON.stringify({items: assets, projects: [], models: [], trash_count: 0})))
+    .mockResolvedValueOnce(new Response(JSON.stringify({moved: [assets[0].path], failed: [{path: assets[1].path, error: "文件正在使用"}]})))
+    .mockResolvedValueOnce(new Response(JSON.stringify({moved: [assets[1].path], failed: []})));
+  render(<GalleryPage enabled />);
+  await screen.findByAltText("one.png");
+  fireEvent.click(screen.getByRole("button", {name: "多选模式"}));
+  fireEvent.click(screen.getByRole("button", {name: "全选当前结果"}));
+  fireEvent.click(screen.getByRole("button", {name: "移入回收站"}));
+  expect(await screen.findByText("已选择 1 项")).toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "取消选择 two.jpg"})).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", {name: "移入回收站"}));
+  await screen.findByText("图片已移入画廊回收站，可随时恢复。");
+  expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({paths: [assets[1].path]});
+  expect(screen.queryByText("文件正在使用")).not.toBeInTheDocument();
+});
+
+it("marquee selects rendered cards, supports additive selection and Escape rollback", async () => {
+  const originalPointer = window.PointerEvent;
+  window.PointerEvent = class extends MouseEvent {pointerId = 1; pointerType = "mouse";} as typeof PointerEvent;
+  try {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({items: assets, projects: [], models: [], trash_count: 0})));
+    render(<GalleryPage enabled />); await screen.findByAltText("one.png");
+    const cards = document.querySelectorAll<HTMLElement>("[data-selection-path]");
+    cards.forEach((card, i) => vi.spyOn(card, "getBoundingClientRect").mockReturnValue({left: 20 + i*120, top: 20, right: 120+i*120, bottom: 120, width: 100, height: 100, x: 20+i*120, y: 20, toJSON: () => ({})}));
+    const grid = screen.getByLabelText("图片选择区域");
+    fireEvent.pointerDown(grid, {button: 0, clientX: 0, clientY: 0});
+    fireEvent.pointerMove(document, {clientX: 125, clientY: 125});
+    fireEvent.pointerUp(document);
+    expect(screen.getByText("已选择 1 项")).toBeInTheDocument();
+    fireEvent.pointerDown(grid, {button: 0, clientX: 130, clientY: 0, ctrlKey: true});
+    fireEvent.pointerMove(document, {clientX: 250, clientY: 130});
+    expect(screen.getByText("已选择 2 项")).toBeInTheDocument();
+    fireEvent.keyDown(document, {key: "Escape"});
+    expect(screen.getByText("已选择 1 项")).toBeInTheDocument();
+  } finally {window.PointerEvent = originalPointer;}
 });
